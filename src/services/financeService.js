@@ -15,7 +15,7 @@ const generateRecurringDates = (pattern) => {
         let current = new Date(start);
         while (current <= end) {
             if (daysOfWeek.includes(current.getDay())) {
-                const dateStr = current.toISOString().split('T')[0];
+                const dateStr = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
                 dates.push(dateStr);
             }
             current.setDate(current.getDate() + 1);

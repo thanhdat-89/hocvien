@@ -259,7 +259,7 @@ const Attendance = ({ db }) => {
                                 {dayNumbers.map((dayNum) => {
                                     const date = new Date(monday);
                                     date.setDate(monday.getDate() + (dayNum - 1));
-                                    const dateStr = date.toISOString().split('T')[0];
+                                    const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
                                     let attendees = (extraAttendance || [])
                                         .filter(a => a.date === dateStr)
