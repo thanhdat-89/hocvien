@@ -643,23 +643,28 @@ export const useDatabase = () => {
         }
     };
 
-    const deleteClass = async (id) => {
+    const deleteClass = async (id, passwordOverride = null) => {
         const hasStudents = students.some(s => s.classId === id);
         if (hasStudents) {
+            if (passwordOverride) throw new Error('Không thể xóa lớp đang có học viên. Vui lòng chuyển học viên sang lớp khác trước.');
             alert('Không thể xóa lớp đang có học viên. Vui lòng chuyển học viên sang lớp khác trước.');
             return;
         }
 
-        const password = window.prompt('Hành động này sẽ xóa vĩnh viễn lớp học. Vui lòng nhập mật khẩu quản lý để tiếp tục:');
+        let password = passwordOverride;
 
-        if (password === null) return; // User cancelled
+        if (!password) {
+            password = window.prompt('Hành động này sẽ xóa vĩnh viễn lớp học. Vui lòng nhập mật khẩu quản lý để tiếp tục:');
+            if (password === null) return; // User cancelled
+        }
 
         if (password !== 'cqt263') {
+            if (passwordOverride) throw new Error('Mật khẩu không chính xác.');
             alert('Mật khẩu không chính xác. Thao tác xóa bị hủy.');
             return;
         }
 
-        if (window.confirm('Bạn có chắc chắn muốn xóa lớp này không?')) {
+        if (passwordOverride || window.confirm('Bạn có chắc chắn muốn xóa lớp này không?')) {
             try {
                 // Delete associated holidays for this class
                 await holidayService.deleteByClass(id);
@@ -671,9 +676,12 @@ export const useDatabase = () => {
                 setClasses(prev => prev.filter(c => c.id !== id));
                 setHolidays(prev => prev.filter(h => h.classId !== id));
 
-                alert('Đã xóa lớp học thành công.');
+                if (!passwordOverride) {
+                    alert('Đã xóa lớp học thành công.');
+                }
             } catch (error) {
                 console.error('Failed to delete class:', error);
+                if (passwordOverride) throw new Error('Lỗi khi xóa lớp học: ' + (error.message || 'Vui lòng thử lại sau.'));
                 alert('Lỗi khi xóa lớp học: ' + (error.message || 'Vui lòng thử lại sau.'));
             }
         }

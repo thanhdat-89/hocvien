@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { Plus, Edit2, Trash2, BadgeCheck } from 'lucide-react';
 import AddClassModal from '../components/AddClassModal';
+import DeleteClassModal from '../components/DeleteClassModal';
 
 const Classes = ({ db }) => {
     const { classes, students, actions } = db;
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingClass, setEditingClass] = useState(null);
+    const [classToDelete, setClassToDelete] = useState(null);
 
     const handleEdit = (cls) => {
         setEditingClass(cls);
@@ -67,6 +69,14 @@ const Classes = ({ db }) => {
                 />
             )}
 
+            {classToDelete && (
+                <DeleteClassModal
+                    classItem={classToDelete}
+                    onDelete={(id, password) => actions.deleteClass(id, password)}
+                    onClose={() => setClassToDelete(null)}
+                />
+            )}
+
             <div className="table-container glass">
                 <table>
                     <thead>
@@ -109,7 +119,7 @@ const Classes = ({ db }) => {
                                             <Edit2 size={16} color="var(--primary)" />
                                         </button>
                                         <button
-                                            onClick={() => actions.deleteClass(c.id)}
+                                            onClick={() => setClassToDelete(c)}
                                             className="btn btn-glass" style={{ padding: '0.4rem', borderRadius: '8px', border: 'none' }}
                                         >
                                             <Trash2 size={16} color="var(--danger)" />
