@@ -15,6 +15,7 @@ export const promotionService = {
             discountRate: parseFloat(p.discount_rate) || 0,
             discountAmount: parseFloat(p.discount_amount) || 0,
             discountType: p.discount_type || 'percent', // 'percent' | 'amount'
+            excludedStudentIds: p.excluded_student_ids || [],
             description: p.description
         }));
     },
@@ -27,6 +28,7 @@ export const promotionService = {
             discount_rate: promotion.discountType === 'percent' ? promotion.discountRate : 0,
             discount_amount: promotion.discountType === 'amount' ? promotion.discountAmount : 0,
             discount_type: promotion.discountType || 'percent',
+            excluded_student_ids: promotion.excludedStudentIds || [],
             description: promotion.description
         };
         const { data, error } = await supabase
@@ -48,6 +50,7 @@ export const promotionService = {
             discount_rate: promotion.discountType === 'percent' ? promotion.discountRate : 0,
             discount_amount: promotion.discountType === 'amount' ? promotion.discountAmount : 0,
             discount_type: promotion.discountType || 'percent',
+            excluded_student_ids: promotion.excludedStudentIds || [],
             description: promotion.description
         };
         const { error } = await supabase

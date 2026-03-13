@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react';
-import { X, Save, Percent, DollarSign } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { X, Save, Percent, DollarSign, UserX, Search } from 'lucide-react';
 import { useNotification } from '../contexts/NotificationContext';
 
-const AddPromotionModal = ({ classes, onAdd, onBulkAdd, onUpdate, onClose, initialData }) => {
+const AddPromotionModal = ({ classes, students = [], onAdd, onBulkAdd, onUpdate, onClose, initialData }) => {
     const { showToast } = useNotification();
     const [selectedClassIds, setSelectedClassIds] = useState([]);
+    const [excludedStudentIds, setExcludedStudentIds] = useState([]);
+    const [excludeSearch, setExcludeSearch] = useState('');
     const [formData, setFormData] = useState({
         month: new Date().toISOString().substring(0, 7), // YYYY-MM
         discountType: 'percent', // 'percent' | 'amount'
@@ -16,6 +18,7 @@ const AddPromotionModal = ({ classes, onAdd, onBulkAdd, onUpdate, onClose, initi
     useEffect(() => {
         if (initialData) {
             setSelectedClassIds([initialData.classId]);
+            setExcludedStudentIds(initialData.excludedStudentIds || []);
             setFormData({
                 month: initialData.month || '',
                 discountType: initialData.discountType || 'percent',
@@ -28,7 +31,7 @@ const AddPromotionModal = ({ classes, onAdd, onBulkAdd, onUpdate, onClose, initi
 
     const toggleClass = (classId) => {
         if (initialData) {
-            setSelectedClassIds([classId]); // Only one class when editing
+            setSelectedClassIds([classId]);
             return;
         }
         setSelectedClassIds(prev =>
@@ -37,6 +40,23 @@ const AddPromotionModal = ({ classes, onAdd, onBulkAdd, onUpdate, onClose, initi
                 : [...prev, classId]
         );
     };
+
+    const toggleExcludeStudent = (studentId) => {
+        setExcludedStudentIds(prev =>
+            prev.includes(studentId)
+                ? prev.filter(id => id !== studentId)
+                : [...prev, studentId]
+        );
+    };
+
+    // Students that belong to the selected class(es) — only shown when 1 class selected
+    const eligibleStudents = useMemo(() => {
+        if (selectedClassIds.length !== 1) return [];
+        return students
+            .filter(s => s.classId === selectedClassIds[0] && s.status !== 'Đã nghỉ' && s.status !== 'Đã xóa')
+            .filter(s => s.name.toLowerCase().includes(excludeSearch.toLowerCase()))
+            .sort((a, b) => a.name.localeCompare(b.name, 'vi'));
+    }, [selectedClassIds, students, excludeSearch]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -61,6 +81,7 @@ const AddPromotionModal = ({ classes, onAdd, onBulkAdd, onUpdate, onClose, initi
             discountType: formData.discountType,
             discountRate: formData.discountType === 'percent' ? formData.discountRate / 100 : 0,
             discountAmount: formData.discountType === 'amount' ? parseFloat(formData.discountAmount) : 0,
+            excludedStudentIds: selectedClassIds.length === 1 ? excludedStudentIds : [],
             description: formData.description
         };
 
@@ -100,9 +121,11 @@ const AddPromotionModal = ({ classes, onAdd, onBulkAdd, onUpdate, onClose, initi
         boxShadow: active ? '0 4px 12px rgba(99, 102, 241, 0.35)' : 'none',
     });
 
+    const showExcludeSection = selectedClassIds.length === 1;
+
     return (
         <div className="modal-overlay">
-            <div className="modal-content card" style={{ maxWidth: '450px', width: '90%', padding: '1.5rem' }}>
+            <div className="modal-content card" style={{ maxWidth: '500px', width: '90%', padding: '1.5rem', maxHeight: '90vh', overflowY: 'auto' }}>
                 <button onClick={onClose} className="btn-close-modal">
                     <X size={24} />
                 </button>
@@ -112,10 +135,11 @@ const AddPromotionModal = ({ classes, onAdd, onBulkAdd, onUpdate, onClose, initi
                 </h2>
 
                 <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                    {/* Classes */}
                     <div>
                         <label className="form-label" style={{ marginBottom: '0.75rem', display: 'block' }}>Lớp học áp dụng</label>
                         <div style={{
-                            maxHeight: '200px',
+                            maxHeight: '180px',
                             overflowY: 'auto',
                             display: 'flex',
                             flexWrap: 'wrap',
@@ -156,13 +180,14 @@ const AddPromotionModal = ({ classes, onAdd, onBulkAdd, onUpdate, onClose, initi
                             })}
                         </div>
                         {!initialData && (
-                            <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem', justifyContent: 'flex-start' }}>
+                            <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem' }}>
                                 <button type="button" className="btn btn-glass btn-sm" onClick={() => setSelectedClassIds(classes.map(c => c.id))} style={{ fontSize: '0.75rem' }}>Chọn tất cả</button>
                                 <button type="button" className="btn btn-glass btn-sm" onClick={() => setSelectedClassIds([])} style={{ fontSize: '0.75rem' }}>Bỏ chọn</button>
                             </div>
                         )}
                     </div>
 
+                    {/* Month */}
                     <div>
                         <label className="form-label">Tháng áp dụng</label>
                         <input
@@ -186,24 +211,16 @@ const AddPromotionModal = ({ classes, onAdd, onBulkAdd, onUpdate, onClose, initi
                             borderRadius: '12px',
                             padding: '0.25rem',
                         }}>
-                            <button
-                                type="button"
-                                style={tabStyle(formData.discountType === 'percent')}
-                                onClick={() => setFormData({ ...formData, discountType: 'percent' })}
-                            >
+                            <button type="button" style={tabStyle(formData.discountType === 'percent')} onClick={() => setFormData({ ...formData, discountType: 'percent' })}>
                                 <Percent size={15} /> Phần trăm (%)
                             </button>
-                            <button
-                                type="button"
-                                style={tabStyle(formData.discountType === 'amount')}
-                                onClick={() => setFormData({ ...formData, discountType: 'amount' })}
-                            >
+                            <button type="button" style={tabStyle(formData.discountType === 'amount')} onClick={() => setFormData({ ...formData, discountType: 'amount' })}>
                                 <DollarSign size={15} /> Số tiền (đ)
                             </button>
                         </div>
                     </div>
 
-                    {/* Discount value input */}
+                    {/* Discount value */}
                     {formData.discountType === 'percent' ? (
                         <div>
                             <label className="form-label">Phần trăm giảm giá (%)</label>
@@ -211,8 +228,7 @@ const AddPromotionModal = ({ classes, onAdd, onBulkAdd, onUpdate, onClose, initi
                                 type="number"
                                 className="glass"
                                 style={{ width: '100%', boxSizing: 'border-box' }}
-                                min="1"
-                                max="100"
+                                min="1" max="100"
                                 value={formData.discountRate}
                                 onChange={(e) => setFormData({ ...formData, discountRate: parseFloat(e.target.value) || 0 })}
                                 placeholder="Ví dụ: 10 (nghĩa là giảm 10%)"
@@ -226,8 +242,7 @@ const AddPromotionModal = ({ classes, onAdd, onBulkAdd, onUpdate, onClose, initi
                                 type="number"
                                 className="glass"
                                 style={{ width: '100%', boxSizing: 'border-box' }}
-                                min="1000"
-                                step="1000"
+                                min="1000" step="1000"
                                 value={formData.discountAmount}
                                 onChange={(e) => setFormData({ ...formData, discountAmount: parseFloat(e.target.value) || 0 })}
                                 placeholder="Ví dụ: 50000 (nghĩa là giảm 50.000đ)"
@@ -241,6 +256,125 @@ const AddPromotionModal = ({ classes, onAdd, onBulkAdd, onUpdate, onClose, initi
                         </div>
                     )}
 
+                    {/* Exclude students — only when 1 class is selected */}
+                    {showExcludeSection && (
+                        <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.6rem' }}>
+                                <UserX size={16} color="var(--warning)" />
+                                <label className="form-label" style={{ margin: 0 }}>Học sinh không áp dụng khuyến mãi</label>
+                                {excludedStudentIds.length > 0 && (
+                                    <span style={{
+                                        background: 'var(--warning)',
+                                        color: '#000',
+                                        borderRadius: '20px',
+                                        padding: '0.1rem 0.5rem',
+                                        fontSize: '0.72rem',
+                                        fontWeight: 700
+                                    }}>
+                                        {excludedStudentIds.length} học sinh
+                                    </span>
+                                )}
+                            </div>
+
+                            {/* Search */}
+                            <div style={{ position: 'relative', marginBottom: '0.6rem' }}>
+                                <Search size={14} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
+                                <input
+                                    type="text"
+                                    className="glass"
+                                    style={{ width: '100%', boxSizing: 'border-box', paddingLeft: '2.2rem', fontSize: '0.85rem' }}
+                                    placeholder="Tìm tên học sinh..."
+                                    value={excludeSearch}
+                                    onChange={(e) => setExcludeSearch(e.target.value)}
+                                />
+                            </div>
+
+                            {eligibleStudents.length === 0 ? (
+                                <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', textAlign: 'center', padding: '0.75rem' }}>
+                                    {students.filter(s => s.classId === selectedClassIds[0]).length === 0
+                                        ? 'Lớp này chưa có học sinh nào.'
+                                        : 'Không tìm thấy học sinh phù hợp.'}
+                                </p>
+                            ) : (
+                                <div style={{
+                                    maxHeight: '180px',
+                                    overflowY: 'auto',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '0.4rem',
+                                    border: '1.5px solid var(--glass-border)',
+                                    borderRadius: '12px',
+                                    padding: '0.5rem',
+                                    background: 'rgba(255,255,255,0.03)'
+                                }}>
+                                    {eligibleStudents.map(s => {
+                                        const isExcluded = excludedStudentIds.includes(s.id);
+                                        return (
+                                            <div
+                                                key={s.id}
+                                                onClick={() => toggleExcludeStudent(s.id)}
+                                                style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.6rem',
+                                                    padding: '0.45rem 0.75rem',
+                                                    borderRadius: '8px',
+                                                    cursor: 'pointer',
+                                                    transition: 'background 0.15s ease',
+                                                    background: isExcluded ? 'rgba(245, 158, 11, 0.12)' : 'transparent',
+                                                    border: `1.5px solid ${isExcluded ? 'rgba(245, 158, 11, 0.4)' : 'transparent'}`,
+                                                    userSelect: 'none'
+                                                }}
+                                                onMouseEnter={e => { if (!isExcluded) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
+                                                onMouseLeave={e => { if (!isExcluded) e.currentTarget.style.background = 'transparent'; }}
+                                            >
+                                                {/* Checkbox visual */}
+                                                <div style={{
+                                                    width: '18px', height: '18px',
+                                                    borderRadius: '5px',
+                                                    border: `2px solid ${isExcluded ? 'var(--warning)' : 'var(--glass-border)'}`,
+                                                    background: isExcluded ? 'var(--warning)' : 'transparent',
+                                                    flexShrink: 0,
+                                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                    transition: 'all 0.15s ease'
+                                                }}>
+                                                    {isExcluded && (
+                                                        <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                                                            <path d="M1.5 5L4 7.5L8.5 2.5" stroke="#000" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                                                        </svg>
+                                                    )}
+                                                </div>
+                                                <span style={{
+                                                    fontSize: '0.85rem',
+                                                    fontWeight: isExcluded ? 600 : 400,
+                                                    color: isExcluded ? 'var(--warning)' : 'var(--text-primary)',
+                                                    flex: 1
+                                                }}>
+                                                    {s.name}
+                                                </span>
+                                                {isExcluded && (
+                                                    <span style={{ fontSize: '0.7rem', color: 'var(--warning)', fontWeight: 600 }}>Loại trừ</span>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+
+                            {excludedStudentIds.length > 0 && (
+                                <button
+                                    type="button"
+                                    className="btn btn-glass btn-sm"
+                                    style={{ marginTop: '0.4rem', fontSize: '0.75rem' }}
+                                    onClick={() => setExcludedStudentIds([])}
+                                >
+                                    Bỏ chọn tất cả
+                                </button>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Description */}
                     <div>
                         <label className="form-label">Mô tả chương trình (tùy chọn)</label>
                         <textarea
@@ -253,7 +387,7 @@ const AddPromotionModal = ({ classes, onAdd, onBulkAdd, onUpdate, onClose, initi
                         />
                     </div>
 
-                    <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
+                    <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
                         <button type="button" onClick={onClose} className="btn btn-glass" style={{ flex: 1 }}>
                             Hủy
                         </button>

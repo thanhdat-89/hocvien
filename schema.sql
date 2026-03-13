@@ -70,6 +70,7 @@ create table if not exists promotions (
   discount_rate numeric default 0,
   discount_amount numeric default 0,
   discount_type text default 'percent', -- 'percent' | 'amount'
+  excluded_student_ids jsonb default '[]'::jsonb,
   description text,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );

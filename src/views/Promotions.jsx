@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Edit2, Trash2, Gift, Calendar, Filter, ChevronLeft, ChevronRight, Clock, Users } from 'lucide-react';
+import { Plus, Edit2, Trash2, Gift, Calendar, Filter, ChevronLeft, ChevronRight, Clock, Users, UserX } from 'lucide-react';
 import AddPromotionModal from '../components/AddPromotionModal';
 
 const Promotions = ({ db }) => {
@@ -142,6 +142,7 @@ const Promotions = ({ db }) => {
                                     <th>Tháng</th>
                                     <th>Lớp học</th>
                                     <th style={{ textAlign: 'center' }}>Mức giảm</th>
+                                    <th style={{ textAlign: 'center' }}>Loại trừ</th>
                                     <th>Mô tả</th>
                                     <th style={{ textAlign: 'right' }}>Thao tác</th>
                                 </tr>
@@ -166,6 +167,21 @@ const Promotions = ({ db }) => {
                                                     : `-${(p.discountRate * 100).toFixed(0)}%`
                                                 }
                                             </div>
+                                        </td>
+                                        <td style={{ textAlign: 'center' }}>
+                                            {(p.excludedStudentIds || []).length > 0 ? (
+                                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                                                    <UserX size={14} color="var(--warning)" />
+                                                    <span style={{
+                                                        fontSize: '0.78rem', fontWeight: 600,
+                                                        color: 'var(--warning)'
+                                                    }}>
+                                                        {p.excludedStudentIds.length} HS
+                                                    </span>
+                                                </div>
+                                            ) : (
+                                                <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>—</span>
+                                            )}
                                         </td>
                                         <td style={{ color: 'var(--text-secondary)', maxWidth: '300px' }}>
                                             {p.description || '-'}
@@ -306,6 +322,7 @@ const Promotions = ({ db }) => {
             {isModalOpen && (
                 <AddPromotionModal
                     classes={classes}
+                    students={students}
                     onAdd={actions.addPromotion}
                     onBulkAdd={actions.bulkAddPromotions}
                     onUpdate={actions.updatePromotion}

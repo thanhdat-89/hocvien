@@ -216,8 +216,10 @@ export const useDatabase = () => {
         const feePerSession = studentClass.feePerSession || 0;
 
         // Apply class-level promotion for the selected month
+        // (promotion is null if student is in the excluded list)
         const selectedMonthStr = `${calculationYear}-${String(calculationMonth + 1).padStart(2, '0')}`;
-        const promotion = promotions.find(p => p.classId === student.classId && p.month === selectedMonthStr);
+        const rawPromotion = promotions.find(p => p.classId === student.classId && p.month === selectedMonthStr);
+        const promotion = (rawPromotion && (rawPromotion.excludedStudentIds || []).includes(studentId)) ? null : rawPromotion;
         const promotionDiscount = promotion ? promotion.discountRate : 0;
         const promotionAmount = promotion ? (promotion.discountAmount || 0) : 0;
         const promotionType = promotion ? (promotion.discountType || 'percent') : 'percent';
@@ -266,7 +268,8 @@ export const useDatabase = () => {
                 const isIterDiscountValid = effectiveEndDate && monthStr <= effectiveEndDate;
                 const iterStudentDiscount = isIterDiscountValid ? (student.discountRate || 0) : 0;
 
-                const monthPromo = promotions.find(p => p.classId === student.classId && p.month === monthStr);
+                const rawMonthPromo = promotions.find(p => p.classId === student.classId && p.month === monthStr);
+                const monthPromo = (rawMonthPromo && (rawMonthPromo.excludedStudentIds || []).includes(studentId)) ? null : rawMonthPromo;
 
                 const monthBase = monthScheduledCount * feePerSession * (1 - iterStudentDiscount);
                 tuitionIncurred += Math.round(applyPromoDiscount(monthBase, monthPromo));
@@ -289,7 +292,8 @@ export const useDatabase = () => {
             const isIterDiscountValid = effectiveEndDate && monthStr <= effectiveEndDate;
             const iterStudentDiscount = isIterDiscountValid ? (student.discountRate || 0) : 0;
 
-            const monthPromo = promotions.find(p => p.classId === student.classId && p.month === monthStr);
+            const rawMonthPromo = promotions.find(p => p.classId === student.classId && p.month === monthStr);
+            const monthPromo = (rawMonthPromo && (rawMonthPromo.excludedStudentIds || []).includes(studentId)) ? null : rawMonthPromo;
             const sessionFee = a.fee || feePerSession;
             const extraBase = sessionFee * (1 - iterStudentDiscount);
             tuitionIncurred += Math.round(applyPromoDiscount(extraBase, monthPromo));
