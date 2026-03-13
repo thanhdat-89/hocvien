@@ -213,21 +213,33 @@ export const useDatabase = () => {
         const extraCount = extraSessionsSelected.length;
         const totalExtraFee = extraSessionsSelected.reduce((sum, a) => sum + (a.fee || studentClass.feePerSession), 0);
 
-        const discount = student.discountRate || 0;
         const feePerSession = studentClass.feePerSession || 0;
 
         // Apply class-level promotion for the selected month
         const selectedMonthStr = `${calculationYear}-${String(calculationMonth + 1).padStart(2, '0')}`;
         const promotion = promotions.find(p => p.classId === student.classId && p.month === selectedMonthStr);
         const promotionDiscount = promotion ? promotion.discountRate : 0;
+        const promotionAmount = promotion ? (promotion.discountAmount || 0) : 0;
+        const promotionType = promotion ? (promotion.discountType || 'percent') : 'percent';
 
-        // Final Tuition = Base * (1 - Student Discount) * (1 - Promotion Discount)
+        // Helper: apply promotion discount (percent or fixed amount)
+        const applyPromoDiscount = (baseAmount, promo) => {
+            if (!promo) return baseAmount;
+            if (promo.discountType === 'amount') {
+                return Math.max(0, baseAmount - (promo.discountAmount || 0));
+            }
+            return baseAmount * (1 - (promo.discountRate || 0));
+        };
+
+        // Final Tuition = Base * (1 - Student Discount) then apply Promotion
         const effectiveEndDate = student.discountEndDate || (student.discountRate > 0 ? '2026-07' : null);
         const isStudentDiscountValid = effectiveEndDate && selectedMonthStr <= effectiveEndDate;
         const effectiveStudentDiscount = isStudentDiscountValid ? (student.discountRate || 0) : 0;
 
-        const scheduledTuition = Math.round(scheduledCount * feePerSession * (1 - effectiveStudentDiscount) * (1 - promotionDiscount));
-        const tuitionDue = Math.round((scheduledCount * feePerSession + totalExtraFee) * (1 - effectiveStudentDiscount) * (1 - promotionDiscount));
+        const scheduledBase = scheduledCount * feePerSession * (1 - effectiveStudentDiscount);
+        const scheduledTuition = Math.round(applyPromoDiscount(scheduledBase, promotion));
+        const tuitionBase = (scheduledCount * feePerSession + totalExtraFee) * (1 - effectiveStudentDiscount);
+        const tuitionDue = Math.round(applyPromoDiscount(tuitionBase, promotion));
 
         // --- Balance Calculation (Relative to Target Month) ---
         // Debt = (Scheduled + Extra up to Target Month) - Total Payments
@@ -255,9 +267,9 @@ export const useDatabase = () => {
                 const iterStudentDiscount = isIterDiscountValid ? (student.discountRate || 0) : 0;
 
                 const monthPromo = promotions.find(p => p.classId === student.classId && p.month === monthStr);
-                const monthPromoDiscount = monthPromo ? monthPromo.discountRate : 0;
 
-                tuitionIncurred += Math.round(monthScheduledCount * feePerSession * (1 - iterStudentDiscount) * (1 - monthPromoDiscount));
+                const monthBase = monthScheduledCount * feePerSession * (1 - iterStudentDiscount);
+                tuitionIncurred += Math.round(applyPromoDiscount(monthBase, monthPromo));
             }
             iterDate = mEndNext;
         }
@@ -278,9 +290,9 @@ export const useDatabase = () => {
             const iterStudentDiscount = isIterDiscountValid ? (student.discountRate || 0) : 0;
 
             const monthPromo = promotions.find(p => p.classId === student.classId && p.month === monthStr);
-            const monthPromoDiscount = monthPromo ? monthPromo.discountRate : 0;
             const sessionFee = a.fee || feePerSession;
-            tuitionIncurred += Math.round(sessionFee * (1 - iterStudentDiscount) * (1 - monthPromoDiscount));
+            const extraBase = sessionFee * (1 - iterStudentDiscount);
+            tuitionIncurred += Math.round(applyPromoDiscount(extraBase, monthPromo));
         });
 
         const totalPaid = fees
@@ -299,6 +311,8 @@ export const useDatabase = () => {
             totalPaid,
             balance,
             promotionDiscount,
+            promotionAmount,
+            promotionType,
             studentDiscountRate: effectiveStudentDiscount,
             promotionDescription: promotion ? promotion.description : '',
             status: balance <= 0 ? 'Đã hoàn thành' : 'Còn nợ'

@@ -161,7 +161,10 @@ const Promotions = ({ db }) => {
                                         <td style={{ textAlign: 'center' }}>
                                             <div className="label label-success" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
                                                 <Gift size={14} />
-                                                {p.discountRate * 100}%
+                                                {p.discountType === 'amount'
+                                                    ? `-${(p.discountAmount || 0).toLocaleString('vi-VN')} đ`
+                                                    : `-${(p.discountRate * 100).toFixed(0)}%`
+                                                }
                                             </div>
                                         </td>
                                         <td style={{ color: 'var(--text-secondary)', maxWidth: '300px' }}>

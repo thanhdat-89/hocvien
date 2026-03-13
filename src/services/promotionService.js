@@ -12,7 +12,9 @@ export const promotionService = {
             id: p.id,
             classId: p.class_id,
             month: p.month, // Format: YYYY-MM
-            discountRate: parseFloat(p.discount_rate),
+            discountRate: parseFloat(p.discount_rate) || 0,
+            discountAmount: parseFloat(p.discount_amount) || 0,
+            discountType: p.discount_type || 'percent', // 'percent' | 'amount'
             description: p.description
         }));
     },
@@ -22,7 +24,9 @@ export const promotionService = {
         const dbPromotion = {
             class_id: promotion.classId,
             month: promotion.month,
-            discount_rate: promotion.discountRate,
+            discount_rate: promotion.discountType === 'percent' ? promotion.discountRate : 0,
+            discount_amount: promotion.discountType === 'amount' ? promotion.discountAmount : 0,
+            discount_type: promotion.discountType || 'percent',
             description: promotion.description
         };
         const { data, error } = await supabase
@@ -41,7 +45,9 @@ export const promotionService = {
         const dbPromotion = {
             class_id: promotion.classId,
             month: promotion.month,
-            discount_rate: promotion.discountRate,
+            discount_rate: promotion.discountType === 'percent' ? promotion.discountRate : 0,
+            discount_amount: promotion.discountType === 'amount' ? promotion.discountAmount : 0,
+            discount_type: promotion.discountType || 'percent',
             description: promotion.description
         };
         const { error } = await supabase

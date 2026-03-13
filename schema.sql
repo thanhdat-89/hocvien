@@ -68,6 +68,8 @@ create table if not exists promotions (
   class_id text references classes(id) on delete cascade,
   month text not null, -- Format: YYYY-MM
   discount_rate numeric default 0,
+  discount_amount numeric default 0,
+  discount_type text default 'percent', -- 'percent' | 'amount'
   description text,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );

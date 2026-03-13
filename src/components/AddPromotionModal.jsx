@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Save } from 'lucide-react';
+import { X, Save, Percent, DollarSign } from 'lucide-react';
 import { useNotification } from '../contexts/NotificationContext';
 
 const AddPromotionModal = ({ classes, onAdd, onBulkAdd, onUpdate, onClose, initialData }) => {
@@ -7,7 +7,9 @@ const AddPromotionModal = ({ classes, onAdd, onBulkAdd, onUpdate, onClose, initi
     const [selectedClassIds, setSelectedClassIds] = useState([]);
     const [formData, setFormData] = useState({
         month: new Date().toISOString().substring(0, 7), // YYYY-MM
+        discountType: 'percent', // 'percent' | 'amount'
         discountRate: 0,
+        discountAmount: 0,
         description: ''
     });
 
@@ -16,7 +18,9 @@ const AddPromotionModal = ({ classes, onAdd, onBulkAdd, onUpdate, onClose, initi
             setSelectedClassIds([initialData.classId]);
             setFormData({
                 month: initialData.month || '',
+                discountType: initialData.discountType || 'percent',
                 discountRate: (initialData.discountRate || 0) * 100,
+                discountAmount: initialData.discountAmount || 0,
                 description: initialData.description || ''
             });
         }
@@ -42,9 +46,22 @@ const AddPromotionModal = ({ classes, onAdd, onBulkAdd, onUpdate, onClose, initi
             return;
         }
 
+        if (formData.discountType === 'percent' && (formData.discountRate <= 0 || formData.discountRate > 100)) {
+            showToast('Phần trăm giảm giá phải từ 1 đến 100.', 'warning');
+            return;
+        }
+
+        if (formData.discountType === 'amount' && formData.discountAmount <= 0) {
+            showToast('Số tiền giảm giá phải lớn hơn 0.', 'warning');
+            return;
+        }
+
         const baseData = {
-            ...formData,
-            discountRate: formData.discountRate / 100
+            month: formData.month,
+            discountType: formData.discountType,
+            discountRate: formData.discountType === 'percent' ? formData.discountRate / 100 : 0,
+            discountAmount: formData.discountType === 'amount' ? parseFloat(formData.discountAmount) : 0,
+            description: formData.description
         };
 
         try {
@@ -64,6 +81,24 @@ const AddPromotionModal = ({ classes, onAdd, onBulkAdd, onUpdate, onClose, initi
             // Error handling is managed by the action
         }
     };
+
+    const tabStyle = (active) => ({
+        flex: 1,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '0.4rem',
+        padding: '0.55rem 1rem',
+        borderRadius: '10px',
+        fontSize: '0.85rem',
+        fontWeight: 600,
+        cursor: 'pointer',
+        transition: 'all 0.2s ease',
+        border: 'none',
+        background: active ? 'var(--primary)' : 'transparent',
+        color: active ? 'white' : 'var(--text-secondary)',
+        boxShadow: active ? '0 4px 12px rgba(99, 102, 241, 0.35)' : 'none',
+    });
 
     return (
         <div className="modal-overlay">
@@ -140,19 +175,71 @@ const AddPromotionModal = ({ classes, onAdd, onBulkAdd, onUpdate, onClose, initi
                         />
                     </div>
 
+                    {/* Discount type toggle */}
                     <div>
-                        <label className="form-label">Phần trăm giảm giá (%)</label>
-                        <input
-                            type="number"
-                            className="glass"
-                            style={{ width: '100%', boxSizing: 'border-box' }}
-                            min="0"
-                            max="100"
-                            value={formData.discountRate}
-                            onChange={(e) => setFormData({ ...formData, discountRate: parseFloat(e.target.value) || 0 })}
-                            required
-                        />
+                        <label className="form-label" style={{ marginBottom: '0.6rem', display: 'block' }}>Loại giảm giá</label>
+                        <div style={{
+                            display: 'flex',
+                            gap: '0.25rem',
+                            background: 'rgba(255,255,255,0.05)',
+                            border: '1.5px solid var(--glass-border)',
+                            borderRadius: '12px',
+                            padding: '0.25rem',
+                        }}>
+                            <button
+                                type="button"
+                                style={tabStyle(formData.discountType === 'percent')}
+                                onClick={() => setFormData({ ...formData, discountType: 'percent' })}
+                            >
+                                <Percent size={15} /> Phần trăm (%)
+                            </button>
+                            <button
+                                type="button"
+                                style={tabStyle(formData.discountType === 'amount')}
+                                onClick={() => setFormData({ ...formData, discountType: 'amount' })}
+                            >
+                                <DollarSign size={15} /> Số tiền (đ)
+                            </button>
+                        </div>
                     </div>
+
+                    {/* Discount value input */}
+                    {formData.discountType === 'percent' ? (
+                        <div>
+                            <label className="form-label">Phần trăm giảm giá (%)</label>
+                            <input
+                                type="number"
+                                className="glass"
+                                style={{ width: '100%', boxSizing: 'border-box' }}
+                                min="1"
+                                max="100"
+                                value={formData.discountRate}
+                                onChange={(e) => setFormData({ ...formData, discountRate: parseFloat(e.target.value) || 0 })}
+                                placeholder="Ví dụ: 10 (nghĩa là giảm 10%)"
+                                required
+                            />
+                        </div>
+                    ) : (
+                        <div>
+                            <label className="form-label">Số tiền giảm (đ)</label>
+                            <input
+                                type="number"
+                                className="glass"
+                                style={{ width: '100%', boxSizing: 'border-box' }}
+                                min="1000"
+                                step="1000"
+                                value={formData.discountAmount}
+                                onChange={(e) => setFormData({ ...formData, discountAmount: parseFloat(e.target.value) || 0 })}
+                                placeholder="Ví dụ: 50000 (nghĩa là giảm 50.000đ)"
+                                required
+                            />
+                            {formData.discountAmount > 0 && (
+                                <p style={{ marginTop: '0.35rem', fontSize: '0.8rem', color: 'var(--success)' }}>
+                                    → Giảm: {parseFloat(formData.discountAmount).toLocaleString('vi-VN')} đ / tháng
+                                </p>
+                            )}
+                        </div>
+                    )}
 
                     <div>
                         <label className="form-label">Mô tả chương trình (tùy chọn)</label>
@@ -162,7 +249,7 @@ const AddPromotionModal = ({ classes, onAdd, onBulkAdd, onUpdate, onClose, initi
                             rows="2"
                             value={formData.description}
                             onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                            placeholder="Ví dụ: Giảm giá nhân dịp khai trương..."
+                            placeholder="Ví dụ: Giảm giá nhân dịp khai trường..."
                         />
                     </div>
 

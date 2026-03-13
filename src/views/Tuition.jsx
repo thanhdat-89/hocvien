@@ -83,7 +83,9 @@ const Tuition = ({ db }) => {
             'Số buổi học riêng': s.tuition.extraCount,
             'Học phí học riêng': s.tuition.totalExtraFee,
             'Giảm giá học viên': `${s.discountRate * 100}%`,
-            'Khuyến mãi lớp': `${(s.tuition.promotionDiscount || 0) * 100}%`,
+            'Khuyến mãi lớp': s.tuition.promotionType === 'amount'
+                ? `-${(s.tuition.promotionAmount || 0).toLocaleString('vi-VN')} đ`
+                : `${(s.tuition.promotionDiscount || 0) * 100}%`,
             [`Học phí tháng ${selectedMonth + 1}`]: s.tuition.tuitionDue
         }));
 
@@ -305,9 +307,12 @@ const Tuition = ({ db }) => {
                                     </td>
                                     <td className="hide-mobile" style={{ textAlign: 'center' }}>{s.discountRate * 100}%</td>
                                     <td className="hide-mobile" style={{ textAlign: 'center' }}>
-                                        {s.tuition.promotionDiscount > 0 ? (
+                                        {(s.tuition.promotionDiscount > 0 || s.tuition.promotionAmount > 0) ? (
                                             <span className="label label-success" style={{ fontSize: '0.75rem' }}>
-                                                -{s.tuition.promotionDiscount * 100}%
+                                                {s.tuition.promotionType === 'amount'
+                                                    ? `-${(s.tuition.promotionAmount || 0).toLocaleString('vi-VN')} đ`
+                                                    : `-${(s.tuition.promotionDiscount * 100).toFixed(0)}%`
+                                                }
                                             </span>
                                         ) : '-'}
                                     </td>
