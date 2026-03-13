@@ -330,7 +330,7 @@ const Tuition = ({ db }) => {
                                             </span>
                                         ) : '-'}
                                     </td>
-                                    <td style={{ color: 'var(--text-primary)', textAlign: 'right' }}>
+                                    <td style={{ color: 'var(--text-primary)', textAlign: 'right', fontWeight: 700 }}>
                                         {new Intl.NumberFormat('vi-VN').format(s.tuition.tuitionDue)} đ
                                     </td>
                                 </tr>
