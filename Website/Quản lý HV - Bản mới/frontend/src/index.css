@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    font-family: 'Inter', sans-serif;
+    background-color: #f8f5ff;
+    color: #282b51;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+@layer components {
+  .material-symbols-outlined {
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    user-select: none;
+  }
+
+  .nav-item {
+    @apply flex items-center gap-3 px-4 py-3 text-sm font-medium text-slate-600 hover:text-blue-500 hover:bg-blue-50/50 rounded-lg transition-all duration-200 cursor-pointer;
+  }
+
+  .nav-item-active {
+    @apply flex items-center gap-3 px-4 py-3 text-sm font-medium text-blue-600 bg-white shadow-sm rounded-lg mx-2;
+  }
+
+  .card {
+    @apply bg-surface-container-lowest rounded-xl shadow-sm;
+  }
+
+  .btn-primary {
+    @apply px-5 py-2.5 bg-primary text-on-primary font-semibold rounded-xl hover:bg-primary-dim transition-all shadow-md shadow-primary/20 active:scale-95 flex items-center gap-2 text-sm;
+  }
+
+  .btn-secondary {
+    @apply px-5 py-2.5 bg-surface-container-highest text-on-surface font-medium rounded-xl hover:bg-surface-container-high transition-all text-sm flex items-center gap-2;
+  }
+
+  .status-badge-active {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-secondary-container/30 text-secondary text-[11px] font-bold uppercase tracking-wider;
+  }
+
+  .status-badge-inactive {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-error-container/10 text-error text-[11px] font-bold uppercase tracking-wider;
+  }
+
+  .status-badge-pending {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high text-on-surface-variant text-[11px] font-bold uppercase tracking-wider;
+  }
+
+  .table-header {
+    @apply px-6 py-5 text-[11px] font-bold text-outline tracking-widest uppercase;
+  }
+
+  .table-cell {
+    @apply px-6 py-4;
+  }
+
+  .input {
+    @apply w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20;
+  }
+}
+
+@layer utilities {
+  .tonal-shift-right {
+    background: linear-gradient(90deg, #f8f5ff 0%, #f1efff 100%);
+  }
+
+  .glass-header {
+    background: rgba(248, 245, 255, 0.8);
+    backdrop-filter: blur(20px);
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #a7aad740; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #a7aad7; }
