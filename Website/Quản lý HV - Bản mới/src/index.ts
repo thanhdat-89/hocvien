@@ -28,6 +28,9 @@ app.use(cors())
 app.use(morgan('dev'))
 app.use(express.json())
 
+// ─── Health check ─────────────────────────────────────────────
+app.get('/health', (_req, res) => res.json({ status: 'ok' }))
+
 // ─── Routes ───────────────────────────────────────────────────
 app.use('/api/auth',       authRoutes)
 app.use('/api/dashboard',  dashboardRoutes)

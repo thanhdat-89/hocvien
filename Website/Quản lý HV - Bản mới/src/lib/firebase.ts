@@ -14,11 +14,17 @@ if (!admin.apps.length) {
 
   if (serviceAccountJson) {
     // Từ biến môi trường (khuyến nghị cho production)
-    admin.initializeApp({
-      credential: admin.credential.cert(JSON.parse(serviceAccountJson) as admin.ServiceAccount),
-      databaseURL: DATABASE_URL,
-      projectId: PROJECT_ID,
-    })
+    try {
+      const parsed = JSON.parse(serviceAccountJson)
+      admin.initializeApp({
+        credential: admin.credential.cert(parsed as admin.ServiceAccount),
+        databaseURL: DATABASE_URL,
+        projectId: PROJECT_ID,
+      })
+    } catch (e) {
+      console.error('[Firebase] Lỗi parse FIREBASE_SERVICE_ACCOUNT_JSON:', e)
+      throw e
+    }
   } else {
     // Từ file local (cho development)
     try {
