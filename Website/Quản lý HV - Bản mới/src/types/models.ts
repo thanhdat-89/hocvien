@@ -279,3 +279,19 @@ export interface Notification {
   createdById?: string
   createdAt: string
 }
+
+export interface Lead {
+  id: string
+  zaloUserId: string
+  parentName?: string
+  studentName?: string
+  gradeLevel?: string
+  phone?: string
+  status: 'NEW' | 'COLLECTING' | 'COMPLETED' | 'CONTACTED' | 'ENROLLED' | 'LOST'
+  /** Bước hiện tại trong chatbot: 0=chào, 1=hỏi tên PH, 2=hỏi tên con+lớp, 3=hỏi SĐT, 4=hoàn tất */
+  chatStep: number
+  note?: string
+  source?: string
+  createdAt: string
+  updatedAt: string
+}

@@ -10,3 +10,4 @@ firebase-service-account.json
 frontend/dist/
 
 /generated/prisma
+.vercel

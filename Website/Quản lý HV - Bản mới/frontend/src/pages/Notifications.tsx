@@ -54,7 +54,13 @@ export default function Notifications() {
     content: '',
     type: 'GENERAL' as NotificationType,
     targetType: 'ALL' as NotificationTarget,
+    targetId: '' as string,
+    sendViaZalo: false,
   })
+
+  const [classes, setClasses] = useState<{ id: string; name: string }[]>([])
+  const [students, setStudents] = useState<{ id: string; fullName: string }[]>([])
+  const [targetsLoaded, setTargetsLoaded] = useState(false)
 
   const addToast = useCallback((message: string, type: ToastMessage['type']) => {
     setToasts(prev => [...prev, { id: Date.now(), message, type }])
@@ -77,6 +83,17 @@ export default function Notifications() {
 
   useEffect(() => { fetchNotifications() }, [fetchNotifications])
 
+  useEffect(() => {
+    if (targetsLoaded) return
+    api.get<{ classes: { id: string; name: string }[]; students: { id: string; fullName: string }[] }>('/notifications/targets')
+      .then(res => {
+        setClasses(res.data.classes)
+        setStudents(res.data.students)
+        setTargetsLoaded(true)
+      })
+      .catch(() => {})
+  }, [targetsLoaded])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.title.trim() || !form.content.trim()) return
@@ -84,11 +101,15 @@ export default function Notifications() {
     setSubmitting(true)
     try {
       await api.post('/notifications', {
-        ...form,
-        sendViaZalo: false, // Tính năng Zalo sẽ được kích hoạt sau
+        title: form.title,
+        content: form.content,
+        type: form.type,
+        targetType: form.targetType,
+        targetId: form.targetType !== 'ALL' ? form.targetId : undefined,
+        sendViaZalo: form.sendViaZalo,
       })
-      addToast('Đã tạo thông báo thành công', 'success')
-      setForm({ title: '', content: '', type: 'GENERAL', targetType: 'ALL' })
+      addToast(form.sendViaZalo ? 'Đã tạo thông báo và gửi qua Zalo OA' : 'Đã tạo thông báo thành công', 'success')
+      setForm({ title: '', content: '', type: 'GENERAL', targetType: 'ALL', targetId: '', sendViaZalo: false })
       fetchNotifications()
     } catch {
       addToast('Không thể tạo thông báo. Vui lòng thử lại.', 'error')
@@ -161,7 +182,7 @@ export default function Notifications() {
               <label className="block text-sm font-medium text-on-surface-variant mb-1">Đối tượng</label>
               <select
                 value={form.targetType}
-                onChange={e => setForm(f => ({ ...f, targetType: e.target.value as NotificationTarget }))}
+                onChange={e => setForm(f => ({ ...f, targetType: e.target.value as NotificationTarget, targetId: '' }))}
                 className="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
               >
                 {(Object.keys(TARGET_LABELS) as NotificationTarget[]).map(t => (
@@ -171,25 +192,59 @@ export default function Notifications() {
             </div>
           </div>
 
-          {/* Toggle Zalo — disabled, sắp ra mắt */}
-          <div className="flex items-center gap-3 py-3 px-4 rounded-lg bg-surface-container border border-outline-variant/30 opacity-60 cursor-not-allowed select-none">
+          {/* Chọn lớp hoặc học viên cụ thể */}
+          {form.targetType === 'CLASS' && (
+            <div>
+              <label className="block text-sm font-medium text-on-surface-variant mb-1">Chọn lớp</label>
+              <select
+                value={form.targetId}
+                onChange={e => setForm(f => ({ ...f, targetId: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                required
+              >
+                <option value="">-- Chọn lớp --</option>
+                {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+          )}
+
+          {form.targetType === 'STUDENT' && (
+            <div>
+              <label className="block text-sm font-medium text-on-surface-variant mb-1">Chọn học viên</label>
+              <select
+                value={form.targetId}
+                onChange={e => setForm(f => ({ ...f, targetId: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-outline-variant bg-surface text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                required
+              >
+                <option value="">-- Chọn học viên --</option>
+                {students.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
+              </select>
+            </div>
+          )}
+
+          {/* Toggle gửi qua Zalo OA */}
+          <label className={`flex items-center gap-3 py-3 px-4 rounded-lg border cursor-pointer transition-colors ${form.sendViaZalo ? 'bg-primary/5 border-primary/40' : 'bg-surface-container border-outline-variant/30'}`}>
             <input
               type="checkbox"
-              disabled
-              className="w-4 h-4 rounded border-outline-variant cursor-not-allowed"
+              checked={form.sendViaZalo}
+              onChange={e => setForm(f => ({ ...f, sendViaZalo: e.target.checked }))}
+              className="w-4 h-4 rounded border-outline-variant accent-primary"
             />
             <span className="material-symbols-outlined text-[18px] text-on-surface-variant">send</span>
             <span className="text-sm font-medium text-on-surface-variant flex-1">Gửi qua Zalo OA</span>
-            <span className="text-[10px] font-bold uppercase tracking-widest text-white bg-primary px-2 py-0.5 rounded-full">
-              Sắp ra mắt
-            </span>
-          </div>
+            {form.sendViaZalo && (
+              <span className="text-[10px] font-bold uppercase tracking-widest text-white bg-secondary px-2 py-0.5 rounded-full">
+                Sẽ gửi Zalo
+              </span>
+            )}
+          </label>
 
           {/* Submit */}
           <div className="flex justify-end">
             <button
               type="submit"
-              disabled={submitting || !form.title.trim() || !form.content.trim()}
+              disabled={submitting || !form.title.trim() || !form.content.trim() || (form.targetType !== 'ALL' && !form.targetId)}
               className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-on-primary text-sm font-medium hover:bg-primary/90 active:bg-primary/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {submitting ? (

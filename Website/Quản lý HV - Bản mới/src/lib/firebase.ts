@@ -68,6 +68,7 @@ export const C = {
   STUDENT_PROMOTIONS:  'studentPromotions',
   HOLIDAYS:            'holidays',
   NOTIFICATIONS:       'notifications',
+  LEADS:               'leads',
   PRIVATE_SCHEDULES:   'privateSchedules',
 } as const
 

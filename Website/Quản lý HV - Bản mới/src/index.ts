@@ -16,6 +16,7 @@ import tuitionRoutes from './routes/tuition'
 import teacherRoutes from './routes/teachers'
 import dashboardRoutes from './routes/dashboard'
 import { notificationRouter, webhookRouter } from './routes/notifications'
+import leadRoutes from './routes/leads'
 
 import { errorHandler, notFound } from './middleware/errorHandler'
 
@@ -31,6 +32,19 @@ app.use(express.json())
 // ─── Health check ─────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok' }))
 
+// ─── Zalo domain verification ────────────────────────────────
+app.get('/zalo_verifierMeNX2R-7MmvqfE0Z_fTD87ZfzWAKdoDSDpCn.html', (_req, res) => {
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta property="zalo-platform-site-verification" content="MeNX2R-7MmvqfE0Z_fTD87ZfzWAKdoDSDpCn" />
+</head>
+<body>
+There Is No Limit To What You Can Accomplish Using Zalo!
+</body>
+</html>`)
+})
+
 // ─── Routes ───────────────────────────────────────────────────
 app.use('/api/auth',       authRoutes)
 app.use('/api/dashboard',  dashboardRoutes)
@@ -44,6 +58,7 @@ app.use('/api/attendance', attendanceRoutes)
 app.use('/api/tuition',    tuitionRoutes)
 app.use('/api/teachers',       teacherRoutes)
 app.use('/api/notifications',  notificationRouter)
+app.use('/api/leads',          leadRoutes)
 app.use('/api/zalo',           webhookRouter)
 
 // ─── Error handlers ───────────────────────────────────────────

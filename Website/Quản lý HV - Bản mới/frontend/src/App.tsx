@@ -11,6 +11,7 @@ import Classes from './pages/Classes'
 import Tuition from './pages/Tuition'
 import Attendance from './pages/Attendance'
 import Notifications from './pages/Notifications'
+import Leads from './pages/Leads'
 import PrivateSchedule from './pages/PrivateSchedule'
 
 export default function App() {
@@ -30,6 +31,7 @@ export default function App() {
             <Route path="/tuition" element={<Tuition />} />
             <Route path="/attendance" element={<Attendance />} />
             <Route path="/notifications" element={<Notifications />} />
+            <Route path="/leads" element={<Leads />} />
           </Route>
         </Routes>
       </AuthProvider>
