@@ -31,27 +31,39 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
       students = students.filter(s => ids.has(s.id))
     }
 
-    // Gắn primary parent cho mỗi học viên
+    // Paginate TRƯỚC, chỉ enrich data cho trang hiện tại
+    const total = students.length
+    const pageNum = Number(page)
+    const limitNum = Number(limit)
+    const pageStudents = students.slice((pageNum - 1) * limitNum, pageNum * limitNum)
+
+    // Batch lấy tất cả enrollments active 1 lần thay vì N+1
+    const allEnrollSnap = await db.collection(C.ENROLLMENTS)
+      .where('status', '==', 'ACTIVE')
+      .get()
+    const allEnrollments = toDocs<ClassEnrollment>(allEnrollSnap)
+    const enrollByStudent = new Map<string, ClassEnrollment[]>()
+    for (const e of allEnrollments) {
+      const arr = enrollByStudent.get(e.studentId) ?? []
+      arr.push(e)
+      enrollByStudent.set(e.studentId, arr)
+    }
+
+    // Chỉ query parents cho students trong trang hiện tại
     const result = await Promise.all(
-      students.map(async s => {
+      pageStudents.map(async s => {
         const parentsSnap = await db.collection(C.STUDENTS).doc(s.id)
           .collection('parents')
           .where('isPrimaryContact', '==', true)
           .limit(1)
           .get()
         const primaryParent = parentsSnap.empty ? null : { id: parentsSnap.docs[0].id, ...parentsSnap.docs[0].data() }
-
-        const enrollSnap = await db.collection(C.ENROLLMENTS)
-          .where('studentId', '==', s.id)
-          .where('status', '==', 'ACTIVE')
-          .get()
-        const enrollments = toDocs<ClassEnrollment>(enrollSnap)
-
+        const enrollments = enrollByStudent.get(s.id) ?? []
         return { ...s, primaryParent, enrollments }
       })
     )
 
-    res.json(paginate(result, Number(page), Number(limit)))
+    res.json({ data: result, total, page: pageNum, limit: limitNum, totalPages: Math.ceil(total / limitNum) })
   } catch (err) {
     next(err)
   }

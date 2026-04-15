@@ -73,22 +73,28 @@ router.get('/', async (_req: AuthRequest, res: Response, next: NextFunction) => 
 router.get('/revenue', async (_req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const today = new Date()
-    const months: Array<{ year: number; month: number; revenue: number }> = []
 
-    for (let i = 11; i >= 0; i--) {
-      const d = new Date(today.getFullYear(), today.getMonth() - i, 1)
-      const year = d.getFullYear()
-      const month = d.getMonth() + 1
-      const monthStr = `${year}-${String(month).padStart(2, '0')}`
+    // Tính khoảng 12 tháng
+    const monthRanges = Array.from({ length: 12 }, (_, i) => {
+      const d = new Date(today.getFullYear(), today.getMonth() - (11 - i), 1)
+      return { year: d.getFullYear(), month: d.getMonth() + 1 }
+    })
 
-      const snap = await db.collection(C.PAYMENTS)
-        .where('paymentDate', '>=', `${monthStr}-01`)
-        .where('paymentDate', '<=', `${monthStr}-31`)
-        .get()
+    // Query song song thay vì tuần tự
+    const snaps = await Promise.all(
+      monthRanges.map(({ year, month }) => {
+        const monthStr = `${year}-${String(month).padStart(2, '0')}`
+        return db.collection(C.PAYMENTS)
+          .where('paymentDate', '>=', `${monthStr}-01`)
+          .where('paymentDate', '<=', `${monthStr}-31`)
+          .get()
+      })
+    )
 
-      const revenue = toDocs<Payment>(snap).reduce((sum, p) => sum + p.amount, 0)
-      months.push({ year, month, revenue })
-    }
+    const months = monthRanges.map((r, i) => ({
+      ...r,
+      revenue: toDocs<Payment>(snaps[i]).reduce((sum, p) => sum + p.amount, 0),
+    }))
 
     res.json(months)
   } catch (err) {
