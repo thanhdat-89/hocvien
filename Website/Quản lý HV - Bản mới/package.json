@@ -1,7 +1,7 @@
 {
   "name": "math-center-management",
   "version": "1.0.0",
-  "description": "Hệ thống quản lý học viên trung tâm toán",
+  "description": "Hệ thống quản lý học viên Math Center",
   "engines": {
     "node": ">=18"
   },

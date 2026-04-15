@@ -22,7 +22,7 @@ webhookRouter.get('/webhook', (req: Request, res: Response) => {
 
 const CHAT_MESSAGES = {
   welcome:
-    `Chào mừng Quý phụ huynh đến với Trung tâm Toán - CQT Education! 🎓\n\n` +
+    `Chào mừng Quý phụ huynh đến với Math Center! 🎓\n\n` +
     `Trung tâm chuyên dạy thêm Toán cho học sinh các khối lớp.\n\n` +
     `Để tư vấn phù hợp, em xin phép hỏi vài thông tin ngắn ạ.\n\n` +
     `👤 Cho em xin họ tên Phụ huynh ạ?`,
@@ -266,7 +266,7 @@ notificationRouter.post('/', async (req: AuthRequest, res: Response, next: NextF
         await ref.update({ zaloQueued: true })
         console.warn('[Zalo] Thông báo được đánh dấu zaloQueued — điền env vars để kích hoạt')
       } else {
-        const zaloMessage = `[Trung tâm Toán - CQT]\n${title}\n\n${content}`
+        const zaloMessage = `[Math Center]\n${title}\n\n${content}`
         const zaloUserIds = await getZaloRecipients(targetType, targetId)
 
         let sentCount = 0
@@ -336,7 +336,7 @@ notificationRouter.post('/:id/send-zalo', async (req: AuthRequest, res: Response
     }
 
     const notification = doc.data() as Notification
-    const zaloMessage = `[Trung tâm Toán - CQT]\n${notification.title}\n\n${notification.content}`
+    const zaloMessage = `[Math Center]\n${notification.title}\n\n${notification.content}`
     const zaloUserIds = await getZaloRecipients(notification.targetType, notification.targetId)
 
     if (zaloUserIds.length === 0) {

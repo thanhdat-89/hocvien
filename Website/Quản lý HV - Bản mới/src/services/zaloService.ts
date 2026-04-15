@@ -172,7 +172,7 @@ export async function sendTuitionReminder(
 
     const formatted = new Intl.NumberFormat('vi-VN').format(amount)
     const message =
-      `[Trung tâm Toán - CQT]\n` +
+      `[Math Center]\n` +
       `Kính gửi Phụ huynh học viên ${student.fullName},\n\n` +
       `Học phí tháng này là ${formatted} đ.\n` +
       `Vui lòng thanh toán trước ngày 10. Cảm ơn Quý phụ huynh!`
