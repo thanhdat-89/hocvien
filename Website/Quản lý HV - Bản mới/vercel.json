@@ -1,9 +1,13 @@
 {
   "version": 2,
+  "regions": ["sin1"],
   "builds": [
     {
       "src": "src/index.ts",
-      "use": "@vercel/node"
+      "use": "@vercel/node",
+      "config": {
+        "maxDuration": 30
+      }
     }
   ],
   "routes": [

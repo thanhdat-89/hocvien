@@ -14,8 +14,11 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { page = '1', limit = '20', search, status, classId, gradeLevel } = req.query as Record<string, string>
 
-    let students = toDocs<Student>(await db.collection(C.STUDENTS).orderBy('fullName').get())
+    const allStudents = toDocs<Student>(await db.collection(C.STUDENTS).orderBy('fullName').get())
+    const totalAll = allStudents.length
+    const totalActive = allStudents.filter(s => s.status === 'ACTIVE').length
 
+    let students = allStudents
     // Filter
     if (status) students = students.filter(s => s.status === status)
     if (gradeLevel) students = students.filter(s => s.gradeLevel === Number(gradeLevel))
@@ -63,7 +66,7 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
       })
     )
 
-    res.json({ data: result, total, page: pageNum, limit: limitNum, totalPages: Math.ceil(total / limitNum) })
+    res.json({ data: result, total, page: pageNum, limit: limitNum, totalPages: Math.ceil(total / limitNum), totalAll, totalActive })
   } catch (err) {
     next(err)
   }

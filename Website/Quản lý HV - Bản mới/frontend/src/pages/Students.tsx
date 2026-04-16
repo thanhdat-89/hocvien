@@ -334,21 +334,34 @@ function ImportExcelModal({ onClose, onImported }: { onClose: () => void; onImpo
 
 export default function Students() {
   const navigate = useNavigate()
-  const [allStudents, setAllStudents] = useState<Student[]>([])
+  const [students, setStudents] = useState<Student[]>([])
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
   const [gradeLevel, setGradeLevel] = useState('')
   const [page, setPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [totalAll, setTotalAll] = useState(0)
+  const [totalActive, setTotalActive] = useState(0)
   const [showModal, setShowModal] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
   const [editStudent, setEditStudent] = useState<Student | null>(null)
   const [privateModalStudent, setPrivateModalStudent] = useState<Student | null>(null)
 
-  const loadAll = async () => {
+  const searchRef = useRef<ReturnType<typeof setTimeout>>()
+
+  const loadPage = async (p: number, s?: string, gl?: string) => {
     setLoading(true)
     try {
-      const { data } = await api.get('/students?limit=1000')
-      setAllStudents(data.data ?? [])
+      const params = new URLSearchParams({ page: String(p), limit: String(PAGE_SIZE) })
+      if (s) params.set('search', s)
+      if (gl) params.set('gradeLevel', gl)
+      const { data } = await api.get(`/students?${params}`)
+      setStudents(data.data ?? [])
+      setTotal(data.total ?? 0)
+      setTotalPages(data.totalPages ?? 1)
+      setTotalAll(data.totalAll ?? 0)
+      setTotalActive(data.totalActive ?? 0)
     } catch (err) {
       console.error('Lỗi tải danh sách học viên:', err)
     } finally {
@@ -356,39 +369,36 @@ export default function Students() {
     }
   }
 
-  useEffect(() => { loadAll() }, [])
-
-  // Client-side filtering
-  const filtered = allStudents.filter(s => {
-    const matchSearch = !search || s.fullName.toLowerCase().includes(search.toLowerCase())
-    const matchGrade = !gradeLevel || String(s.gradeLevel) === gradeLevel
-    return matchSearch && matchGrade
-  })
-
-  const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
-  const pageData = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
-  const result = { data: pageData, total: filtered.length, totalPages }
+  useEffect(() => { loadPage(1) }, [])
 
   const handleSearch = (q: string) => {
     setSearch(q)
     setPage(1)
+    clearTimeout(searchRef.current)
+    searchRef.current = setTimeout(() => loadPage(1, q, gradeLevel), 300)
   }
 
   const handleGradeFilter = (gl: string) => {
     setGradeLevel(gl)
     setPage(1)
+    loadPage(1, search, gl)
+  }
+
+  const handlePageChange = (p: number) => {
+    setPage(p)
+    loadPage(p, search, gradeLevel)
   }
 
   const handleDelete = async (id: string) => {
     if (!confirm('Chuyển học viên sang trạng thái nghỉ học?')) return
     await api.delete(`/students/${id}`)
-    loadAll()
+    loadPage(page, search, gradeLevel)
   }
 
   const handleSaved = () => {
     setShowModal(false)
     setEditStudent(null)
-    loadAll()
+    loadPage(page, search, gradeLevel)
   }
 
   return (
@@ -423,7 +433,7 @@ export default function Students() {
               </div>
             </div>
             <p className="text-sm text-outline font-medium">Tổng học viên</p>
-            <p className="text-2xl font-black text-on-surface mt-1">{loading ? '—' : allStudents.length}</p>
+            <p className="text-2xl font-black text-on-surface mt-1">{loading ? '—' : totalAll}</p>
           </div>
           <div className="bg-surface-container-lowest p-6 rounded-2xl shadow-sm border border-outline-variant/10">
             <div className="flex items-center justify-between mb-4">
@@ -434,7 +444,7 @@ export default function Students() {
             </div>
             <p className="text-sm text-outline font-medium">Đang theo học</p>
             <p className="text-2xl font-black text-on-surface mt-1">
-              {loading ? '—' : allStudents.filter((s) => s.status === 'ACTIVE').length}
+              {loading ? '—' : totalActive}
             </p>
           </div>
           <div className="md:col-span-2 bg-surface-container-low p-5 rounded-2xl flex flex-col justify-center">
@@ -473,7 +483,7 @@ export default function Students() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant/10">
-                {pageData.map((student, index) => (
+                {students.map((student, index) => (
                   <tr key={student.id} className="hover:bg-surface-container-low/30 transition-colors group">
                     <td className="table-cell text-center text-sm text-outline font-medium">
                       {(page - 1) * PAGE_SIZE + index + 1}
@@ -542,7 +552,7 @@ export default function Students() {
                     </td>
                   </tr>
                 ))}
-                {pageData.length === 0 && (
+                {students.length === 0 && (
                   <tr>
                     <td colSpan={7} className="py-16 text-center text-outline">
                       <span className="material-symbols-outlined text-5xl block mb-3 opacity-30">search_off</span>
@@ -558,22 +568,26 @@ export default function Students() {
           {totalPages > 1 && (
             <div className="flex items-center justify-between px-6 py-5 bg-surface-container-low/20">
               <p className="text-xs font-medium text-outline">
-                Hiển thị {(page - 1) * PAGE_SIZE + 1} - {Math.min(page * PAGE_SIZE, filtered.length)} của {filtered.length} học viên
+                Hiển thị {(page - 1) * PAGE_SIZE + 1} - {Math.min(page * PAGE_SIZE, total)} của {total} học viên
               </p>
               <div className="flex items-center gap-1">
                 <button
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  onClick={() => handlePageChange(Math.max(1, page - 1))}
                   disabled={page === 1}
                   className="w-8 h-8 flex items-center justify-center rounded-lg text-outline hover:bg-surface-container-high transition-all disabled:opacity-40"
                 >
                   <span className="material-symbols-outlined text-[18px]">chevron_left</span>
                 </button>
                 {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                  const pg = i + 1
+                  let pg: number
+                  if (totalPages <= 5) { pg = i + 1 }
+                  else if (page <= 3) { pg = i + 1 }
+                  else if (page >= totalPages - 2) { pg = totalPages - 4 + i }
+                  else { pg = page - 2 + i }
                   return (
                     <button
                       key={pg}
-                      onClick={() => setPage(pg)}
+                      onClick={() => handlePageChange(pg)}
                       className={`w-8 h-8 flex items-center justify-center rounded-lg text-xs font-bold transition-all ${pg === page ? 'bg-primary text-on-primary shadow-md shadow-primary/20' : 'text-outline hover:bg-surface-container-high'}`}
                     >
                       {pg}
@@ -581,7 +595,7 @@ export default function Students() {
                   )
                 })}
                 <button
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  onClick={() => handlePageChange(Math.min(totalPages, page + 1))}
                   disabled={page === totalPages}
                   className="w-8 h-8 flex items-center justify-center rounded-lg text-outline hover:bg-surface-container-high transition-all disabled:opacity-40"
                 >
@@ -613,7 +627,7 @@ export default function Students() {
       {showImportModal && (
         <ImportExcelModal
           onClose={() => setShowImportModal(false)}
-          onImported={() => { loadAll() }}
+          onImported={() => { loadPage(1, search, gradeLevel) }}
         />
       )}
     </div>
