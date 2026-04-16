@@ -9,8 +9,8 @@ const navItems = [
   { path: '/private-schedule', icon: 'person_apron', label: 'Lịch học riêng' },
   { path: '/tuition', icon: 'payments', label: 'Học phí' },
   // { path: '/attendance', icon: 'assignment_turned_in', label: 'Chấm công' },
-  { path: '/notifications', icon: 'notifications', label: 'Thông báo' },
-  { path: '/leads', icon: 'person_add', label: 'Khách tiềm năng' },
+  // { path: '/notifications', icon: 'notifications', label: 'Thông báo' },
+  // { path: '/leads', icon: 'person_add', label: 'Khách tiềm năng' },
 ]
 
 export default function Sidebar() {
