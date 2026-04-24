@@ -22,7 +22,7 @@ export default function Tuition() {
   const [year, setYear] = useState(thisYear)
   const [rows, setRows] = useState<ScheduleRow[]>([])
   const [loading, setLoading] = useState(false)
-  const [gradeFilter, setGradeFilter] = useState<string | null>(null)
+  const [classFilter, setClassFilter] = useState<string | null>(null)
 
   const loadData = () => {
     setLoading(true)
@@ -34,12 +34,16 @@ export default function Tuition() {
 
   useEffect(() => { loadData() }, [month, year])
 
-  // Danh sách khối có trong dữ liệu, sắp xếp theo số
-  const grades = Array.from(new Set(rows.map(r => r.gradeLevel != null ? `Lớp ${r.gradeLevel}` : 'Khác')))
-    .sort((a, b) => (parseInt(a) || 99) - (parseInt(b) || 99))
+  // Danh sách lớp học có trong dữ liệu, sắp xếp theo tên
+  const classes = Array.from(new Set(rows.map(r => r.className).filter(Boolean)))
+    .sort((a, b) => {
+      const na = Number(a.match(/\d+/)?.[0] ?? 999)
+      const nb = Number(b.match(/\d+/)?.[0] ?? 999)
+      return na - nb || a.localeCompare(b)
+    })
 
-  const filtered = gradeFilter
-    ? rows.filter(r => (r.gradeLevel != null ? `Lớp ${r.gradeLevel}` : 'Khác') === gradeFilter)
+  const filtered = classFilter
+    ? rows.filter(r => r.className === classFilter)
     : rows
 
   const totalAmount = filtered.reduce((s, r) => s + r.finalAmount, 0)
@@ -89,7 +93,7 @@ export default function Tuition() {
     ]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, `Học phí T${month}-${year}`)
-    XLSX.writeFile(wb, `hoc-phi-thang-${month}-${year}${gradeFilter ? `-lop${gradeFilter.replace('Lớp ', '')}` : ''}.xlsx`)
+    XLSX.writeFile(wb, `hoc-phi-thang-${month}-${year}${classFilter ? `-${classFilter.replace(/\s+/g, '_')}` : ''}.xlsx`)
   }
 
   return (
@@ -141,31 +145,31 @@ export default function Tuition() {
           </div>
         </div>
 
-        {/* Grade filter */}
-        {grades.length > 1 && (
+        {/* Class filter */}
+        {classes.length > 1 && (
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-bold text-outline uppercase tracking-wider mr-1">Khối lớp:</span>
+            <span className="text-xs font-bold text-outline uppercase tracking-wider mr-1">Lớp học:</span>
             <button
-              onClick={() => setGradeFilter(null)}
+              onClick={() => setClassFilter(null)}
               className={`px-4 py-1.5 rounded-full text-sm font-semibold border transition-all ${
-                gradeFilter === null
+                classFilter === null
                   ? 'bg-primary text-on-primary border-primary shadow-sm'
                   : 'bg-surface-container-low text-outline border-outline-variant/20 hover:border-primary/40 hover:text-primary'
               }`}
             >
               Tất cả
             </button>
-            {grades.map(g => (
+            {classes.map(c => (
               <button
-                key={g}
-                onClick={() => setGradeFilter(g === gradeFilter ? null : g)}
+                key={c}
+                onClick={() => setClassFilter(c === classFilter ? null : c)}
                 className={`px-4 py-1.5 rounded-full text-sm font-semibold border transition-all ${
-                  gradeFilter === g
+                  classFilter === c
                     ? 'bg-primary text-on-primary border-primary shadow-sm'
                     : 'bg-surface-container-low text-outline border-outline-variant/20 hover:border-primary/40 hover:text-primary'
                 }`}
               >
-                {g}
+                {c}
               </button>
             ))}
           </div>
@@ -234,7 +238,7 @@ export default function Tuition() {
                     <tr>
                       <td colSpan={8} className="py-16 text-center text-outline">
                         <span className="material-symbols-outlined text-5xl block mb-3 opacity-30">payments</span>
-                        {gradeFilter ? `Không có dữ liệu cho ${gradeFilter}` : `Không có dữ liệu học phí tháng ${month}/${year}`}
+                        {classFilter ? `Không có dữ liệu cho ${classFilter}` : `Không có dữ liệu học phí tháng ${month}/${year}`}
                       </td>
                     </tr>
                   )}
