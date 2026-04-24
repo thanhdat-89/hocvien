@@ -529,18 +529,18 @@ export default function Students() {
                           <span className="material-symbols-outlined text-[20px]">visibility</span>
                         </button>
                         <button
+                          onClick={() => setPrivateModalStudent(student)}
+                          className="p-2 text-outline hover:text-tertiary hover:bg-tertiary-container/10 rounded-lg transition-all"
+                          title="Thêm lịch học riêng"
+                        >
+                          <span className="material-symbols-outlined text-[20px]">calendar_month</span>
+                        </button>
+                        <button
                           onClick={() => { setEditStudent(student); setShowModal(true) }}
                           className="p-2 text-outline hover:text-primary hover:bg-primary-container/10 rounded-lg transition-all"
                           title="Chỉnh sửa"
                         >
                           <span className="material-symbols-outlined text-[20px]">edit_square</span>
-                        </button>
-                        <button
-                          onClick={() => setPrivateModalStudent(student)}
-                          className="p-2 text-outline hover:text-tertiary hover:bg-tertiary-container/10 rounded-lg transition-all"
-                          title="Thêm lịch học riêng"
-                        >
-                          <span className="material-symbols-outlined text-[20px]">person_apron</span>
                         </button>
                         <button
                           onClick={() => handleDelete(student.id)}
