@@ -813,6 +813,7 @@ export default function Classes() {
   const [weekStart, setWeekStart] = useState(() => getWeekStart(new Date()))
   const [sessions, setSessions] = useState<Session[]>([])
   const [classes, setClasses] = useState<Class[]>([])
+  const [schedulesByClass, setSchedulesByClass] = useState<Record<string, string[]>>({})
   const [selectedSession, setSelectedSession] = useState<Session | null>(null)
   const [showClassModal, setShowClassModal] = useState(false)
   const [editingClass, setEditingClass] = useState<Class | null>(null)
@@ -834,9 +835,21 @@ export default function Classes() {
   const loadClasses = () =>
     api.get('/classes?limit=50').then((r) => setClasses(r.data?.data ?? r.data)).catch(() => {})
 
+  const loadSchedules = () =>
+    api.get('/schedules').then((r) => {
+      const list: Array<{ classId: string; dayOfWeek: string }> = Array.isArray(r.data) ? r.data : []
+      const map: Record<string, string[]> = {}
+      for (const s of list) {
+        if (!map[s.classId]) map[s.classId] = []
+        if (!map[s.classId].includes(s.dayOfWeek)) map[s.classId].push(s.dayOfWeek)
+      }
+      setSchedulesByClass(map)
+    }).catch(() => {})
+
   useEffect(() => {
     loadSessions(weekStart)
     loadClasses()
+    loadSchedules()
   }, [])
 
   const prevWeek = () => { const ws = addDays(weekStart, -7); setWeekStart(ws); loadSessions(ws) }
@@ -1094,7 +1107,11 @@ export default function Classes() {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-                {classes.map((cls, i) => {
+                {[...classes].sort((a, b) => {
+                  const numA = a.gradeLevel ?? Number(a.name.match(/\d+/)?.[0] ?? 999)
+                  const numB = b.gradeLevel ?? Number(b.name.match(/\d+/)?.[0] ?? 999)
+                  return numA - numB || a.name.localeCompare(b.name)
+                }).map((cls, i) => {
                   const color = CLASS_COLORS[i % CLASS_COLORS.length]
                   return (
                     <div key={cls.id} className="bg-surface-container-lowest p-6 rounded-2xl shadow-sm border border-outline-variant/10 hover:border-primary/30 hover:shadow-md transition-all group">
@@ -1135,6 +1152,19 @@ export default function Classes() {
 
                       {/* Info chips */}
                       <div className="flex flex-wrap gap-2 mb-4">
+                        {(() => {
+                          const days = schedulesByClass[cls.id]
+                          if (!days || days.length === 0) return null
+                          const order = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']
+                          const labels: Record<string, string> = { MONDAY: 'T2', TUESDAY: 'T3', WEDNESDAY: 'T4', THURSDAY: 'T5', FRIDAY: 'T6', SATURDAY: 'T7', SUNDAY: 'CN' }
+                          const sorted = [...days].sort((a, b) => order.indexOf(a) - order.indexOf(b)).map(d => labels[d] ?? d).join(', ')
+                          return (
+                            <span className="flex items-center gap-1 text-[11px] font-semibold text-primary bg-primary/5 px-2.5 py-1 rounded-lg">
+                              <span className="material-symbols-outlined text-[13px]">calendar_today</span>
+                              {sorted}
+                            </span>
+                          )
+                        })()}
                         <span className="flex items-center gap-1 text-[11px] font-semibold text-on-surface-variant bg-surface-container-low px-2.5 py-1 rounded-lg">
                           <span className="material-symbols-outlined text-[13px]">payments</span>
                           {(cls.tuitionRate ?? 0).toLocaleString('vi-VN')}đ/buổi
