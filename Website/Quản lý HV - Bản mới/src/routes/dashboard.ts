@@ -7,63 +7,86 @@ import type { Session, TuitionRecord, Payment, Student } from '../types/models'
 const router = Router()
 router.use(authenticate)
 
-// GET /api/dashboard
+const DASHBOARD_TTL_MS = 5 * 60 * 1000 // 5 phút
+
+async function computeDashboard() {
+  const today = new Date().toISOString().slice(0, 10)
+  const thisMonth = today.slice(0, 7)
+
+  const [
+    activeStudentsSnap,
+    activeClassesSnap,
+    sessionsTodaySnap,
+    newStudentsSnap,
+    revenueSnap,
+    overdueSnap,
+    recentPaymentsSnap,
+  ] = await Promise.all([
+    db.collection(C.STUDENTS).where('status', '==', 'ACTIVE').get(),
+    db.collection(C.CLASSES).where('status', '==', 'ACTIVE').get(),
+    db.collection(C.SESSIONS).where('sessionDate', '==', today).get(),
+    db.collection(C.STUDENTS)
+      .where('enrollmentDate', '>=', `${thisMonth}-01`)
+      .where('enrollmentDate', '<=', `${thisMonth}-31`)
+      .get(),
+    db.collection(C.PAYMENTS)
+      .where('paymentDate', '>=', `${thisMonth}-01`)
+      .where('paymentDate', '<=', `${thisMonth}-31`)
+      .get(),
+    db.collection(C.TUITION_RECORDS).where('dueDate', '<', today).get(),
+    db.collection(C.PAYMENTS).orderBy('createdAt', 'desc').limit(10).get(),
+  ])
+
+  const revenueThisMonth = toDocs<Payment>(revenueSnap).reduce((sum, p) => sum + p.amount, 0)
+  const overdueCount = toDocs<TuitionRecord>(overdueSnap)
+    .filter(r => r.status === 'PENDING' || r.status === 'PARTIAL').length
+  const sessionsToday = toDocs<Session>(sessionsTodaySnap)
+    .sort((a, b) => a.startTime.localeCompare(b.startTime))
+  const recentPayments = toDocs<Payment>(recentPaymentsSnap)
+
+  return {
+    stats: {
+      totalActiveStudents: activeStudentsSnap.size,
+      totalActiveClasses: activeClassesSnap.size,
+      newStudentsThisMonth: newStudentsSnap.size,
+      revenueThisMonth,
+      overdueCount,
+      sessionsTodayCount: sessionsToday.length,
+    },
+    sessionsToday,
+    recentPayments,
+    cachedAt: Date.now(),
+  }
+}
+
+// GET /api/dashboard — lazy write-through: trả aggregate doc nếu fresh, nếu không compute + lưu
 router.get('/', async (_req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const today = new Date().toISOString().slice(0, 10)
-    const thisMonth = today.slice(0, 7) // "YYYY-MM"
-    const thisYear = Number(today.slice(0, 4))
-    const thisMonthNum = Number(today.slice(5, 7))
+    const aggRef = db.collection(C.AGGREGATES).doc('dashboard')
+    const aggSnap = await aggRef.get()
 
-    const [
-      activeStudentsSnap,
-      activeClassesSnap,
-      sessionsTodaySnap,
-      newStudentsSnap,
-      revenueSnap,
-      overdueSnap,
-      recentPaymentsSnap,
-    ] = await Promise.all([
-      db.collection(C.STUDENTS).where('status', '==', 'ACTIVE').get(),
-      db.collection(C.CLASSES).where('status', '==', 'ACTIVE').get(),
-      db.collection(C.SESSIONS).where('sessionDate', '==', today).get(),
-      db.collection(C.STUDENTS)
-        .where('enrollmentDate', '>=', `${thisMonth}-01`)
-        .where('enrollmentDate', '<=', `${thisMonth}-31`)
-        .get(),
-      db.collection(C.PAYMENTS)
-        .where('paymentDate', '>=', `${thisMonth}-01`)
-        .where('paymentDate', '<=', `${thisMonth}-31`)
-        .get(),
-      db.collection(C.TUITION_RECORDS)
-        .where('dueDate', '<', today)
-        .get(),
-      db.collection(C.PAYMENTS).orderBy('createdAt', 'desc').limit(10).get(),
-    ])
+    if (aggSnap.exists) {
+      const cached = aggSnap.data() as { cachedAt?: number }
+      if (cached.cachedAt && Date.now() - cached.cachedAt < DASHBOARD_TTL_MS) {
+        res.json(cached)
+        return
+      }
+    }
 
-    const revenueThisMonth = toDocs<Payment>(revenueSnap)
-      .reduce((sum, p) => sum + p.amount, 0)
+    const fresh = await computeDashboard()
+    await aggRef.set(fresh)
+    res.json(fresh)
+  } catch (err) {
+    next(err)
+  }
+})
 
-    const overdueCount = toDocs<TuitionRecord>(overdueSnap)
-      .filter(r => r.status === 'PENDING' || r.status === 'PARTIAL').length
-
-    const sessionsToday = toDocs<Session>(sessionsTodaySnap)
-      .sort((a, b) => a.startTime.localeCompare(b.startTime))
-
-    const recentPayments = toDocs<Payment>(recentPaymentsSnap)
-
-    res.json({
-      stats: {
-        totalActiveStudents: activeStudentsSnap.size,
-        totalActiveClasses: activeClassesSnap.size,
-        newStudentsThisMonth: newStudentsSnap.size,
-        revenueThisMonth,
-        overdueCount,
-        sessionsTodayCount: sessionsToday.length,
-      },
-      sessionsToday,
-      recentPayments,
-    })
+// POST /api/dashboard/refresh — force refresh (dùng khi có payment/enrollment mới)
+router.post('/refresh', async (_req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const fresh = await computeDashboard()
+    await db.collection(C.AGGREGATES).doc('dashboard').set(fresh)
+    res.json(fresh)
   } catch (err) {
     next(err)
   }

@@ -74,26 +74,34 @@ router.get('/schedule-summary', async (req: AuthRequest, res: Response, next: Ne
       if (doc.exists) studentMap[doc.id] = { id: doc.id, ...doc.data() }
     }
 
-    // 5. Fetch sessions per class (lọc ngày in-memory để tránh composite index)
+    // 5. Fetch sessions per class — dùng composite index (classId, sessionDate)
+    //    để chỉ lấy sessions trong tháng, không cần filter in-memory
     const sessionsByClass: Record<string, any[]> = {}
     await Promise.all(classIds.map(async (classId) => {
-      const snap = await db.collection(C.SESSIONS).where('classId', '==', classId).get()
+      const snap = await db.collection(C.SESSIONS)
+        .where('classId', '==', classId)
+        .where('sessionDate', '>=', fromDate)
+        .where('sessionDate', '<=', toDate)
+        .get()
       sessionsByClass[classId] = toDocs<any>(snap)
     }))
 
-    // 6. Fetch promotions per enrollment
-    const promotionMap: Record<string, any[]> = {}
+    // 6. Fetch promotions per unique (studentId, classId) — song song thay vì tuần tự
+    const uniquePairs = new Map<string, { studentId: string; classId: string }>()
     for (const e of relevantEnrollments) {
       const key = `${e.studentId}-${e.classId}`
-      if (promotionMap[key] !== undefined) continue
+      if (!uniquePairs.has(key)) uniquePairs.set(key, { studentId: e.studentId, classId: e.classId })
+    }
+    const promotionMap: Record<string, any[]> = {}
+    await Promise.all(Array.from(uniquePairs.entries()).map(async ([key, { studentId, classId }]) => {
       const snap = await db.collection(C.STUDENT_PROMOTIONS)
-        .where('studentId', '==', e.studentId)
-        .where('classId', '==', e.classId)
+        .where('studentId', '==', studentId)
+        .where('classId', '==', classId)
         .get()
       promotionMap[key] = toDocs<any>(snap).filter((p: any) =>
         (!p.appliedFrom || p.appliedFrom <= toDate) && (!p.appliedTo || p.appliedTo >= fromDate)
       )
-    }
+    }))
 
     // 7. Tính từng enrollment
     const rows: any[] = []
@@ -140,11 +148,12 @@ router.get('/schedule-summary', async (req: AuthRequest, res: Response, next: Ne
       })
     }
 
-    // Học riêng — fetch privateSchedules trong tháng này
-    const privateSnap = await db.collection(C.PRIVATE_SCHEDULES).get()
-    const allPrivate = toDocs<any>(privateSnap).filter((ps: any) =>
-      ps.sessionDate && ps.sessionDate.startsWith(monthStr) && ps.status !== 'CANCELLED'
-    )
+    // Học riêng — dùng range query thay vì fetch all rồi filter
+    const privateSnap = await db.collection(C.PRIVATE_SCHEDULES)
+      .where('sessionDate', '>=', fromDate)
+      .where('sessionDate', '<=', toDate)
+      .get()
+    const allPrivate = toDocs<any>(privateSnap).filter((ps: any) => ps.status !== 'CANCELLED')
 
     // Group by studentId
     const privateByStudent: Record<string, any[]> = {}
