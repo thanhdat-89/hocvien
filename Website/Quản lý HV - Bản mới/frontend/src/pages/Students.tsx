@@ -1,5 +1,6 @@
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import TopBar from '../components/TopBar'
 import api from '../services/api'
 import { Student } from '../types'
@@ -334,15 +335,11 @@ function ImportExcelModal({ onClose, onImported }: { onClose: () => void; onImpo
 
 export default function Students() {
   const navigate = useNavigate()
-  const [students, setStudents] = useState<Student[]>([])
-  const [loading, setLoading] = useState(false)
+  const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [gradeLevel, setGradeLevel] = useState('')
   const [page, setPage] = useState(1)
-  const [totalPages, setTotalPages] = useState(1)
-  const [total, setTotal] = useState(0)
-  const [totalAll, setTotalAll] = useState(0)
-  const [totalActive, setTotalActive] = useState(0)
   const [showModal, setShowModal] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
   const [editStudent, setEditStudent] = useState<Student | null>(null)
@@ -350,55 +347,59 @@ export default function Students() {
 
   const searchRef = useRef<ReturnType<typeof setTimeout>>()
 
-  const loadPage = async (p: number, s?: string, gl?: string) => {
-    setLoading(true)
-    try {
-      const params = new URLSearchParams({ page: String(p), limit: String(PAGE_SIZE) })
-      if (s) params.set('search', s)
-      if (gl) params.set('gradeLevel', gl)
-      const { data } = await api.get(`/students?${params}`)
-      setStudents(data.data ?? [])
-      setTotal(data.total ?? 0)
-      setTotalPages(data.totalPages ?? 1)
-      setTotalAll(data.totalAll ?? 0)
-      setTotalActive(data.totalActive ?? 0)
-    } catch (err) {
-      console.error('Lỗi tải danh sách học viên:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
+  const studentsQuery = useQuery<{
+    data: Student[]
+    total: number
+    totalPages: number
+    totalAll: number
+    totalActive: number
+  }>({
+    queryKey: ['students', page, debouncedSearch, gradeLevel],
+    queryFn: async () => {
+      const params = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE) })
+      if (debouncedSearch) params.set('search', debouncedSearch)
+      if (gradeLevel) params.set('gradeLevel', gradeLevel)
+      const res = await api.get(`/students?${params}`)
+      return res.data
+    },
+    placeholderData: (prev) => prev, // giữ data cũ khi chuyển trang → không flash trắng
+  })
 
-  useEffect(() => { loadPage(1) }, [])
+  const students = studentsQuery.data?.data ?? []
+  const total = studentsQuery.data?.total ?? 0
+  const totalPages = studentsQuery.data?.totalPages ?? 1
+  const totalAll = studentsQuery.data?.totalAll ?? 0
+  const totalActive = studentsQuery.data?.totalActive ?? 0
+  const loading = studentsQuery.isLoading
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['students'] })
 
   const handleSearch = (q: string) => {
     setSearch(q)
     setPage(1)
     clearTimeout(searchRef.current)
-    searchRef.current = setTimeout(() => loadPage(1, q, gradeLevel), 300)
+    searchRef.current = setTimeout(() => setDebouncedSearch(q), 300)
   }
 
   const handleGradeFilter = (gl: string) => {
     setGradeLevel(gl)
     setPage(1)
-    loadPage(1, search, gl)
   }
 
   const handlePageChange = (p: number) => {
     setPage(p)
-    loadPage(p, search, gradeLevel)
   }
 
   const handleDelete = async (id: string) => {
     if (!confirm('Chuyển học viên sang trạng thái nghỉ học?')) return
     await api.delete(`/students/${id}`)
-    loadPage(page, search, gradeLevel)
+    invalidate()
   }
 
   const handleSaved = () => {
     setShowModal(false)
     setEditStudent(null)
-    loadPage(page, search, gradeLevel)
+    invalidate()
   }
 
   return (
@@ -627,7 +628,7 @@ export default function Students() {
       {showImportModal && (
         <ImportExcelModal
           onClose={() => setShowImportModal(false)}
-          onImported={() => { loadPage(1, search, gradeLevel) }}
+          onImported={() => { setPage(1); invalidate() }}
         />
       )}
     </div>

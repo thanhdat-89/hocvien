@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react'
+import React from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   PieChart, Pie, Cell, Legend,
@@ -71,35 +72,33 @@ function formatFullVND(n: number) {
 
 export default function Dashboard() {
   const navigate = useNavigate()
-  const [data, setData] = useState<DashboardData | null>(null)
-  const [revenue, setRevenue] = useState<RevenueMonth[]>([])
-  const [grades, setGrades] = useState<GradeData[]>([])
-  const [privateSessions, setPrivateSessions] = useState<PrivateSession[]>([])
-  const [loading, setLoading] = useState(true)
-
   const today = new Date()
   const todayStr = today.toISOString().slice(0, 10)
 
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true)
-      try {
-        const [dashRes, revRes, gradeRes, privateRes] = await Promise.all([
-          api.get('/dashboard').catch(() => null),
-          api.get('/dashboard/revenue').catch(() => null),
-          api.get('/dashboard/students-by-grade').catch(() => null),
-          api.get(`/students/private-sessions/all?fromDate=${todayStr}&toDate=${todayStr}`).catch(() => null),
-        ])
-        if (dashRes) setData(dashRes.data)
-        if (revRes) setRevenue(revRes.data)
-        if (gradeRes) setGrades(gradeRes.data)
-        if (privateRes) setPrivateSessions(privateRes.data)
-      } finally {
-        setLoading(false)
-      }
-    }
-    load()
-  }, [])
+  const dashQuery = useQuery<DashboardData>({
+    queryKey: ['dashboard'],
+    queryFn: () => api.get('/dashboard').then(r => r.data),
+  })
+  const revenueQuery = useQuery<RevenueMonth[]>({
+    queryKey: ['dashboard', 'revenue'],
+    queryFn: () => api.get('/dashboard/revenue').then(r => r.data),
+    staleTime: 5 * 60_000, // revenue ít thay đổi, cache 5 phút
+  })
+  const gradeQuery = useQuery<GradeData[]>({
+    queryKey: ['dashboard', 'students-by-grade'],
+    queryFn: () => api.get('/dashboard/students-by-grade').then(r => r.data),
+    staleTime: 5 * 60_000,
+  })
+  const privateQuery = useQuery<PrivateSession[]>({
+    queryKey: ['private-sessions', todayStr],
+    queryFn: () => api.get(`/students/private-sessions/all?fromDate=${todayStr}&toDate=${todayStr}`).then(r => r.data),
+  })
+
+  const data = dashQuery.data ?? null
+  const revenue = revenueQuery.data ?? []
+  const grades = gradeQuery.data ?? []
+  const privateSessions = privateQuery.data ?? []
+  const loading = dashQuery.isLoading
 
   const stats = data?.stats
   const sessionsToday = data?.sessionsToday ?? []

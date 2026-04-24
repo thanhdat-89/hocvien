@@ -28,18 +28,9 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
     if (teacherId) classes = classes.filter(c => c.teacherId === teacherId)
     if (subjectId) classes = classes.filter(c => c.subjectId === subjectId)
 
-    // Batch 1 query lấy tất cả enrollments active, đếm theo classId
-    const allEnrollSnap = await db.collection(C.ENROLLMENTS)
-      .where('status', '==', 'ACTIVE')
-      .get()
-    const countByClass = new Map<string, number>()
-    for (const doc of allEnrollSnap.docs) {
-      const cid = doc.data().classId as string
-      countByClass.set(cid, (countByClass.get(cid) ?? 0) + 1)
-    }
-
+    // activeStudentCount đã được denorm lên class doc — không cần query ENROLLMENTS
     const result = classes
-      .map(c => ({ ...c, activeStudentCount: countByClass.get(c.id) ?? 0 }))
+      .map(c => ({ ...c, activeStudentCount: c.activeStudentCount ?? 0 }))
       .sort((a, b) => a.name.localeCompare(b.name))
     res.json(paginate(result, Number(page), Number(limit)))
   } catch (err) {

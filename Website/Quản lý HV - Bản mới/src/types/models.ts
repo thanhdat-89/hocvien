@@ -60,6 +60,10 @@ export interface Student {
   status: StudentStatus
   avatarUrl?: string
   notes?: string
+  // Denorm từ subcollection parents (primary contact) — dùng cho list view
+  primaryParentName?: string | null
+  primaryParentPhone?: string | null
+  primaryParentZalo?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -102,6 +106,8 @@ export interface Class {
   endDate?: string
   status: ClassStatus
   notes?: string
+  // Denorm: số HV đang ACTIVE trong lớp — cập nhật qua recountClassActiveStudents
+  activeStudentCount?: number
   createdAt: string
   updatedAt: string
 }

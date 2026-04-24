@@ -1,5 +1,7 @@
 import { Router, Response, NextFunction } from 'express'
 import { db, C, s, toObj, toDocs, paginate } from '../lib/firebase'
+import { syncPrimaryParentToStudent } from '../lib/studentSync'
+import { recountClassActiveStudents } from '../lib/classSync'
 import { authenticate } from '../middleware/auth'
 import { AuthRequest } from '../types'
 import type { Student, ClassEnrollment, StudentAttendance, PrivateSession } from '../types/models'
@@ -52,19 +54,18 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
       enrollByStudent.set(e.studentId, arr)
     }
 
-    // Chỉ query parents cho students trong trang hiện tại
-    const result = await Promise.all(
-      pageStudents.map(async s => {
-        const parentsSnap = await db.collection(C.STUDENTS).doc(s.id)
-          .collection('parents')
-          .where('isPrimaryContact', '==', true)
-          .limit(1)
-          .get()
-        const primaryParent = parentsSnap.empty ? null : { id: parentsSnap.docs[0].id, ...parentsSnap.docs[0].data() }
-        const enrollments = enrollByStudent.get(s.id) ?? []
-        return { ...s, primaryParent, enrollments }
-      })
-    )
+    // Đọc primaryParent từ denorm fields trên doc cha (không còn subcollection query)
+    const result = pageStudents.map(stu => {
+      const primaryParent = stu.primaryParentName
+        ? {
+            fullName: stu.primaryParentName,
+            phone: stu.primaryParentPhone ?? null,
+            zalo: stu.primaryParentZalo ?? null,
+          }
+        : null
+      const enrollments = enrollByStudent.get(stu.id) ?? []
+      return { ...stu, primaryParent, enrollments }
+    })
 
     res.json({ data: result, total, page: pageNum, limit: limitNum, totalPages: Math.ceil(total / limitNum), totalAll, totalActive })
   } catch (err) {
@@ -134,9 +135,10 @@ router.post('/bulk', async (req: AuthRequest, res: Response, next: NextFunction)
             fullName: s.parentName.trim(),
             phone: s.parentPhone?.trim() || null,
             relationship: 'PHỤ HUYNH',
-            isPrimary: true,
+            isPrimaryContact: true,
             createdAt: now(),
           })
+          await syncPrimaryParentToStudent(studentId)
         }
 
         if (s.className?.trim()) {
@@ -151,6 +153,7 @@ router.post('/bulk', async (req: AuthRequest, res: Response, next: NextFunction)
               status: 'ACTIVE',
               createdAt: now(),
             })
+            await recountClassActiveStudents(cls.id)
           } else {
             // Ghi chú lỗi phụ nhưng không fail học viên
             failed.push({ row: i + 1, name: s.fullName, error: `Không tìm thấy lớp "${s.className}" — học viên đã được tạo nhưng chưa đăng ký lớp` })
@@ -250,6 +253,7 @@ router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => 
         batch.set(pRef, { ...p, studentId, createdAt: now() })
       }
       await batch.commit()
+      await syncPrimaryParentToStudent(studentId)
     }
 
     const created = toObj<Student>(await ref.get())
@@ -294,6 +298,7 @@ router.put('/:id', async (req: AuthRequest, res: Response, next: NextFunction) =
           createdAt: now(),
         })
       }
+      await syncPrimaryParentToStudent(studentId)
     }
 
     const updated = toObj<Student>(await db.collection(C.STUDENTS).doc(studentId).get())
@@ -306,7 +311,11 @@ router.put('/:id', async (req: AuthRequest, res: Response, next: NextFunction) =
 // POST /api/students/:id/enroll/:enrollmentId/remove — xoá enrollment
 router.post('/:id/enroll/:enrollmentId/remove', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    await db.collection(C.ENROLLMENTS).doc(s(req.params.enrollmentId)).delete()
+    const enrollRef = db.collection(C.ENROLLMENTS).doc(s(req.params.enrollmentId))
+    const enrollDoc = await enrollRef.get()
+    const classId = enrollDoc.exists ? (enrollDoc.data()!.classId as string) : null
+    await enrollRef.delete()
+    if (classId) await recountClassActiveStudents(classId)
     res.json({ message: 'Đã xoá đăng ký lớp học' })
   } catch (err) {
     next(err)
@@ -352,6 +361,7 @@ router.post('/:id/enroll', async (req: AuthRequest, res: Response, next: NextFun
     if (notes) enrollment.notes = notes
 
     const ref = await db.collection(C.ENROLLMENTS).add(enrollment)
+    await recountClassActiveStudents(classId)
     res.status(201).json({ id: ref.id, ...enrollment })
   } catch (err) {
     next(err)
@@ -362,10 +372,14 @@ router.post('/:id/enroll', async (req: AuthRequest, res: Response, next: NextFun
 router.put('/:id/enroll/:enrollmentId/drop', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { dropDate } = req.body
-    await db.collection(C.ENROLLMENTS).doc(s(req.params.enrollmentId)).update({
+    const enrollRef = db.collection(C.ENROLLMENTS).doc(s(req.params.enrollmentId))
+    const enrollDoc = await enrollRef.get()
+    const classId = enrollDoc.exists ? (enrollDoc.data()!.classId as string) : null
+    await enrollRef.update({
       status: 'DROPPED',
       dropDate: dropDate || now().slice(0, 10),
     })
+    if (classId) await recountClassActiveStudents(classId)
     res.json({ message: 'Đã nghỉ lớp' })
   } catch (err) {
     next(err)

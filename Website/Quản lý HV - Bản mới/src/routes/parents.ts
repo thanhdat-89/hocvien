@@ -1,5 +1,6 @@
 import { Router, Response, NextFunction } from 'express'
 import { db, C, s } from '../lib/firebase'
+import { syncPrimaryParentToStudent } from '../lib/studentSync'
 import { authenticate } from '../middleware/auth'
 import { AuthRequest } from '../types'
 
@@ -24,6 +25,7 @@ router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => 
 
     const ref = db.collection(C.STUDENTS).doc(studentId).collection('parents').doc()
     await ref.set({ studentId, fullName, relationship, phone, zalo, email, isPrimaryContact: !!isPrimaryContact, createdAt: now() })
+    await syncPrimaryParentToStudent(studentId)
     res.status(201).json({ id: ref.id, studentId, fullName, relationship, phone, zalo, email, isPrimaryContact: !!isPrimaryContact })
   } catch (err) {
     next(err)
@@ -54,6 +56,7 @@ router.put('/:studentId/:parentId', async (req: AuthRequest, res: Response, next
     if (isPrimaryContact !== undefined) updates.isPrimaryContact = isPrimaryContact
 
     await db.collection(C.STUDENTS).doc(studentId).collection('parents').doc(parentId).update(updates)
+    await syncPrimaryParentToStudent(studentId)
     res.json({ message: 'Đã cập nhật thông tin phụ huynh' })
   } catch (err) {
     next(err)
@@ -63,8 +66,10 @@ router.put('/:studentId/:parentId', async (req: AuthRequest, res: Response, next
 // DELETE /api/parents/:studentId/:parentId
 router.delete('/:studentId/:parentId', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    await db.collection(C.STUDENTS).doc(s(req.params.studentId))
+    const studentId = s(req.params.studentId)
+    await db.collection(C.STUDENTS).doc(studentId)
       .collection('parents').doc(s(req.params.parentId)).delete()
+    await syncPrimaryParentToStudent(studentId)
     res.json({ message: 'Đã xoá phụ huynh' })
   } catch (err) {
     next(err)
