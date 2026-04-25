@@ -511,7 +511,11 @@ export default function Students() {
                             </span>
                           ))}
                         </div>
-                      ) : <span className="text-outline text-sm">—</span>}
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-tertiary/10 text-tertiary text-xs font-medium">
+                          Học riêng
+                        </span>
+                      )}
                     </td>
                     <td className="table-cell">
                       {student.promotions && student.promotions.length > 0 ? (
