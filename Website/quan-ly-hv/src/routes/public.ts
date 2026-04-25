@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { db, C, s, toDocs, toObj } from '../lib/firebase'
+import { computeTuitionSummary, loadStudentPromotions } from '../lib/tuition'
 import type { Student, ClassEnrollment, Class, Schedule, TuitionRecord, Payment } from '../types/models'
 
 const router = Router()
@@ -221,10 +222,17 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
       }
     })
 
+    const [tuitionSummary, promotions] = await Promise.all([
+      computeTuitionSummary(studentId),
+      loadStudentPromotions(studentId),
+    ])
+
     res.json({
       student: publicStudent,
       classes,
       tuition,
+      tuitionSummary,
+      promotions,
       reviews,
     })
   } catch (err) { next(err) }
