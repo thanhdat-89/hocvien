@@ -1,6 +1,6 @@
 {
   "rewrites": [
-    { "source": "/api/:path*", "destination": "https://api.hocvien.cqt.vn/api/:path*" },
+    { "source": "/api/:path*", "destination": "https://api.qlhv.cqt.vn/api/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
