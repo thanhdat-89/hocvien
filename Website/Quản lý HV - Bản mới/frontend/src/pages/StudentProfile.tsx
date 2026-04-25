@@ -1109,7 +1109,8 @@ const DAY_NAMES: Record<string, string> = {
   '1': 'Thứ 2', '2': 'Thứ 3', '3': 'Thứ 4', '4': 'Thứ 5',
   '5': 'Thứ 6', '6': 'Thứ 7', '0': 'Chủ nhật',
 }
-const WEEKDAY_LABELS = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7']
+const WEEKDAY_LABELS = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'] // index theo JS getDay() (0=CN)
+const WEEKDAY_LABELS_MON_FIRST = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'] // hiển thị tuần bắt đầu T2
 
 function dayOfWeek(dateStr: string) {
   const d = new Date(dateStr + 'T00:00:00')
@@ -1190,9 +1191,10 @@ export function PrivateScheduleModal({ studentId, studentName, onClose, onSaved 
   const prevMonth = () => { if (calMonth === 0) { setCalYear(y => y - 1); setCalMonth(11) } else setCalMonth(m => m - 1) }
   const nextMonth = () => { if (calMonth === 11) { setCalYear(y => y + 1); setCalMonth(0) } else setCalMonth(m => m + 1) }
 
-  // Build calendar grid
+  // Build calendar grid (tuần bắt đầu T2, kết thúc CN)
   const calDays = React.useMemo(() => {
-    const first = new Date(calYear, calMonth, 1).getDay()
+    // Map JS getDay() (0=CN..6=T7) → Monday-first index (0=T2..6=CN)
+    const first = (new Date(calYear, calMonth, 1).getDay() + 6) % 7
     const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate()
     const cells: (number | null)[] = Array(first).fill(null)
     for (let d = 1; d <= daysInMonth; d++) cells.push(d)
@@ -1260,7 +1262,7 @@ export function PrivateScheduleModal({ studentId, studentName, onClose, onSaved 
                   <button type="button" onClick={nextMonth} className="p-1 hover:bg-surface-container rounded-lg"><span className="material-symbols-outlined text-sm">chevron_right</span></button>
                 </div>
                 <div className="grid grid-cols-7 gap-1 mb-1">
-                  {WEEKDAY_LABELS.map(d => <div key={d} className="text-center text-[10px] font-bold text-outline py-1">{d}</div>)}
+                  {WEEKDAY_LABELS_MON_FIRST.map(d => <div key={d} className="text-center text-[10px] font-bold text-outline py-1">{d}</div>)}
                 </div>
                 <div className="grid grid-cols-7 gap-1">
                   {calDays.map((day, i) => {
