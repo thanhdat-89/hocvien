@@ -478,7 +478,7 @@ function EditClassModal({ cls, onClose, onSaved }: { cls: Class; onClose: () => 
     tuitionRate: String(cls.tuitionRate ?? ''),
     startDate: cls.startDate ?? todayLocal,
     endDate: cls.endDate ?? '',
-    effectiveDate: todayLocal,
+    effectiveDate: cls.startDate ?? todayLocal,
   })
   const [daySchedules, setDaySchedules] = useState<Record<string, DaySchedule>>({})
   const [saving, setSaving] = useState(false)
