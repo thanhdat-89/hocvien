@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import TopBar from '../components/TopBar'
+import { useConfirm, useAlert } from '../components/ConfirmDialog'
 import api from '../services/api'
 import { Student, ClassEnrollment, TuitionRecord, Parent, Class, StudentPromotion, PrivateSession } from '../types'
 
@@ -434,6 +435,7 @@ function InfoTab({
   onEdit: () => void
   onStatusChange: (status: 'ACTIVE' | 'INACTIVE' | 'RESERVED') => void
 }) {
+  const showAlert = useAlert()
   const [parentModal, setParentModal] = useState<{ open: boolean; parent: (Parent & { id: string }) | null }>({ open: false, parent: null })
   const [enrollModal, setEnrollModal] = useState(false)
   const [confirm, setConfirm] = useState<{ message: string; onConfirm: () => void } | null>(null)
@@ -450,7 +452,7 @@ function InfoTab({
           onRefresh()
         } catch (err: any) {
           console.error('[deleteEnrollment] error:', err.response?.status, err.response?.data)
-          alert('Lỗi: ' + (err.response?.data?.message ?? err.message ?? 'Không thể xoá') + '\nURL: /students/' + student.id + '/enroll/' + e.id)
+          void showAlert('Lỗi: ' + (err.response?.data?.message ?? err.message ?? 'Không thể xoá') + '\nURL: /students/' + student.id + '/enroll/' + e.id)
         }
       },
     })
@@ -920,6 +922,7 @@ function PromoModal({ studentId, enrollments, hasPrivate, onClose, onSaved }: Pr
 }
 
 function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments: ClassEnrollment[] }) {
+  const confirm = useConfirm()
   const now = new Date()
   const [rows, setRows] = useState<TuitionRow[]>([])
   const [promos, setPromos] = useState<StudentPromotion[]>([])
@@ -942,7 +945,13 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
   useEffect(() => { load() }, [studentId])
 
   const deletePromo = async (id: string) => {
-    if (!confirm('Xoá khuyến mại này?')) return
+    const ok = await confirm({
+      title: 'Xoá khuyến mại',
+      message: 'Bạn có chắc muốn xoá khuyến mại này?',
+      confirmLabel: 'Xoá',
+      danger: true,
+    })
+    if (!ok) return
     await api.delete(`/tuition/student-promotions/${id}`)
     load()
   }
@@ -1375,6 +1384,7 @@ export function PrivateScheduleModal({ studentId, studentName, onClose, onSaved 
 
 // ─── Private Tab ───────────────────────────────────────────────────
 function PrivateTab({ studentId, studentName }: { studentId: string; studentName: string }) {
+  const confirm = useConfirm()
   const today = new Date()
   const [month, setMonth] = React.useState(today.getMonth() + 1)
   const [year, setYear] = React.useState(today.getFullYear())
@@ -1393,7 +1403,13 @@ function PrivateTab({ studentId, studentName }: { studentId: string; studentName
   React.useEffect(() => { load() }, [studentId, month, year])
 
   const deleteSession = async (id: string) => {
-    if (!confirm('Xoá buổi học này?')) return
+    const ok = await confirm({
+      title: 'Xoá buổi học riêng',
+      message: 'Bạn có chắc muốn xoá buổi học này?',
+      confirmLabel: 'Xoá',
+      danger: true,
+    })
+    if (!ok) return
     await api.delete(`/students/${studentId}/private-schedule/${id}`)
     load()
   }
@@ -1731,6 +1747,7 @@ function MoreMenu({ student, onUpdated }: { student: Student & { id: string }; o
 export default function StudentProfile() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const confirm = useConfirm()
   const [student, setStudent] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'info' | 'schedule' | 'private' | 'tuition'>('info')
@@ -1858,7 +1875,13 @@ export default function StudentProfile() {
             onEdit={() => setEditModal(true)}
             onStatusChange={async (status) => {
               const labels = { ACTIVE: 'Đang học', INACTIVE: 'Đã nghỉ', RESERVED: 'Bảo lưu' }
-              if (!window.confirm(`Chuyển trạng thái sang "${labels[status]}"?`)) return
+              const ok = await confirm({
+                title: 'Đổi trạng thái học viên',
+                message: `Chuyển trạng thái học viên sang "${labels[status]}"?`,
+                confirmLabel: 'Xác nhận',
+                danger: status === 'INACTIVE',
+              })
+              if (!ok) return
               await api.put(`/students/${student.id}`, { status })
               setStudent((prev: any) => ({ ...prev, status }))
             }}

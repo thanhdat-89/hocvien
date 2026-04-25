@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import TopBar from '../components/TopBar'
+import { useConfirm } from '../components/ConfirmDialog'
 import api from '../services/api'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -58,6 +59,7 @@ function SessionDetailModal({ session, onClose, onDeleted, onUpdated }: {
   onDeleted: () => void
   onUpdated: (patch: Partial<PrivateSession>) => void
 }) {
+  const confirm = useConfirm()
   const [teachers, setTeachers] = useState<{ id: string; fullName: string }[]>([])
   const [teacherName, setTeacherName] = useState(session.teacherName ?? '')
   const [startTime, setStartTime] = useState(session.startTime ?? '')
@@ -97,7 +99,13 @@ function SessionDetailModal({ session, onClose, onDeleted, onUpdated }: {
   }
 
   const handleDelete = async () => {
-    if (!confirm('Xoá buổi học riêng này?')) return
+    const ok = await confirm({
+      title: 'Xoá buổi học riêng',
+      message: 'Bạn có chắc muốn xoá buổi học riêng này?',
+      confirmLabel: 'Xoá',
+      danger: true,
+    })
+    if (!ok) return
     setDeleting(true)
     try {
       await api.delete(`/students/${session.studentId}/private-schedule/${session.id}`)

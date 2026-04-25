@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import TopBar from '../components/TopBar'
 import Toast, { ToastMessage } from '../components/Toast'
+import { useConfirm, useAlert } from '../components/ConfirmDialog'
 import api from '../services/api'
 import { Session, Class } from '../types'
 
@@ -783,16 +784,23 @@ function DeleteClassModal({ cls, onClose, onDone }: {
 // ─── Auto-init attendance button ─────────────────────────────────────────────
 
 function AutoInitAttendanceBtn() {
+  const confirm = useConfirm()
+  const alert = useAlert()
   const [loading, setLoading] = useState(false)
 
   const run = async () => {
-    if (!window.confirm('Tự động khởi tạo điểm danh (mặc định Có mặt) cho tất cả buổi học đã qua chưa điểm danh?')) return
+    const ok = await confirm({
+      title: 'Khởi tạo điểm danh tự động',
+      message: 'Tự động khởi tạo điểm danh (mặc định Có mặt) cho tất cả buổi học đã qua chưa điểm danh?',
+      confirmLabel: 'Khởi tạo',
+    })
+    if (!ok) return
     setLoading(true)
     try {
       const res = await api.post('/sessions/auto-init-attendance')
-      alert(res.data.message)
+      await alert(res.data.message)
     } catch {
-      alert('Có lỗi xảy ra')
+      await alert('Có lỗi xảy ra')
     } finally {
       setLoading(false)
     }

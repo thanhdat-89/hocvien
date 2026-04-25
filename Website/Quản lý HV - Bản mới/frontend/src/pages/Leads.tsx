@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import api from '../services/api'
 import Toast, { ToastMessage } from '../components/Toast'
+import { useConfirm } from '../components/ConfirmDialog'
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -49,6 +50,7 @@ const NEXT_ACTIONS: Partial<Record<LeadStatus, LeadStatus>> = {
 // ─── Component ────────────────────────────────────────────────
 
 export default function Leads() {
+  const confirm = useConfirm()
   const [toasts, setToasts] = useState<ToastMessage[]>([])
   const [leads, setLeads] = useState<Lead[]>([])
   const [stats, setStats] = useState<Stats | null>(null)
@@ -105,7 +107,13 @@ export default function Leads() {
   }
 
   const deleteLead = async (id: string) => {
-    if (!confirm('Xoá lead này?')) return
+    const ok = await confirm({
+      title: 'Xoá lead',
+      message: 'Bạn có chắc muốn xoá lead này?',
+      confirmLabel: 'Xoá',
+      danger: true,
+    })
+    if (!ok) return
     try {
       await api.delete(`/leads/${id}`)
       addToast('Đã xoá', 'success')

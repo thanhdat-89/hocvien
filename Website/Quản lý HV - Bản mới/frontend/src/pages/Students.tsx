@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import TopBar from '../components/TopBar'
+import { useConfirm, useAlert } from '../components/ConfirmDialog'
 import api from '../services/api'
 import { Student } from '../types'
 import StudentModal from './StudentModal'
@@ -138,6 +139,7 @@ function downloadTemplate() {
 }
 
 function ImportExcelModal({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
+  const alert = useAlert()
   const fileRef = useRef<HTMLInputElement>(null)
   const [rows, setRows] = useState<ImportRow[]>([])
   const [fileName, setFileName] = useState('')
@@ -152,7 +154,7 @@ function ImportExcelModal({ onClose, onImported }: { onClose: () => void; onImpo
       setFileName(file.name)
       setResult(null)
     } catch {
-      alert('Không đọc được file. Vui lòng dùng file .xlsx hoặc .xls')
+      void alert('Không đọc được file. Vui lòng dùng file .xlsx hoặc .xls')
     }
   }
 
@@ -170,7 +172,7 @@ function ImportExcelModal({ onClose, onImported }: { onClose: () => void; onImpo
       setResult({ created: res.data.created, failed: res.data.failed ?? [] })
       if (res.data.created > 0) onImported()
     } catch (err: any) {
-      alert(err.response?.data?.message ?? 'Có lỗi xảy ra')
+      void alert(err.response?.data?.message ?? 'Có lỗi xảy ra')
     } finally {
       setImporting(false)
     }
@@ -336,6 +338,7 @@ function ImportExcelModal({ onClose, onImported }: { onClose: () => void; onImpo
 export default function Students() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const confirm = useConfirm()
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [gradeLevel, setGradeLevel] = useState('')
@@ -391,7 +394,13 @@ export default function Students() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Chuyển học viên sang trạng thái nghỉ học?')) return
+    const ok = await confirm({
+      title: 'Chuyển học viên sang nghỉ học',
+      message: 'Bạn có chắc muốn chuyển học viên này sang trạng thái nghỉ học?',
+      confirmLabel: 'Xác nhận nghỉ học',
+      danger: true,
+    })
+    if (!ok) return
     await api.delete(`/students/${id}`)
     invalidate()
   }

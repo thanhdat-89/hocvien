@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import TopBar from '../components/TopBar'
+import { useConfirm } from '../components/ConfirmDialog'
 import api from '../services/api'
 import { Session } from '../types'
 
@@ -12,6 +13,7 @@ interface SalarySummary {
 }
 
 export default function Attendance() {
+  const confirm = useConfirm()
   const [tab, setTab] = useState<'sessions' | 'salary'>('salary')
   const [salary, setSalary] = useState<SalarySummary[]>([])
   const [sessions, setSessions] = useState<Session[]>([])
@@ -46,7 +48,12 @@ export default function Attendance() {
   }
 
   const handleCompleteSession = async (session: Session) => {
-    if (!confirm(`Hoàn thành buổi học "${session.className}" ngày ${session.sessionDate}?`)) return
+    const ok = await confirm({
+      title: 'Hoàn thành buổi học',
+      message: `Đánh dấu hoàn thành buổi "${session.className}" ngày ${session.sessionDate}?`,
+      confirmLabel: 'Hoàn thành',
+    })
+    if (!ok) return
     await api.put(`/sessions/${session.id}/complete`, {})
     load()
   }
