@@ -1925,12 +1925,20 @@ function MoreMenu({ student, onUpdated }: { student: Student & { id: string }; o
 
 // ─── Share Link Box ──────────────────────────────────────────────────────────
 
-const PARENT_PORTAL_BASE = 'https://hocthemtoan.vn/hoc-vien'
+const IS_LOCAL =
+  typeof location !== 'undefined' &&
+  (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+
+function buildParentUrl(studentId: string) {
+  return IS_LOCAL
+    ? `http://localhost:5174/hoc-vien/index.html?id=${encodeURIComponent(studentId)}`
+    : `https://hocthemtoan.vn/hoc-vien/${encodeURIComponent(studentId)}`
+}
 
 function ShareLinkBox({ studentId }: { studentId: string }) {
   const showAlert = useAlert()
   const [copied, setCopied] = useState(false)
-  const url = `${PARENT_PORTAL_BASE}/${studentId}`
+  const url = buildParentUrl(studentId)
 
   const copy = async () => {
     try {
