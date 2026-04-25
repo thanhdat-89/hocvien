@@ -393,15 +393,26 @@ export default function Students() {
     setPage(p)
   }
 
-  const handleDelete = async (id: string) => {
-    const ok = await confirm({
-      title: 'Chuyển học viên sang nghỉ học',
-      message: 'Bạn có chắc muốn chuyển học viên này sang trạng thái nghỉ học?',
-      confirmLabel: 'Xác nhận nghỉ học',
-      danger: true,
-    })
-    if (!ok) return
-    await api.delete(`/students/${id}`)
+  const handleDelete = async (student: Student) => {
+    if (student.status === 'INACTIVE') {
+      const ok = await confirm({
+        title: 'Xoá hoàn toàn học viên',
+        message: `Bạn có chắc muốn xoá HOÀN TOÀN dữ liệu của "${student.fullName}"?\n\nThao tác này sẽ xoá:\n• Hồ sơ học viên + thông tin phụ huynh\n• Toàn bộ ghi danh, lịch học riêng, điểm danh\n• Phiếu học phí, thanh toán, khuyến mại\n\nKhông thể hoàn tác.`,
+        confirmLabel: 'Xoá vĩnh viễn',
+        danger: true,
+      })
+      if (!ok) return
+      await api.delete(`/students/${student.id}/hard`)
+    } else {
+      const ok = await confirm({
+        title: 'Chuyển học viên sang nghỉ học',
+        message: `Chuyển "${student.fullName}" sang trạng thái nghỉ học?`,
+        confirmLabel: 'Xác nhận nghỉ học',
+        danger: true,
+      })
+      if (!ok) return
+      await api.delete(`/students/${student.id}`)
+    }
     invalidate()
   }
 
@@ -568,7 +579,7 @@ export default function Students() {
                           <span className="material-symbols-outlined text-[20px]">edit_square</span>
                         </button>
                         <button
-                          onClick={() => handleDelete(student.id)}
+                          onClick={() => handleDelete(student)}
                           className="p-2 text-outline hover:text-error hover:bg-error-container/10 rounded-lg transition-all"
                           title="Xóa"
                         >

@@ -346,6 +346,53 @@ router.delete('/:id', async (req: AuthRequest, res: Response, next: NextFunction
   }
 })
 
+// DELETE /api/students/:id/hard — xoá hoàn toàn HV và toàn bộ dữ liệu liên quan
+router.delete('/:id/hard', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const studentId = s(req.params.id)
+    const studentRef = db.collection(C.STUDENTS).doc(studentId)
+
+    // Lấy danh sách các collection liên quan
+    const [parentsSnap, enrollSnap, privateSnap, attendSnap, tuitionSnap, paymentSnap, promoSnap] = await Promise.all([
+      studentRef.collection('parents').get(),
+      db.collection(C.ENROLLMENTS).where('studentId', '==', studentId).get(),
+      db.collection(C.PRIVATE_SCHEDULES).where('studentId', '==', studentId).get(),
+      db.collection(C.STUDENT_ATTENDANCES).where('studentId', '==', studentId).get(),
+      db.collection(C.TUITION_RECORDS).where('studentId', '==', studentId).get(),
+      db.collection(C.PAYMENTS).where('studentId', '==', studentId).get(),
+      db.collection(C.STUDENT_PROMOTIONS).where('studentId', '==', studentId).get(),
+    ])
+
+    // Lưu lại classIds đang ACTIVE để recount sau khi xoá
+    const affectedClassIds = new Set<string>()
+    for (const doc of enrollSnap.docs) {
+      if (doc.data().status === 'ACTIVE') affectedClassIds.add(doc.data().classId as string)
+    }
+
+    // Xoá song song
+    await Promise.all([
+      ...parentsSnap.docs.map(d => d.ref.delete()),
+      ...enrollSnap.docs.map(d => d.ref.delete()),
+      ...privateSnap.docs.map(d => d.ref.delete()),
+      ...attendSnap.docs.map(d => d.ref.delete()),
+      ...tuitionSnap.docs.map(d => d.ref.delete()),
+      ...paymentSnap.docs.map(d => d.ref.delete()),
+      ...promoSnap.docs.map(d => d.ref.delete()),
+    ])
+
+    // Xoá doc HV
+    await studentRef.delete()
+
+    // Recount activeStudentCount cho các lớp bị ảnh hưởng
+    const { recountClassActiveStudents } = await import('../lib/classSync')
+    await Promise.all(Array.from(affectedClassIds).map(cid => recountClassActiveStudents(cid)))
+
+    res.json({ message: 'Đã xoá hoàn toàn dữ liệu học viên' })
+  } catch (err) {
+    next(err)
+  }
+})
+
 // POST /api/students/:id/enroll — Đăng ký lớp
 router.post('/:id/enroll', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
