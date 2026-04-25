@@ -1137,8 +1137,14 @@ export function PrivateScheduleModal({ studentId, studentName, onClose, onSaved 
   React.useEffect(() => {
     api.get(`/students/${studentId}/private-schedule`)
       .then(r => {
-        const dates = new Set<string>((r.data ?? []).map((s: any) => s.sessionDate as string))
+        const list: any[] = r.data ?? []
+        const dates = new Set<string>(list.map((s: any) => s.sessionDate as string))
         setExistingDates(dates)
+        // Gợi ý học phí từ buổi học riêng gần nhất (nếu có)
+        const latest = [...list]
+          .filter(s => s.ratePerSession)
+          .sort((a, b) => (b.sessionDate ?? '').localeCompare(a.sessionDate ?? ''))[0]
+        if (latest?.ratePerSession) setRate(String(latest.ratePerSession))
       })
       .catch(() => {})
   }, [studentId])
