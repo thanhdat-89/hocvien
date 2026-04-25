@@ -20,6 +20,7 @@ export interface Student {
   updatedAt: string
   primaryParent?: Parent | null
   enrollments?: ClassEnrollment[]
+  promotions?: StudentPromotion[]
 }
 
 export interface Parent {

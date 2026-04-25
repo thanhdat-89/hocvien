@@ -478,7 +478,7 @@ export default function Students() {
                   <th className="table-header">Học viên</th>
                   <th className="table-header">Khối lớp</th>
                   <th className="table-header">Lớp học</th>
-                  <th className="table-header">Số điện thoại</th>
+                  <th className="table-header">Khuyến mại</th>
                   <th className="table-header">Trạng thái</th>
                   <th className="table-header text-right">Thao tác</th>
                 </tr>
@@ -514,7 +514,19 @@ export default function Students() {
                       ) : <span className="text-outline text-sm">—</span>}
                     </td>
                     <td className="table-cell">
-                      <p className="text-sm text-on-surface-variant">{student.primaryParent?.phone ?? '—'}</p>
+                      {student.promotions && student.promotions.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {student.promotions.map((p, i) => (
+                            <span key={i} className="inline-flex items-center px-2 py-0.5 rounded-md bg-tertiary/10 text-tertiary text-xs font-bold">
+                              {p.promotionType === 'PERCENTAGE'
+                                ? `${p.promotionValue}%`
+                                : p.promotionType === 'FIXED_AMOUNT'
+                                ? `${(p.promotionValue / 1000).toFixed(0)}K`
+                                : `${p.promotionValue} buổi`}
+                            </span>
+                          ))}
+                        </div>
+                      ) : <span className="text-outline text-sm">—</span>}
                     </td>
                     <td className="table-cell">
                       <StatusBadge status={student.status} />

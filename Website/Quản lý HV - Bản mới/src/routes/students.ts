@@ -42,16 +42,29 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
     const limitNum = Number(limit)
     const pageStudents = students.slice((pageNum - 1) * limitNum, pageNum * limitNum)
 
-    // Batch lấy tất cả enrollments active 1 lần thay vì N+1
-    const allEnrollSnap = await db.collection(C.ENROLLMENTS)
-      .where('status', '==', 'ACTIVE')
-      .get()
+    // Batch lấy tất cả enrollments active + promotions 1 lần thay vì N+1
+    const today = new Date().toISOString().slice(0, 10)
+    const [allEnrollSnap, allPromoSnap] = await Promise.all([
+      db.collection(C.ENROLLMENTS).where('status', '==', 'ACTIVE').get(),
+      db.collection(C.STUDENT_PROMOTIONS).get(),
+    ])
     const allEnrollments = toDocs<ClassEnrollment>(allEnrollSnap)
     const enrollByStudent = new Map<string, ClassEnrollment[]>()
     for (const e of allEnrollments) {
       const arr = enrollByStudent.get(e.studentId) ?? []
       arr.push(e)
       enrollByStudent.set(e.studentId, arr)
+    }
+    const promoByStudent = new Map<string, any[]>()
+    for (const doc of allPromoSnap.docs) {
+      const p = doc.data()
+      // Chỉ lấy promotions còn hiệu lực
+      if (p.appliedFrom && p.appliedFrom > today) continue
+      if (p.appliedTo && p.appliedTo < today) continue
+      const sid = p.studentId as string
+      const arr = promoByStudent.get(sid) ?? []
+      arr.push({ id: doc.id, ...p })
+      promoByStudent.set(sid, arr)
     }
 
     // Đọc primaryParent từ denorm fields trên doc cha (không còn subcollection query)
@@ -64,7 +77,8 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
           }
         : null
       const enrollments = enrollByStudent.get(stu.id) ?? []
-      return { ...stu, primaryParent, enrollments }
+      const promotions = promoByStudent.get(stu.id) ?? []
+      return { ...stu, primaryParent, enrollments, promotions }
     })
 
     res.json({ data: result, total, page: pageNum, limit: limitNum, totalPages: Math.ceil(total / limitNum), totalAll, totalActive })
