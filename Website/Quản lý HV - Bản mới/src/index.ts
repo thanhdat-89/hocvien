@@ -17,6 +17,8 @@ import teacherRoutes from './routes/teachers'
 import dashboardRoutes from './routes/dashboard'
 import { notificationRouter, webhookRouter } from './routes/notifications'
 import leadRoutes from './routes/leads'
+import reviewRoutes from './routes/reviews'
+import publicRoutes from './routes/public'
 
 import { errorHandler, notFound } from './middleware/errorHandler'
 
@@ -60,6 +62,8 @@ app.use('/api/teachers',       teacherRoutes)
 app.use('/api/notifications',  notificationRouter)
 app.use('/api/leads',          leadRoutes)
 app.use('/api/zalo',           webhookRouter)
+app.use('/api/reviews',        reviewRoutes)
+app.use('/api/public',         publicRoutes)
 
 // ─── Error handlers ───────────────────────────────────────────
 app.use(notFound)
