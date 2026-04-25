@@ -23,6 +23,7 @@ export default function Tuition() {
   const [rows, setRows] = useState<ScheduleRow[]>([])
   const [loading, setLoading] = useState(false)
   const [classFilter, setClassFilter] = useState<string | null>(null)
+  const [gradeFilter, setGradeFilter] = useState<number | null>(null)
 
   const loadData = () => {
     setLoading(true)
@@ -34,17 +35,35 @@ export default function Tuition() {
 
   useEffect(() => { loadData() }, [month, year])
 
-  // Danh sách lớp học có trong dữ liệu, sắp xếp theo tên
-  const classes = Array.from(new Set(rows.map(r => r.className).filter(Boolean)))
-    .sort((a, b) => {
-      const na = Number(a.match(/\d+/)?.[0] ?? 999)
-      const nb = Number(b.match(/\d+/)?.[0] ?? 999)
-      return na - nb || a.localeCompare(b)
-    })
+  // Bỏ classFilter nếu lớp không thuộc khối đang chọn
+  useEffect(() => {
+    if (gradeFilter != null && classFilter) {
+      const stillValid = rows.some(r => r.className === classFilter && r.gradeLevel === gradeFilter)
+      if (!stillValid) setClassFilter(null)
+    }
+  }, [gradeFilter, rows])
 
-  const filtered = classFilter
-    ? rows.filter(r => r.className === classFilter)
-    : rows
+  // Danh sách khối lớp có trong dữ liệu
+  const grades = Array.from(new Set(rows.map(r => r.gradeLevel).filter((g): g is number => g != null)))
+    .sort((a, b) => a - b)
+
+  // Danh sách lớp học có trong dữ liệu (lọc theo grade nếu đang chọn)
+  const classes = Array.from(new Set(
+    rows
+      .filter(r => gradeFilter == null || r.gradeLevel === gradeFilter)
+      .map(r => r.className)
+      .filter(Boolean)
+  )).sort((a, b) => {
+    const na = Number(a.match(/\d+/)?.[0] ?? 999)
+    const nb = Number(b.match(/\d+/)?.[0] ?? 999)
+    return na - nb || a.localeCompare(b)
+  })
+
+  const filtered = rows.filter(r => {
+    if (gradeFilter != null && r.gradeLevel !== gradeFilter) return false
+    if (classFilter && r.className !== classFilter) return false
+    return true
+  })
 
   const totalAmount = filtered.reduce((s, r) => s + r.finalAmount, 0)
   const totalSessions = filtered.reduce((s, r) => s + r.totalSessions, 0)
@@ -93,7 +112,11 @@ export default function Tuition() {
     ]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, `Học phí T${month}-${year}`)
-    XLSX.writeFile(wb, `hoc-phi-thang-${month}-${year}${classFilter ? `-${classFilter.replace(/\s+/g, '_')}` : ''}.xlsx`)
+    const suffix = [
+      gradeFilter != null ? `khoi${gradeFilter}` : '',
+      classFilter ? classFilter.replace(/\s+/g, '_') : '',
+    ].filter(Boolean).join('-')
+    XLSX.writeFile(wb, `hoc-phi-thang-${month}-${year}${suffix ? `-${suffix}` : ''}.xlsx`)
   }
 
   return (
@@ -145,35 +168,74 @@ export default function Tuition() {
           </div>
         </div>
 
-        {/* Class filter */}
-        {classes.length > 1 && (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-bold text-outline uppercase tracking-wider mr-1">Lớp học:</span>
-            <button
-              onClick={() => setClassFilter(null)}
-              className={`px-4 py-1.5 rounded-full text-sm font-semibold border transition-all ${
-                classFilter === null
-                  ? 'bg-primary text-on-primary border-primary shadow-sm'
-                  : 'bg-surface-container-low text-outline border-outline-variant/20 hover:border-primary/40 hover:text-primary'
-              }`}
-            >
-              Tất cả
-            </button>
-            {classes.map(c => (
+        {/* Filter cards */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Grade filter card */}
+          <div className="bg-surface-container-lowest p-5 rounded-2xl shadow-sm border border-outline-variant/10">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="material-symbols-outlined text-primary text-[18px]">school</span>
+              <span className="text-xs font-bold text-outline uppercase tracking-wider">Lọc theo Khối lớp</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
               <button
-                key={c}
-                onClick={() => setClassFilter(c === classFilter ? null : c)}
-                className={`px-4 py-1.5 rounded-full text-sm font-semibold border transition-all ${
-                  classFilter === c
+                onClick={() => setGradeFilter(null)}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                  gradeFilter === null
                     ? 'bg-primary text-on-primary border-primary shadow-sm'
                     : 'bg-surface-container-low text-outline border-outline-variant/20 hover:border-primary/40 hover:text-primary'
                 }`}
               >
-                {c}
+                Tất cả
               </button>
-            ))}
+              {grades.map(g => (
+                <button
+                  key={g}
+                  onClick={() => setGradeFilter(g === gradeFilter ? null : g)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                    gradeFilter === g
+                      ? 'bg-primary text-on-primary border-primary shadow-sm'
+                      : 'bg-surface-container-low text-outline border-outline-variant/20 hover:border-primary/40 hover:text-primary'
+                  }`}
+                >
+                  Lớp {g}
+                </button>
+              ))}
+            </div>
           </div>
-        )}
+
+          {/* Class filter card */}
+          <div className="bg-surface-container-lowest p-5 rounded-2xl shadow-sm border border-outline-variant/10">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="material-symbols-outlined text-secondary text-[18px]">class</span>
+              <span className="text-xs font-bold text-outline uppercase tracking-wider">Lọc theo Lớp học</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setClassFilter(null)}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                  classFilter === null
+                    ? 'bg-secondary text-on-secondary border-secondary shadow-sm'
+                    : 'bg-surface-container-low text-outline border-outline-variant/20 hover:border-secondary/40 hover:text-secondary'
+                }`}
+              >
+                Tất cả
+              </button>
+              {classes.map(c => (
+                <button
+                  key={c}
+                  onClick={() => setClassFilter(c === classFilter ? null : c)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                    classFilter === c
+                      ? 'bg-secondary text-on-secondary border-secondary shadow-sm'
+                      : 'bg-surface-container-low text-outline border-outline-variant/20 hover:border-secondary/40 hover:text-secondary'
+                  }`}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
 
         {/* Table */}
         <div className="bg-surface-container-lowest rounded-3xl overflow-hidden shadow-sm border border-outline-variant/10">
@@ -238,7 +300,9 @@ export default function Tuition() {
                     <tr>
                       <td colSpan={8} className="py-16 text-center text-outline">
                         <span className="material-symbols-outlined text-5xl block mb-3 opacity-30">payments</span>
-                        {classFilter ? `Không có dữ liệu cho ${classFilter}` : `Không có dữ liệu học phí tháng ${month}/${year}`}
+                        {classFilter || gradeFilter != null
+                          ? `Không có dữ liệu cho bộ lọc đang chọn`
+                          : `Không có dữ liệu học phí tháng ${month}/${year}`}
                       </td>
                     </tr>
                   )}
