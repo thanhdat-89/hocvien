@@ -94,18 +94,30 @@ export default function Reviews() {
     if (filterClassId && !classOptions.some(c => c.classId === filterClassId)) setFilterClassId('')
   }, [classOptions, filterClassId])
 
-  const visible = useMemo(() => {
-    const q = search.trim().toLowerCase()
+  // Tập hợp đã lọc theo khối + lớp (không tính status/search) — dùng để đếm
+  const scoped = useMemo(() => {
     return rows.filter(r => {
       if (filterGrade && String(r.gradeLevel ?? '') !== filterGrade) return false
       if (filterClassId && !r.classes.some(c => c.classId === filterClassId)) return false
+      return true
+    })
+  }, [rows, filterGrade, filterClassId])
+
+  const scopedFilled = useMemo(
+    () => scoped.filter(r => r.review && r.review.content.trim()).length,
+    [scoped]
+  )
+
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return scoped.filter(r => {
       const hasReview = !!(r.review && r.review.content.trim())
       if (filterStatus === 'reviewed' && !hasReview) return false
       if (filterStatus === 'pending' && hasReview) return false
       if (q && !r.studentName.toLowerCase().includes(q)) return false
       return true
     })
-  }, [rows, filterGrade, filterClassId, filterStatus, search])
+  }, [scoped, filterStatus, search])
 
   const updateRow = (sid: string, patch: Partial<RowState>) => {
     setRows(rs => rs.map(r => r.studentId === sid ? { ...r, ...patch, dirty: true } : r))
@@ -171,7 +183,6 @@ export default function Reviews() {
 
   const months = Array.from({ length: 12 }, (_, i) => i + 1)
   const years = Array.from({ length: 6 }, (_, i) => today.getFullYear() - 2 + i)
-  const filledCount = rows.filter(r => r.review && r.review.content.trim()).length
 
   return (
     <div className="space-y-6">
@@ -213,7 +224,7 @@ export default function Reviews() {
             </div>
             <div className="flex items-center gap-3">
               <span className="text-sm text-outline">
-                Đã nhận xét: <b className="text-on-surface">{filledCount}</b> / {rows.length}
+                Đã nhận xét: <b className="text-on-surface">{scopedFilled}</b> / {scoped.length}
               </span>
               {dirtyCount > 0 && (
                 <button
@@ -227,7 +238,38 @@ export default function Reviews() {
             </div>
           </div>
 
-          {/* Row 2 — Khối lớp */}
+          {/* Row 2 — Tình trạng nhận xét (đếm theo khối + lớp đang chọn) */}
+          <div className="flex items-start gap-3 flex-wrap">
+            <span className="text-[10px] font-bold text-outline uppercase tracking-wider w-20 pt-2 shrink-0">Tình trạng</span>
+            <div className="flex flex-wrap gap-2 flex-1">
+              {([
+                { v: 'all', label: 'Tất cả', count: scoped.length },
+                { v: 'reviewed', label: 'Đã nhận xét', count: scopedFilled },
+                { v: 'pending', label: 'Chưa nhận xét', count: scoped.length - scopedFilled },
+              ] as const).map(opt => {
+                const active = filterStatus === opt.v
+                const tone = opt.v === 'reviewed'
+                  ? (active ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm' : 'bg-surface text-emerald-700 border-emerald-200 hover:border-emerald-400')
+                  : opt.v === 'pending'
+                  ? (active ? 'bg-amber-500 text-white border-amber-500 shadow-sm' : 'bg-surface text-amber-700 border-amber-200 hover:border-amber-400')
+                  : (active ? 'bg-primary text-on-primary border-primary shadow-sm' : 'bg-surface text-on-surface-variant border-outline-variant/30 hover:border-primary/40 hover:text-primary')
+                return (
+                  <button
+                    key={opt.v}
+                    onClick={() => setFilterStatus(opt.v)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all flex items-center gap-1.5 ${tone}`}
+                  >
+                    {opt.label}
+                    <span className={`px-1.5 py-0.5 rounded-md text-[10px] ${active ? 'bg-white/20' : 'bg-surface-container-high text-outline'}`}>
+                      {opt.count}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Row 3 — Khối lớp */}
           <div className="flex items-start gap-3 flex-wrap">
             <span className="text-[10px] font-bold text-outline uppercase tracking-wider w-20 pt-2 shrink-0">Khối lớp</span>
             <div className="flex flex-wrap gap-2 flex-1">
@@ -257,7 +299,7 @@ export default function Reviews() {
             </div>
           </div>
 
-          {/* Row 3 — Lớp học */}
+          {/* Row 4 — Lớp học */}
           {classOptions.length > 0 && (
             <div className="flex items-start gap-3 flex-wrap">
               <span className="text-[10px] font-bold text-outline uppercase tracking-wider w-20 pt-2 shrink-0">Lớp học</span>
@@ -289,36 +331,6 @@ export default function Reviews() {
             </div>
           )}
 
-          {/* Row 4 — Tình trạng nhận xét */}
-          <div className="flex items-start gap-3 flex-wrap">
-            <span className="text-[10px] font-bold text-outline uppercase tracking-wider w-20 pt-2 shrink-0">Tình trạng</span>
-            <div className="flex flex-wrap gap-2 flex-1">
-              {([
-                { v: 'all', label: 'Tất cả', count: rows.length },
-                { v: 'reviewed', label: 'Đã nhận xét', count: filledCount },
-                { v: 'pending', label: 'Chưa nhận xét', count: rows.length - filledCount },
-              ] as const).map(opt => {
-                const active = filterStatus === opt.v
-                const tone = opt.v === 'reviewed'
-                  ? (active ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm' : 'bg-surface text-emerald-700 border-emerald-200 hover:border-emerald-400')
-                  : opt.v === 'pending'
-                  ? (active ? 'bg-amber-500 text-white border-amber-500 shadow-sm' : 'bg-surface text-amber-700 border-amber-200 hover:border-amber-400')
-                  : (active ? 'bg-primary text-on-primary border-primary shadow-sm' : 'bg-surface text-on-surface-variant border-outline-variant/30 hover:border-primary/40 hover:text-primary')
-                return (
-                  <button
-                    key={opt.v}
-                    onClick={() => setFilterStatus(opt.v)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all flex items-center gap-1.5 ${tone}`}
-                  >
-                    {opt.label}
-                    <span className={`px-1.5 py-0.5 rounded-md text-[10px] ${active ? 'bg-white/20' : 'bg-surface-container-high text-outline'}`}>
-                      {opt.count}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
         </div>
 
         <div className="overflow-x-auto">
