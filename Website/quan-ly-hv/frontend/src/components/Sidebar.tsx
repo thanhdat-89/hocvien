@@ -8,6 +8,7 @@ const navItems = [
   { path: '/classes', icon: 'calendar_month', label: 'Lịch & Lớp học' },
   { path: '/private-schedule', icon: 'person_apron', label: 'Lịch học riêng' },
   { path: '/exams', icon: 'quiz', label: 'Điểm kiểm tra' },
+  { path: '/reviews', icon: 'rate_review', label: 'Nhận xét học viên' },
   { path: '/tuition', icon: 'payments', label: 'Học phí' },
   // { path: '/attendance', icon: 'assignment_turned_in', label: 'Chấm công' },
   // { path: '/notifications', icon: 'notifications', label: 'Thông báo' },

@@ -14,6 +14,7 @@ import Notifications from './pages/Notifications'
 import Leads from './pages/Leads'
 import PrivateSchedule from './pages/PrivateSchedule'
 import Tests from './pages/Tests'
+import Reviews from './pages/Reviews'
 
 export default function App() {
   return (
@@ -30,6 +31,7 @@ export default function App() {
             <Route path="/classes" element={<Classes />} />
             <Route path="/private-schedule" element={<PrivateSchedule />} />
             <Route path="/exams" element={<Tests />} />
+            <Route path="/reviews" element={<Reviews />} />
             <Route path="/tuition" element={<Tuition />} />
             <Route path="/attendance" element={<Attendance />} />
             <Route path="/notifications" element={<Notifications />} />

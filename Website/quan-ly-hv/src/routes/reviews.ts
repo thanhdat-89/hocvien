@@ -20,6 +20,58 @@ interface StudentReview {
   updatedAt: string
 }
 
+// GET /api/reviews?month=YYYY-MM — bảng nhận xét cho toàn bộ học viên đang học
+router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const month = (req.query.month ?? '').toString().trim()
+    if (!MONTH_RE.test(month)) {
+      res.status(400).json({ message: 'Tháng không hợp lệ (YYYY-MM)' })
+      return
+    }
+
+    const [studentsSnap, enrollSnap, reviewsSnap] = await Promise.all([
+      db.collection(C.STUDENTS).where('status', '==', 'ACTIVE').get(),
+      db.collection(C.ENROLLMENTS).where('status', '==', 'ACTIVE').get(),
+      db.collectionGroup('reviews').where('month', '==', month).get(),
+    ])
+
+    const enrollByStudent = new Map<string, { classId: string; className: string }[]>()
+    enrollSnap.docs.forEach(d => {
+      const e = d.data() as any
+      if (!e.studentId || !e.classId) return
+      const list = enrollByStudent.get(e.studentId) ?? []
+      list.push({ classId: e.classId, className: e.className ?? '' })
+      enrollByStudent.set(e.studentId, list)
+    })
+
+    const reviewByStudent = new Map<string, any>()
+    reviewsSnap.docs.forEach(d => {
+      const sid = d.ref.parent.parent?.id
+      if (sid) reviewByStudent.set(sid, { id: d.id, ...d.data() })
+    })
+
+    const rows = studentsSnap.docs.map(d => {
+      const stu = d.data() as any
+      const classes = enrollByStudent.get(d.id) ?? []
+      const r = reviewByStudent.get(d.id)
+      return {
+        studentId: d.id,
+        studentName: stu.fullName,
+        gradeLevel: stu.gradeLevel ?? null,
+        classes,
+        review: r ? { content: r.content ?? '', teacherName: r.teacherName ?? '', updatedAt: r.updatedAt ?? '' } : null,
+      }
+    }).sort((a, b) => {
+      const ga = a.gradeLevel ?? 99
+      const gb = b.gradeLevel ?? 99
+      if (ga !== gb) return ga - gb
+      return a.studentName.localeCompare(b.studentName, 'vi')
+    })
+
+    res.json({ month, rows })
+  } catch (err) { next(err) }
+})
+
 // GET /api/reviews/:studentId — danh sách nhận xét của 1 học viên (mới nhất trước)
 router.get('/:studentId', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
