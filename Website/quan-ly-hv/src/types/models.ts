@@ -301,3 +301,29 @@ export interface Lead {
   createdAt: string
   updatedAt: string
 }
+
+
+export type MaterialType = "LINK" | "FILE"
+export type MaterialAudience = "STUDENT" | "CLASS"
+
+export interface Material {
+  id: string
+  title: string
+  description?: string
+  type: MaterialType
+  // Khi type=LINK
+  url?: string
+  // Khi type=FILE
+  storagePath?: string
+  fileName?: string
+  fileSize?: number
+  mimeType?: string
+  // Phạm vi
+  audienceType: MaterialAudience
+  audienceIds: string[]
+  // Người upload
+  uploaderId: string
+  uploaderName: string
+  createdAt: string
+  updatedAt: string
+}

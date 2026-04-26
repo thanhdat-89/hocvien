@@ -71,8 +71,12 @@ export const C = {
   LEADS:               'leads',
   PRIVATE_SCHEDULES:   'privateSchedules',
   TESTS:               'tests',
+  MATERIALS:           'materials',
   AGGREGATES:          'aggregates',
 } as const
+
+// Firebase Storage bucket — dùng default bucket {project}.appspot.com
+export const storageBucket = admin.storage().bucket(`${PROJECT_ID}.appspot.com`)
 
 // ─── Helpers ──────────────────────────────────────────────────
 

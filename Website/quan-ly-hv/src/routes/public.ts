@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { db, C, s, toDocs, toObj } from '../lib/firebase'
 import { computeTuitionSummary, loadStudentPromotions } from '../lib/tuition'
+import { listMaterialsForStudent } from './materials'
 import type { Student, ClassEnrollment, Class, Schedule, TuitionRecord, Payment, PrivateSession } from '../types/models'
 
 const router = Router()
@@ -268,6 +269,8 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
         teacherName: p.teacherName,
       }))
 
+    const materials = await listMaterialsForStudent(studentId)
+
     const payload = {
       student: publicStudent,
       classes,
@@ -277,6 +280,7 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
       promotions,
       reviews,
       testScores,
+      materials,
     }
     publicCache.set(studentId, { at: Date.now(), payload })
     res.json(payload)

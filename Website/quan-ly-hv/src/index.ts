@@ -20,6 +20,7 @@ import leadRoutes from './routes/leads'
 import reviewRoutes from './routes/reviews'
 import testScoreRoutes from './routes/testScores'
 import testRoutes from './routes/tests'
+import materialRoutes from './routes/materials'
 import publicRoutes from './routes/public'
 
 import { errorHandler, notFound } from './middleware/errorHandler'
@@ -67,6 +68,7 @@ app.use('/api/zalo',           webhookRouter)
 app.use('/api/reviews',        reviewRoutes)
 app.use('/api/test-scores',    testScoreRoutes)
 app.use('/api/tests',          testRoutes)
+app.use('/api/materials',      materialRoutes)
 app.use('/api/public',         publicRoutes)
 
 // ─── Error handlers ───────────────────────────────────────────
