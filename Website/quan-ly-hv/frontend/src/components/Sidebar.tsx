@@ -2,17 +2,16 @@ import React from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 
-const navItems = [
+type Role = 'ADMIN' | 'STAFF' | 'TEACHER'
+
+const navItems: { path: string; icon: string; label: string; roles?: Role[] }[] = [
   { path: '/dashboard', icon: 'dashboard', label: 'Dashboard' },
   { path: '/students', icon: 'group', label: 'Học viên' },
   { path: '/classes', icon: 'calendar_month', label: 'Lịch & Lớp học' },
   { path: '/private-schedule', icon: 'person_apron', label: 'Lịch học riêng' },
   { path: '/exams', icon: 'quiz', label: 'Điểm kiểm tra' },
   { path: '/reviews', icon: 'rate_review', label: 'Nhận xét học viên' },
-  { path: '/tuition', icon: 'payments', label: 'Học phí' },
-  // { path: '/attendance', icon: 'assignment_turned_in', label: 'Chấm công' },
-  // { path: '/notifications', icon: 'notifications', label: 'Thông báo' },
-  // { path: '/leads', icon: 'person_add', label: 'Khách tiềm năng' },
+  { path: '/tuition', icon: 'payments', label: 'Học phí', roles: ['ADMIN', 'STAFF'] },
 ]
 
 export default function Sidebar() {
@@ -43,7 +42,7 @@ export default function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 px-2 space-y-1">
-        {navItems.map((item) => (
+        {navItems.filter(item => !item.roles || (user && item.roles.includes(user.role))).map((item) => (
           <NavLink
             key={item.path}
             to={item.path}

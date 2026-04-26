@@ -15,6 +15,7 @@ import Leads from './pages/Leads'
 import PrivateSchedule from './pages/PrivateSchedule'
 import Tests from './pages/Tests'
 import Reviews from './pages/Reviews'
+import RequireRole from './components/RequireRole'
 
 export default function App() {
   return (
@@ -32,10 +33,10 @@ export default function App() {
             <Route path="/private-schedule" element={<PrivateSchedule />} />
             <Route path="/exams" element={<Tests />} />
             <Route path="/reviews" element={<Reviews />} />
-            <Route path="/tuition" element={<Tuition />} />
-            <Route path="/attendance" element={<Attendance />} />
-            <Route path="/notifications" element={<Notifications />} />
-            <Route path="/leads" element={<Leads />} />
+            <Route path="/tuition" element={<RequireRole roles={['ADMIN', 'STAFF']}><Tuition /></RequireRole>} />
+            <Route path="/attendance" element={<RequireRole roles={['ADMIN', 'STAFF']}><Attendance /></RequireRole>} />
+            <Route path="/notifications" element={<RequireRole roles={['ADMIN', 'STAFF']}><Notifications /></RequireRole>} />
+            <Route path="/leads" element={<RequireRole roles={['ADMIN', 'STAFF']}><Leads /></RequireRole>} />
           </Route>
         </Routes>
       </AuthProvider>

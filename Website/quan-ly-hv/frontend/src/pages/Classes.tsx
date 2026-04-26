@@ -4,6 +4,7 @@ import Toast, { ToastMessage } from '../components/Toast'
 import { useConfirm, useAlert } from '../components/ConfirmDialog'
 import api from '../services/api'
 import { Session, Class } from '../types'
+import { useAuth } from '../hooks/useAuth'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -828,6 +829,7 @@ export default function Classes() {
   const [deletingClass, setDeletingClass] = useState<Class | null>(null)
   const [loadingSessions, setLoadingSessions] = useState(false)
   const [toasts, setToasts] = useState<ToastMessage[]>([])
+  const { canManageClasses } = useAuth()
   const showToast = (message: string, type: ToastMessage['type'] = 'info') =>
     setToasts(prev => [...prev, { id: Date.now(), message, type }])
   const dismissToast = (id: number) => setToasts(prev => prev.filter(t => t.id !== id))
@@ -928,10 +930,12 @@ export default function Classes() {
             <h2 className="text-4xl font-black text-on-surface font-headline tracking-tight">Quản Lý Lịch & Lớp Học</h2>
           </div>
           <div className="flex gap-2">
-            <AutoInitAttendanceBtn />
-            <button onClick={() => setShowClassModal(true)} className="btn-primary">
-              <span className="material-symbols-outlined">add</span>Tạo lớp mới
-            </button>
+            {canManageClasses && <AutoInitAttendanceBtn />}
+            {canManageClasses && (
+              <button onClick={() => setShowClassModal(true)} className="btn-primary">
+                <span className="material-symbols-outlined">add</span>Tạo lớp mới
+              </button>
+            )}
           </div>
         </div>
 
@@ -1095,13 +1099,15 @@ export default function Classes() {
                 <h4 className="text-4xl font-headline font-black text-on-surface">{classes.filter((c) => c.status !== 'ACTIVE').length}</h4>
                 <p className="text-xs text-outline mt-1">lớp học</p>
               </div>
-              <button
-                onClick={() => setShowClassModal(true)}
-                className="bg-surface-container-lowest p-5 rounded-2xl shadow-sm border-2 border-dashed border-outline-variant/30 hover:border-primary/50 hover:bg-primary/5 transition-all flex flex-col items-center justify-center gap-2 text-outline hover:text-primary group"
-              >
-                <span className="material-symbols-outlined text-3xl">add_circle</span>
-                <span className="text-xs font-bold">Thêm lớp mới</span>
-              </button>
+              {canManageClasses && (
+                <button
+                  onClick={() => setShowClassModal(true)}
+                  className="bg-surface-container-lowest p-5 rounded-2xl shadow-sm border-2 border-dashed border-outline-variant/30 hover:border-primary/50 hover:bg-primary/5 transition-all flex flex-col items-center justify-center gap-2 text-outline hover:text-primary group"
+                >
+                  <span className="material-symbols-outlined text-3xl">add_circle</span>
+                  <span className="text-xs font-bold">Thêm lớp mới</span>
+                </button>
+              )}
             </div>
 
             {/* Class cards grid */}
@@ -1109,9 +1115,11 @@ export default function Classes() {
               <div className="py-20 text-center text-outline bg-surface-container-lowest rounded-2xl border border-outline-variant/10">
                 <span className="material-symbols-outlined text-5xl block mb-3 opacity-20">school</span>
                 <p className="text-sm font-medium">Chưa có lớp học nào</p>
-                <button onClick={() => setShowClassModal(true)} className="btn-primary mt-4 mx-auto">
-                  <span className="material-symbols-outlined">add</span>Tạo lớp học đầu tiên
-                </button>
+                {canManageClasses && (
+                  <button onClick={() => setShowClassModal(true)} className="btn-primary mt-4 mx-auto">
+                    <span className="material-symbols-outlined">add</span>Tạo lớp học đầu tiên
+                  </button>
+                )}
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
@@ -1132,20 +1140,24 @@ export default function Classes() {
                           <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${cls.status === 'ACTIVE' ? 'text-secondary bg-secondary-container/30' : 'text-outline bg-surface-container-high'}`}>
                             {cls.status === 'ACTIVE' ? 'Đang học' : 'Đóng'}
                           </span>
-                          <button
-                            onClick={() => setEditingClass(cls)}
-                            className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-primary/10 text-outline hover:text-primary transition-all"
-                            title="Chỉnh sửa"
-                          >
-                            <span className="material-symbols-outlined text-[16px]">edit</span>
-                          </button>
-                          <button
-                            onClick={() => handleDeleteClass(cls)}
-                            className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-error/10 text-outline hover:text-error transition-all"
-                            title="Xoá lớp"
-                          >
-                            <span className="material-symbols-outlined text-[16px]">delete</span>
-                          </button>
+                          {canManageClasses && (
+                            <>
+                              <button
+                                onClick={() => setEditingClass(cls)}
+                                className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-primary/10 text-outline hover:text-primary transition-all"
+                                title="Chỉnh sửa"
+                              >
+                                <span className="material-symbols-outlined text-[16px]">edit</span>
+                              </button>
+                              <button
+                                onClick={() => handleDeleteClass(cls)}
+                                className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-error/10 text-outline hover:text-error transition-all"
+                                title="Xoá lớp"
+                              >
+                                <span className="material-symbols-outlined text-[16px]">delete</span>
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
 

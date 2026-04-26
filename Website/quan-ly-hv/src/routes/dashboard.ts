@@ -1,6 +1,6 @@
 import { Router, Response, NextFunction } from 'express'
 import { db, C, toDocs } from '../lib/firebase'
-import { authenticate } from '../middleware/auth'
+import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
 import type { Session, TuitionRecord, Payment, Student } from '../types/models'
 
@@ -98,7 +98,7 @@ router.post('/refresh', async (_req: AuthRequest, res: Response, next: NextFunct
 })
 
 // GET /api/dashboard/revenue — Doanh thu 12 tháng gần nhất
-router.get('/revenue', async (_req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/revenue', requireRole('ADMIN', 'STAFF'), async (_req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     if (revenueCache && Date.now() - revenueCache.at < REVENUE_TTL_MS) {
       res.json(revenueCache.data)

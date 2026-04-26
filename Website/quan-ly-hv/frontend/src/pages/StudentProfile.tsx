@@ -4,6 +4,7 @@ import TopBar from '../components/TopBar'
 import { useConfirm, useAlert } from '../components/ConfirmDialog'
 import api from '../services/api'
 import { Student, ClassEnrollment, TuitionRecord, Parent, Class, StudentPromotion, PrivateSession } from '../types'
+import { useAuth } from '../hooks/useAuth'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -427,6 +428,7 @@ function InfoTab({
   onRefresh,
   onEdit,
   onStatusChange,
+  canManage,
 }: {
   student: Student & { id: string }
   parents: (Parent & { id: string })[]
@@ -434,6 +436,7 @@ function InfoTab({
   onRefresh: () => void
   onEdit: () => void
   onStatusChange: (status: 'ACTIVE' | 'INACTIVE' | 'RESERVED') => void
+  canManage: boolean
 }) {
   const showAlert = useAlert()
   const [parentModal, setParentModal] = useState<{ open: boolean; parent: (Parent & { id: string }) | null }>({ open: false, parent: null })
@@ -490,12 +493,14 @@ function InfoTab({
         <div className="md:col-span-4 bg-surface-container-lowest rounded-xl p-8 shadow-sm">
           <div className="flex items-center justify-between mb-6 border-b border-outline-variant/10 pb-4">
             <h3 className="font-headline text-lg font-bold text-on-surface">Thông tin cơ bản</h3>
-            <button
-              onClick={onEdit}
-              className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
-            >
-              <span className="material-symbols-outlined text-base">edit</span>Chỉnh sửa
-            </button>
+            {canManage && (
+              <button
+                onClick={onEdit}
+                className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
+              >
+                <span className="material-symbols-outlined text-base">edit</span>Chỉnh sửa
+              </button>
+            )}
           </div>
           <div className="space-y-5">
             <InfoRow label="Ngày sinh" value={fmt(student.dateOfBirth)} />
@@ -507,35 +512,37 @@ function InfoTab({
           </div>
 
           {/* Status actions */}
-          <div className="mt-6 pt-5 border-t border-outline-variant/10 flex flex-col gap-2">
-            {student.status !== 'ACTIVE' && (
-              <button
-                onClick={() => onStatusChange('ACTIVE')}
-                className="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-secondary hover:bg-secondary-container/20 transition-colors"
-              >
-                <span className="material-symbols-outlined text-base">check_circle</span>
-                Kích hoạt đang học
-              </button>
-            )}
-            {student.status !== 'RESERVED' && (
-              <button
-                onClick={() => onStatusChange('RESERVED')}
-                className="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-outline hover:bg-surface-container-high transition-colors"
-              >
-                <span className="material-symbols-outlined text-base">pause_circle</span>
-                Bảo lưu
-              </button>
-            )}
-            {student.status !== 'INACTIVE' && (
-              <button
-                onClick={() => onStatusChange('INACTIVE')}
-                className="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-error hover:bg-error-container/10 transition-colors"
-              >
-                <span className="material-symbols-outlined text-base">cancel</span>
-                Cho nghỉ học
-              </button>
-            )}
-          </div>
+          {canManage && (
+            <div className="mt-6 pt-5 border-t border-outline-variant/10 flex flex-col gap-2">
+              {student.status !== 'ACTIVE' && (
+                <button
+                  onClick={() => onStatusChange('ACTIVE')}
+                  className="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-secondary hover:bg-secondary-container/20 transition-colors"
+                >
+                  <span className="material-symbols-outlined text-base">check_circle</span>
+                  Kích hoạt đang học
+                </button>
+              )}
+              {student.status !== 'RESERVED' && (
+                <button
+                  onClick={() => onStatusChange('RESERVED')}
+                  className="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-outline hover:bg-surface-container-high transition-colors"
+                >
+                  <span className="material-symbols-outlined text-base">pause_circle</span>
+                  Bảo lưu
+                </button>
+              )}
+              {student.status !== 'INACTIVE' && (
+                <button
+                  onClick={() => onStatusChange('INACTIVE')}
+                  className="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-error hover:bg-error-container/10 transition-colors"
+                >
+                  <span className="material-symbols-outlined text-base">cancel</span>
+                  Cho nghỉ học
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Right column */}
@@ -544,12 +551,14 @@ function InfoTab({
           <div className="bg-surface-container-lowest rounded-xl p-8 shadow-sm">
             <div className="flex items-center justify-between mb-6 border-b border-outline-variant/10 pb-4">
               <h3 className="font-headline text-lg font-bold text-on-surface">Phụ huynh / Liên hệ</h3>
-              <button
-                onClick={() => setParentModal({ open: true, parent: null })}
-                className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
-              >
-                <span className="material-symbols-outlined text-base">add</span>Thêm
-              </button>
+              {canManage && (
+                <button
+                  onClick={() => setParentModal({ open: true, parent: null })}
+                  className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
+                >
+                  <span className="material-symbols-outlined text-base">add</span>Thêm
+                </button>
+              )}
             </div>
             {parents.length === 0 ? (
               <p className="text-sm text-outline">Chưa có thông tin phụ huynh</p>
@@ -586,16 +595,18 @@ function InfoTab({
                         )}
                       </div>
                     </div>
-                    <div className="flex gap-1 flex-shrink-0">
-                      <button onClick={() => setParentModal({ open: true, parent: p })}
-                        className="p-1.5 rounded-lg hover:bg-surface-container-highest text-outline hover:text-on-surface transition-colors">
-                        <span className="material-symbols-outlined text-base">edit</span>
-                      </button>
-                      <button onClick={() => deleteParent(p)}
-                        className="p-1.5 rounded-lg hover:bg-error-container/20 text-outline hover:text-error transition-colors">
-                        <span className="material-symbols-outlined text-base">delete</span>
-                      </button>
-                    </div>
+                    {canManage && (
+                      <div className="flex gap-1 flex-shrink-0">
+                        <button onClick={() => setParentModal({ open: true, parent: p })}
+                          className="p-1.5 rounded-lg hover:bg-surface-container-highest text-outline hover:text-on-surface transition-colors">
+                          <span className="material-symbols-outlined text-base">edit</span>
+                        </button>
+                        <button onClick={() => deleteParent(p)}
+                          className="p-1.5 rounded-lg hover:bg-error-container/20 text-outline hover:text-error transition-colors">
+                          <span className="material-symbols-outlined text-base">delete</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -606,12 +617,14 @@ function InfoTab({
           <div className="bg-surface-container-lowest rounded-xl p-8 shadow-sm">
             <div className="flex items-center justify-between mb-6 border-b border-outline-variant/10 pb-4">
               <h3 className="font-headline text-lg font-bold text-on-surface">Lớp học</h3>
-              <button
-                onClick={() => setEnrollModal(true)}
-                className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
-              >
-                <span className="material-symbols-outlined text-base">add</span>Đăng ký lớp
-              </button>
+              {canManage && (
+                <button
+                  onClick={() => setEnrollModal(true)}
+                  className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
+                >
+                  <span className="material-symbols-outlined text-base">add</span>Đăng ký lớp
+                </button>
+              )}
             </div>
             {activeEnrollments.length === 0 ? (
               <p className="text-sm text-outline">Chưa đăng ký lớp nào</p>
@@ -625,13 +638,15 @@ function InfoTab({
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] bg-secondary-container/30 text-secondary px-2 py-1 rounded-full font-bold">Đang học</span>
-                      <button
-                        onClick={() => dropEnrollment(e)}
-                        className="p-1.5 rounded-lg hover:bg-error-container/20 text-outline hover:text-error transition-colors"
-                        title="Cho nghỉ lớp"
-                      >
-                        <span className="material-symbols-outlined text-base">person_remove</span>
-                      </button>
+                      {canManage && (
+                        <button
+                          onClick={() => dropEnrollment(e)}
+                          className="p-1.5 rounded-lg hover:bg-error-container/20 text-outline hover:text-error transition-colors"
+                          title="Cho nghỉ lớp"
+                        >
+                          <span className="material-symbols-outlined text-base">person_remove</span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -651,13 +666,15 @@ function InfoTab({
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="text-[10px] bg-surface-container-high text-outline px-2 py-1 rounded-full font-bold">Đã nghỉ</span>
-                        <button
-                          onClick={() => deleteEnrollment(e)}
-                          className="p-1 hover:bg-error/10 hover:text-error text-outline rounded-lg transition-colors"
-                          title="Xoá khỏi lịch học"
-                        >
-                          <span className="material-symbols-outlined text-base">delete</span>
-                        </button>
+                        {canManage && (
+                          <button
+                            onClick={() => deleteEnrollment(e)}
+                            className="p-1 hover:bg-error/10 hover:text-error text-outline rounded-lg transition-colors"
+                            title="Xoá khỏi lịch học"
+                          >
+                            <span className="material-symbols-outlined text-base">delete</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -2227,6 +2244,7 @@ export default function StudentProfile() {
   const confirm = useConfirm()
   const [student, setStudent] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const { canSeeFinance, canManageStudents } = useAuth()
   const [activeTab, setActiveTab] = useState<'info' | 'schedule' | 'private' | 'tuition' | 'reviews' | 'scores'>('info')
   const [editModal, setEditModal] = useState(false)
 
@@ -2329,7 +2347,7 @@ export default function StudentProfile() {
 
         {/* Tabs */}
         <div className="flex gap-1 border-b border-outline-variant/20">
-          {(['info', 'schedule', 'private', 'tuition', 'reviews', 'scores'] as const).map(tab => {
+          {(['info', 'schedule', 'private', 'tuition', 'reviews', 'scores'] as const).filter(t => t !== 'tuition' || canSeeFinance).map(tab => {
             const icons  = { info: 'person', schedule: 'calendar_month', private: 'person_apron', tuition: 'payments', reviews: 'rate_review', scores: 'grade' }
             const labels = { info: 'Thông tin', schedule: 'Lịch học', private: 'Học riêng', tuition: 'Học phí', reviews: 'Nhận xét', scores: 'Điểm KT' }
             return (
@@ -2352,6 +2370,7 @@ export default function StudentProfile() {
             parents={parents}
             enrollments={enrollments}
             onRefresh={load}
+            canManage={canManageStudents}
             onEdit={() => setEditModal(true)}
             onStatusChange={async (status) => {
               const labels = { ACTIVE: 'Đang học', INACTIVE: 'Đã nghỉ', RESERVED: 'Bảo lưu' }

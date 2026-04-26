@@ -3,6 +3,7 @@ import { db, C, s, toObj, toDocs, paginate } from '../lib/firebase'
 import { syncPrimaryParentToStudent } from '../lib/studentSync'
 import { recountClassActiveStudents } from '../lib/classSync'
 import { computeTuitionSummary } from '../lib/tuition'
+import { requireRole } from '../middleware/auth'
 import { authenticate } from '../middleware/auth'
 import { AuthRequest } from '../types'
 import type { Student, ClassEnrollment, StudentAttendance, PrivateSession } from '../types/models'
@@ -89,7 +90,7 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
 })
 
 // POST /api/students/bulk — Import hàng loạt từ Excel
-router.post('/bulk', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/bulk', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { students } = req.body as {
       students: Array<{
@@ -239,7 +240,7 @@ router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) =
 })
 
 // POST /api/students
-router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { fullName, dateOfBirth, gender, school, gradeLevel, address, notes, parents } = req.body
 
@@ -279,7 +280,7 @@ router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => 
 })
 
 // PUT /api/students/:id
-router.put('/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.put('/:id', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { fullName, dateOfBirth, gender, school, gradeLevel, address, status, notes, parentName, phone, parentId } = req.body
     const studentId = s(req.params.id)
@@ -324,7 +325,7 @@ router.put('/:id', async (req: AuthRequest, res: Response, next: NextFunction) =
 })
 
 // POST /api/students/:id/enroll/:enrollmentId/remove — xoá enrollment
-router.post('/:id/enroll/:enrollmentId/remove', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/:id/enroll/:enrollmentId/remove', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const enrollRef = db.collection(C.ENROLLMENTS).doc(s(req.params.enrollmentId))
     const enrollDoc = await enrollRef.get()
@@ -338,7 +339,7 @@ router.post('/:id/enroll/:enrollmentId/remove', async (req: AuthRequest, res: Re
 })
 
 // DELETE /api/students/:id — soft delete
-router.delete('/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.delete('/:id', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     await db.collection(C.STUDENTS).doc(s(req.params.id)).update({ status: 'INACTIVE', updatedAt: now() })
     res.json({ message: 'Đã chuyển học viên sang trạng thái không hoạt động' })
@@ -348,7 +349,7 @@ router.delete('/:id', async (req: AuthRequest, res: Response, next: NextFunction
 })
 
 // DELETE /api/students/:id/hard — xoá hoàn toàn HV và toàn bộ dữ liệu liên quan
-router.delete('/:id/hard', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.delete('/:id/hard', requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const studentId = s(req.params.id)
     const studentRef = db.collection(C.STUDENTS).doc(studentId)
@@ -395,7 +396,7 @@ router.delete('/:id/hard', async (req: AuthRequest, res: Response, next: NextFun
 })
 
 // POST /api/students/:id/enroll — Đăng ký lớp
-router.post('/:id/enroll', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/:id/enroll', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const studentId = s(req.params.id)
     const { classId, enrollmentDate, customTuitionRate, notes } = req.body as { classId: string; enrollmentDate?: string; customTuitionRate?: number; notes?: string }
@@ -431,7 +432,7 @@ router.post('/:id/enroll', async (req: AuthRequest, res: Response, next: NextFun
 })
 
 // PUT /api/students/:id/enroll/:enrollmentId/drop
-router.put('/:id/enroll/:enrollmentId/drop', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.put('/:id/enroll/:enrollmentId/drop', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { dropDate } = req.body
     const enrollRef = db.collection(C.ENROLLMENTS).doc(s(req.params.enrollmentId))
@@ -592,7 +593,7 @@ router.get('/:id/private-schedule', async (req: AuthRequest, res: Response, next
 })
 
 // POST /api/students/:id/private-schedule — tạo nhiều buổi
-router.post('/:id/private-schedule', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/:id/private-schedule', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const studentId = s(req.params.id)
     const { sessions } = req.body as {
@@ -624,7 +625,7 @@ router.post('/:id/private-schedule', async (req: AuthRequest, res: Response, nex
 })
 
 // PUT /api/students/:id/private-schedule/:sessionId
-router.put('/:id/private-schedule/:sessionId', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.put('/:id/private-schedule/:sessionId', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { startTime, endTime, teacherName } = req.body
     const updates: Record<string, unknown> = { updatedAt: now() }
@@ -637,7 +638,7 @@ router.put('/:id/private-schedule/:sessionId', async (req: AuthRequest, res: Res
 })
 
 // DELETE /api/students/:id/private-schedule/:sessionId
-router.delete('/:id/private-schedule/:sessionId', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.delete('/:id/private-schedule/:sessionId', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     await db.collection(C.PRIVATE_SCHEDULES).doc(s(req.params.sessionId)).delete()
     res.json({ message: 'Đã xoá buổi học' })

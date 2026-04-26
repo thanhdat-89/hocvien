@@ -7,6 +7,12 @@ interface AuthContextType {
   loading: boolean
   login: (username: string, password: string) => Promise<void>
   logout: () => void
+  isAdmin: boolean
+  isStaff: boolean
+  isTeacher: boolean
+  canManageStudents: boolean // create+edit+delete students, manage enrollments, finance
+  canManageClasses: boolean  // create+edit+delete classes
+  canSeeFinance: boolean     // /tuition + revenue widgets
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
@@ -36,8 +42,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
   }
 
+  const role = user?.role
+  const isAdmin = role === 'ADMIN'
+  const isStaff = role === 'STAFF'
+  const isTeacher = role === 'TEACHER'
+  const canManageStudents = isAdmin || isStaff
+  const canManageClasses = isAdmin || isStaff
+  const canSeeFinance = isAdmin || isStaff
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{
+      user, loading, login, logout,
+      isAdmin, isStaff, isTeacher,
+      canManageStudents, canManageClasses, canSeeFinance,
+    }}>
       {children}
     </AuthContext.Provider>
   )

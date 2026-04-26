@@ -5,6 +5,7 @@ import TopBar from '../components/TopBar'
 import { useConfirm, useAlert } from '../components/ConfirmDialog'
 import api from '../services/api'
 import { Student } from '../types'
+import { useAuth } from '../hooks/useAuth'
 import StudentModal from './StudentModal'
 import { PrivateScheduleModal } from './StudentProfile'
 import * as XLSX from 'xlsx'
@@ -347,6 +348,7 @@ export default function Students() {
   const [showImportModal, setShowImportModal] = useState(false)
   const [editStudent, setEditStudent] = useState<Student | null>(null)
   const [privateModalStudent, setPrivateModalStudent] = useState<Student | null>(null)
+  const { canManageStudents } = useAuth()
 
   const searchRef = useRef<ReturnType<typeof setTimeout>>()
 
@@ -433,11 +435,13 @@ export default function Students() {
             <h2 className="text-4xl font-black text-on-surface font-headline tracking-tight">Quản lý Học viên</h2>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => setShowImportModal(true)}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-surface-container-low border border-outline-variant/20 text-sm font-semibold text-on-surface-variant hover:bg-surface-container hover:text-primary transition-all">
-              <span className="material-symbols-outlined text-[18px]">upload_file</span>
-              Import Excel
-            </button>
+            {canManageStudents && (
+              <button onClick={() => setShowImportModal(true)}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-surface-container-low border border-outline-variant/20 text-sm font-semibold text-on-surface-variant hover:bg-surface-container hover:text-primary transition-all">
+                <span className="material-symbols-outlined text-[18px]">upload_file</span>
+                Import Excel
+              </button>
+            )}
             <button className="btn-primary" onClick={() => { setEditStudent(null); setShowModal(true) }}>
               <span className="material-symbols-outlined">person_add</span>
               Thêm học viên mới
@@ -571,20 +575,24 @@ export default function Students() {
                         >
                           <span className="material-symbols-outlined text-[20px]">calendar_month</span>
                         </button>
-                        <button
-                          onClick={() => { setEditStudent(student); setShowModal(true) }}
-                          className="p-2 text-outline hover:text-primary hover:bg-primary-container/10 rounded-lg transition-all"
-                          title="Chỉnh sửa"
-                        >
-                          <span className="material-symbols-outlined text-[20px]">edit_square</span>
-                        </button>
-                        <button
-                          onClick={() => handleDelete(student)}
-                          className="p-2 text-outline hover:text-error hover:bg-error-container/10 rounded-lg transition-all"
-                          title="Xóa"
-                        >
-                          <span className="material-symbols-outlined text-[20px]">delete</span>
-                        </button>
+                        {canManageStudents && (
+                          <>
+                            <button
+                              onClick={() => { setEditStudent(student); setShowModal(true) }}
+                              className="p-2 text-outline hover:text-primary hover:bg-primary-container/10 rounded-lg transition-all"
+                              title="Chỉnh sửa"
+                            >
+                              <span className="material-symbols-outlined text-[20px]">edit_square</span>
+                            </button>
+                            <button
+                              onClick={() => handleDelete(student)}
+                              className="p-2 text-outline hover:text-error hover:bg-error-container/10 rounded-lg transition-all"
+                              title="Xóa"
+                            >
+                              <span className="material-symbols-outlined text-[20px]">delete</span>
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>

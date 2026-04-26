@@ -7,6 +7,7 @@ import {
 } from 'recharts'
 import TopBar from '../components/TopBar'
 import api from '../services/api'
+import { useAuth } from '../hooks/useAuth'
 
 interface DashboardData {
   stats: {
@@ -72,6 +73,7 @@ function formatFullVND(n: number) {
 
 export default function Dashboard() {
   const navigate = useNavigate()
+  const { canSeeFinance } = useAuth()
   const today = new Date()
   const todayStr = today.toISOString().slice(0, 10)
 
@@ -82,6 +84,7 @@ export default function Dashboard() {
   const revenueQuery = useQuery<RevenueMonth[]>({
     queryKey: ['dashboard', 'revenue'],
     queryFn: () => api.get('/dashboard/revenue').then(r => r.data),
+    enabled: canSeeFinance,
     staleTime: 5 * 60_000, // revenue ít thay đổi, cache 5 phút
   })
   const gradeQuery = useQuery<GradeData[]>({
@@ -263,31 +266,33 @@ export default function Dashboard() {
               )}
             </div>
 
-            {/* Revenue Chart */}
-            <div className="bg-surface-container-lowest rounded-2xl p-6">
-              <div className="flex justify-between items-center mb-6">
-                <h3 className="text-lg font-headline font-bold text-on-surface">Doanh thu theo tháng</h3>
-                <span className="text-xs text-on-surface-variant">12 tháng gần nhất</span>
+            {/* Revenue Chart — admin/staff only */}
+            {canSeeFinance && (
+              <div className="bg-surface-container-lowest rounded-2xl p-6">
+                <div className="flex justify-between items-center mb-6">
+                  <h3 className="text-lg font-headline font-bold text-on-surface">Doanh thu theo tháng</h3>
+                  <span className="text-xs text-on-surface-variant">12 tháng gần nhất</span>
+                </div>
+                <div className="h-56">
+                  {revenueChartData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={revenueChartData} barSize={20}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e7e6ff" vertical={false} />
+                        <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#555881' }} axisLine={false} tickLine={false} />
+                        <YAxis tick={{ fontSize: 11, fill: '#555881' }} axisLine={false} tickLine={false} tickFormatter={(v) => formatVND(v)} />
+                        <Tooltip
+                          formatter={(v: number) => [formatFullVND(v), 'Doanh thu']}
+                          contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }}
+                        />
+                        <Bar dataKey="revenue" fill="#0050d4" radius={[6, 6, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-outline text-sm">Chưa có dữ liệu doanh thu</div>
+                  )}
+                </div>
               </div>
-              <div className="h-56">
-                {revenueChartData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={revenueChartData} barSize={20}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e7e6ff" vertical={false} />
-                      <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#555881' }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fontSize: 11, fill: '#555881' }} axisLine={false} tickLine={false} tickFormatter={(v) => formatVND(v)} />
-                      <Tooltip
-                        formatter={(v: number) => [formatFullVND(v), 'Doanh thu']}
-                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }}
-                      />
-                      <Bar dataKey="revenue" fill="#0050d4" radius={[6, 6, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="h-full flex items-center justify-center text-outline text-sm">Chưa có dữ liệu doanh thu</div>
-                )}
-              </div>
-            </div>
+            )}
           </div>
 
           {/* Right column */}
