@@ -10,9 +10,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "db:seed": "tsx src/scripts/seedFirebase.ts",
-    "deploy": "vercel --prod --yes",
-    "deploy:fe": "cd frontend && vercel --prod --yes",
-    "deploy:all": "npm run deploy && npm run deploy:fe"
+    "deploy": "vercel --prod --yes"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

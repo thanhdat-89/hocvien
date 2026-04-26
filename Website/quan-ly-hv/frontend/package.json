@@ -6,8 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview",
-    "deploy": "vercel --prod --yes"
+    "preview": "vite preview"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.100.1",
