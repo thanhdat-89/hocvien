@@ -90,7 +90,13 @@ export default function Reviews() {
     return [...map.values()].sort((a, b) => a.className.localeCompare(b.className, 'vi'))
   }, [rows, filterGrade])
 
+  const hasPrivateInScope = useMemo(() => rows.some(r => {
+    if (filterGrade && String(r.gradeLevel ?? '') !== filterGrade) return false
+    return r.classes.length === 0
+  }), [rows, filterGrade])
+
   useEffect(() => {
+    if (filterClassId === '__private__') return
     if (filterClassId && !classOptions.some(c => c.classId === filterClassId)) setFilterClassId('')
   }, [classOptions, filterClassId])
 
@@ -98,6 +104,7 @@ export default function Reviews() {
   const scoped = useMemo(() => {
     return rows.filter(r => {
       if (filterGrade && String(r.gradeLevel ?? '') !== filterGrade) return false
+      if (filterClassId === '__private__') return r.classes.length === 0
       if (filterClassId && !r.classes.some(c => c.classId === filterClassId)) return false
       return true
     })
@@ -300,7 +307,7 @@ export default function Reviews() {
           </div>
 
           {/* Row 4 — Lớp học */}
-          {classOptions.length > 0 && (
+          {(classOptions.length > 0 || hasPrivateInScope) && (
             <div className="flex items-start gap-3 flex-wrap">
               <span className="text-[10px] font-bold text-outline uppercase tracking-wider w-20 pt-2 shrink-0">Lớp học</span>
               <div className="flex flex-wrap gap-2 flex-1">
@@ -327,6 +334,18 @@ export default function Reviews() {
                     {c.className}
                   </button>
                 ))}
+                {hasPrivateInScope && (
+                  <button
+                    onClick={() => setFilterClassId('__private__')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                      filterClassId === '__private__'
+                        ? 'bg-tertiary text-on-tertiary border-tertiary shadow-sm'
+                        : 'bg-surface text-tertiary border-tertiary/30 hover:border-tertiary/60'
+                    }`}
+                  >
+                    Học riêng
+                  </button>
+                )}
               </div>
             </div>
           )}
