@@ -209,8 +209,10 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
       })
 
     // ─── Nhận xét theo tháng ───────────────────────────────────
-    const reviewSnap = await db.collection(C.STUDENTS).doc(studentId)
-      .collection('reviews').orderBy('month', 'desc').get()
+    const [reviewSnap, testScoreSnap] = await Promise.all([
+      db.collection(C.STUDENTS).doc(studentId).collection('reviews').orderBy('month', 'desc').get(),
+      db.collection(C.STUDENTS).doc(studentId).collection('testScores').get(),
+    ])
     const reviews: PublicReview[] = reviewSnap.docs.map(d => {
       const data = d.data()
       return {
@@ -221,6 +223,19 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
         updatedAt: data.updatedAt,
       }
     })
+    const testScores = testScoreSnap.docs
+      .map(d => ({ id: d.id, ...d.data() } as any))
+      .sort((a, b) => (b.testDate || '').localeCompare(a.testDate || ''))
+      .map(t => ({
+        id: t.id,
+        testName: t.testName,
+        testDate: t.testDate,
+        score: t.score,
+        maxScore: t.maxScore,
+        className: t.className,
+        teacherName: t.teacherName,
+        notes: t.notes,
+      }))
 
     const [tuitionSummary, promotions, privateSessionsRaw] = await Promise.all([
       computeTuitionSummary(studentId),
@@ -249,6 +264,7 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
       tuitionSummary,
       promotions,
       reviews,
+      testScores,
     })
   } catch (err) { next(err) }
 })
