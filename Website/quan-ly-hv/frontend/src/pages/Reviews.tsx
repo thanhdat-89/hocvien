@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import TopBar from '../components/TopBar'
 import { useAlert, useConfirm } from '../components/ConfirmDialog'
 import api from '../services/api'
@@ -18,9 +19,27 @@ interface RowState extends ReviewRow {
   dirty: boolean
 }
 
+function Avatar({ name }: { name: string }) {
+  const initials = name.split(' ').slice(-2).map(w => w[0] ?? '').join('').toUpperCase()
+  const colors = ['bg-blue-100 text-primary', 'bg-pink-100 text-tertiary', 'bg-green-100 text-secondary', 'bg-purple-100 text-tertiary']
+  const color = colors[name.charCodeAt(0) % colors.length]
+  return (
+    <div className={`w-10 h-10 rounded-full ${color} flex items-center justify-center font-bold text-sm flex-shrink-0`}>
+      {initials}
+    </div>
+  )
+}
+
 const monthKey = (y: number, m: number) => `${y}-${String(m).padStart(2, '0')}`
 
+const fmtUpdated = (iso?: string) => {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`
+}
+
 export default function Reviews() {
+  const navigate = useNavigate()
   const today = new Date()
   const [year, setYear] = useState(today.getFullYear())
   const [month, setMonth] = useState(today.getMonth() + 1)
@@ -80,9 +99,7 @@ export default function Reviews() {
     setRows(rs => rs.map(r => r.studentId === sid ? { ...r, saving: true } : r))
     try {
       if (!content) {
-        if (row.review) {
-          await api.delete(`/reviews/${sid}/${mk}`)
-        }
+        if (row.review) await api.delete(`/reviews/${sid}/${mk}`)
         setRows(rs => rs.map(r => r.studentId === sid ? {
           ...r, review: null, draft: '', draftTeacher: '', saving: false, dirty: false,
         } : r))
@@ -128,8 +145,7 @@ export default function Reviews() {
 
   const dirtyCount = rows.filter(r => r.dirty).length
   const saveAll = async () => {
-    const dirty = rows.filter(r => r.dirty)
-    for (const r of dirty) await saveRow(r.studentId)
+    for (const r of rows.filter(r => r.dirty)) await saveRow(r.studentId)
   }
 
   const months = Array.from({ length: 12 }, (_, i) => i + 1)
@@ -140,149 +156,177 @@ export default function Reviews() {
     <div className="space-y-6">
       <TopBar title="Nhận xét học viên" />
 
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2 flex-wrap">
-          <select
-            value={month}
-            onChange={e => setMonth(Number(e.target.value))}
-            className="bg-surface-container-low border border-outline-variant/20 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-          >
-            {months.map(m => <option key={m} value={m}>Tháng {m}</option>)}
-          </select>
-          <select
-            value={year}
-            onChange={e => setYear(Number(e.target.value))}
-            className="bg-surface-container-low border border-outline-variant/20 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-          >
-            {years.map(y => <option key={y} value={y}>{y}</option>)}
-          </select>
-          <select
-            value={filterGrade}
-            onChange={e => setFilterGrade(e.target.value)}
-            className="bg-surface-container-low border border-outline-variant/20 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-          >
-            <option value="">Tất cả khối</option>
-            {grades.map(g => <option key={g} value={g}>Khối {g}</option>)}
-          </select>
-          <input
-            type="text"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Tìm học viên..."
-            className="bg-surface-container-low border border-outline-variant/20 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 w-56"
-          />
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-outline">
-            Đã nhận xét: <b className="text-on-surface">{filledCount}</b> / {rows.length}
-          </span>
-          {dirtyCount > 0 && (
-            <button
-              onClick={saveAll}
-              className="bg-primary text-on-primary rounded-xl py-2 px-4 text-sm font-medium hover:bg-primary/90 transition-colors flex items-center gap-2"
-            >
-              <span className="material-symbols-outlined text-base">save</span>
-              Lưu tất cả ({dirtyCount})
-            </button>
-          )}
-        </div>
-      </div>
+      <div className="bg-surface rounded-3xl p-6 md:p-8 shadow-sm">
+        <p className="text-[10px] uppercase tracking-widest text-primary font-bold mb-1">Đánh giá định kỳ</p>
+        <h2 className="font-headline text-3xl font-black text-on-surface mb-6">Nhận xét học viên</h2>
 
-      {loading ? (
-        <div className="flex justify-center py-16">
-          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary" />
+        <div className="flex items-center justify-between gap-3 flex-wrap mb-6">
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={month}
+              onChange={e => setMonth(Number(e.target.value))}
+              className="bg-surface-container-low border border-outline-variant/20 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              {months.map(m => <option key={m} value={m}>Tháng {m}</option>)}
+            </select>
+            <select
+              value={year}
+              onChange={e => setYear(Number(e.target.value))}
+              className="bg-surface-container-low border border-outline-variant/20 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              {years.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+            <select
+              value={filterGrade}
+              onChange={e => setFilterGrade(e.target.value)}
+              className="bg-surface-container-low border border-outline-variant/20 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              <option value="">Tất cả khối</option>
+              {grades.map(g => <option key={g} value={g}>Khối {g}</option>)}
+            </select>
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Tìm học viên..."
+              className="bg-surface-container-low border border-outline-variant/20 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 w-56"
+            />
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-outline">
+              Đã nhận xét: <b className="text-on-surface">{filledCount}</b> / {rows.length}
+            </span>
+            {dirtyCount > 0 && (
+              <button
+                onClick={saveAll}
+                className="bg-primary text-on-primary rounded-xl py-2 px-4 text-sm font-medium hover:bg-primary/90 transition-colors flex items-center gap-2"
+              >
+                <span className="material-symbols-outlined text-base">save</span>
+                Lưu tất cả ({dirtyCount})
+              </button>
+            )}
+          </div>
         </div>
-      ) : visible.length === 0 ? (
-        <div className="bg-surface rounded-2xl py-20 text-center">
-          <p className="text-outline">Không có học viên phù hợp.</p>
-        </div>
-      ) : (
-        <div className="bg-surface rounded-2xl overflow-hidden">
-          <table className="w-full text-left">
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="border-b border-outline-variant/10 text-[10px] uppercase font-bold text-outline tracking-widest">
-                <th className="py-3 px-4 w-12">STT</th>
-                <th className="py-3 px-4 w-56">Học viên</th>
-                <th className="py-3 px-4 w-20">Khối lớp</th>
-                <th className="py-3 px-4 w-48">Lớp học</th>
-                <th className="py-3 px-4">Nội dung nhận xét</th>
-                <th className="py-3 px-4 w-32">Hành động</th>
+              <tr className="bg-surface-container-low/50">
+                <th className="table-header w-12 text-center">STT</th>
+                <th className="table-header">Học viên</th>
+                <th className="table-header">Khối lớp</th>
+                <th className="table-header">Lớp học</th>
+                <th className="table-header">Nội dung nhận xét</th>
+                <th className="table-header">Tình trạng</th>
+                <th className="table-header text-right">Thao tác</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-outline-variant/5">
-              {visible.map((r, i) => (
-                <tr key={r.studentId} className="hover:bg-surface-container-low/30 transition-colors align-top">
-                  <td className="py-3 px-4 text-sm text-outline">{i + 1}</td>
-                  <td className="py-3 px-4">
-                    <a
-                      href={`/students/${r.studentId}`}
-                      className="text-sm font-semibold text-on-surface hover:text-primary"
-                    >
-                      {r.studentName}
-                    </a>
+            <tbody className="divide-y divide-outline-variant/10">
+              {loading ? (
+                <tr>
+                  <td colSpan={7} className="py-16 text-center">
+                    <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
                   </td>
-                  <td className="py-3 px-4">
+                </tr>
+              ) : visible.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-16 text-center text-outline">
+                    <span className="material-symbols-outlined text-5xl block mb-3 opacity-30">search_off</span>
+                    Không tìm thấy học viên nào
+                  </td>
+                </tr>
+              ) : visible.map((r, i) => (
+                <tr key={r.studentId} className="hover:bg-surface-container-low/30 transition-colors group align-top">
+                  <td className="table-cell text-center text-sm text-outline font-medium">{i + 1}</td>
+                  <td className="table-cell">
+                    <button
+                      onClick={() => navigate(`/students/${r.studentId}`)}
+                      className="flex items-center gap-3 hover:opacity-80 transition-opacity text-left"
+                    >
+                      <Avatar name={r.studentName} />
+                      <p className="font-semibold text-on-surface">{r.studentName}</p>
+                    </button>
+                  </td>
+                  <td className="table-cell">
                     {r.gradeLevel != null ? (
-                      <span className="inline-block bg-primary/10 text-primary text-xs font-bold px-2 py-0.5 rounded-md">
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-surface-container-high text-xs font-bold text-primary">
                         Lớp {r.gradeLevel}
                       </span>
-                    ) : (
-                      <span className="text-xs text-outline">—</span>
-                    )}
+                    ) : <span className="text-outline text-sm">—</span>}
                   </td>
-                  <td className="py-3 px-4">
+                  <td className="table-cell">
                     {r.classes.length === 0 ? (
-                      <span className="text-xs text-outline">—</span>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-tertiary/10 text-tertiary text-xs font-medium">
+                        Học riêng
+                      </span>
                     ) : (
                       <div className="flex flex-wrap gap-1">
                         {r.classes.map(c => (
-                          <span key={c.classId} className="inline-block bg-emerald-50 text-emerald-700 text-xs font-medium px-2 py-0.5 rounded-md">
+                          <span key={c.classId} className="inline-flex items-center px-2 py-0.5 rounded-md bg-primary-container/20 text-primary text-xs font-medium">
                             {c.className}
                           </span>
                         ))}
                       </div>
                     )}
                   </td>
-                  <td className="py-3 px-4">
+                  <td className="table-cell w-[40%] min-w-[280px]">
                     <textarea
                       value={r.draft}
                       onChange={e => updateRow(r.studentId, { draft: e.target.value })}
                       placeholder="Nhập nhận xét..."
                       rows={2}
-                      className={`w-full bg-surface-container-low rounded-lg py-1.5 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 resize-y min-h-[44px] ${r.dirty ? 'ring-2 ring-amber-300' : ''}`}
+                      className={`w-full bg-surface-container-low rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 resize-y min-h-[44px] ${r.dirty ? 'ring-2 ring-amber-300' : ''}`}
                     />
                     <input
                       type="text"
                       value={r.draftTeacher}
                       onChange={e => updateRow(r.studentId, { draftTeacher: e.target.value })}
                       placeholder="Tên giáo viên (không bắt buộc)"
-                      className="mt-1 w-full bg-transparent border-none text-xs text-outline focus:outline-none focus:text-on-surface"
+                      className="mt-1 w-full bg-transparent border-none text-xs text-outline focus:outline-none focus:text-on-surface px-1"
                     />
-                    {r.review?.updatedAt && !r.dirty && (
-                      <p className="mt-1 text-[10px] text-outline">
-                        Cập nhật: {new Date(r.review.updatedAt).toLocaleString('vi-VN')}
-                      </p>
+                  </td>
+                  <td className="table-cell">
+                    {r.review && r.review.content.trim() ? (
+                      <div className="space-y-1">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-bold uppercase tracking-wider">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Đã nhận xét
+                        </span>
+                        {r.review.updatedAt && (
+                          <p className="text-[10px] text-outline">{fmtUpdated(r.review.updatedAt)}</p>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-surface-container-high text-outline text-[11px] font-bold uppercase tracking-wider">
+                        <span className="w-1.5 h-1.5 rounded-full bg-outline/40" /> Chưa nhận xét
+                      </span>
                     )}
                   </td>
-                  <td className="py-3 px-4">
-                    <div className="flex items-center gap-1">
+                  <td className="table-cell text-right">
+                    <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
                         onClick={() => saveRow(r.studentId)}
                         disabled={!r.dirty || r.saving}
-                        className="p-2 hover:bg-primary/10 text-outline hover:text-primary rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                        title="Lưu"
+                        className="p-2 text-outline hover:text-primary hover:bg-primary-container/10 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Lưu nhận xét"
                       >
-                        <span className="material-symbols-outlined text-base">
+                        <span className="material-symbols-outlined text-[20px]">
                           {r.saving ? 'progress_activity' : 'save'}
                         </span>
+                      </button>
+                      <button
+                        onClick={() => navigate(`/students/${r.studentId}`)}
+                        className="p-2 text-outline hover:text-primary hover:bg-primary-container/10 rounded-lg transition-all"
+                        title="Xem hồ sơ học viên"
+                      >
+                        <span className="material-symbols-outlined text-[20px]">visibility</span>
                       </button>
                       {r.review && (
                         <button
                           onClick={() => removeRow(r.studentId)}
-                          className="p-2 hover:bg-error/10 text-outline hover:text-error rounded-lg transition-colors"
+                          className="p-2 text-outline hover:text-error hover:bg-error-container/10 rounded-lg transition-all"
                           title="Xoá nhận xét"
                         >
-                          <span className="material-symbols-outlined text-base">delete</span>
+                          <span className="material-symbols-outlined text-[20px]">delete</span>
                         </button>
                       )}
                     </div>
@@ -292,7 +336,7 @@ export default function Reviews() {
             </tbody>
           </table>
         </div>
-      )}
+      </div>
     </div>
   )
 }
