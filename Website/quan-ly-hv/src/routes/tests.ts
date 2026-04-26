@@ -195,7 +195,7 @@ router.delete('/:testId', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: 
   } catch (err) { next(err) }
 })
 
-// GET /api/tests/:testId/scores — list rows: all enrolled students + their score (if any)
+// GET /api/tests/:testId/scores — list rows: all students linked to this class
 router.get('/:testId/scores', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const testId = s(req.params.testId)
@@ -203,12 +203,22 @@ router.get('/:testId/scores', async (req: AuthRequest, res: Response, next: Next
     if (!testDoc.exists) { res.status(404).json({ message: 'Không tìm thấy bài kiểm tra' }); return }
     const test = toObj<Test>(testDoc)
 
-    const enrollSnap = await db.collection(C.ENROLLMENTS)
-      .where('classId', '==', test.classId)
-      .get()
+    // Collect candidate studentIds from enrollments (any status — student may have
+    // dropped before/after but still owns a score) and from session attendance as
+    // a fallback for classes that track membership through sessions only.
+    const [enrollSnap, attendanceSnap] = await Promise.all([
+      db.collection(C.ENROLLMENTS).where('classId', '==', test.classId).get(),
+      db.collection(C.STUDENT_ATTENDANCES).where('classId', '==', test.classId).limit(500).get(),
+    ])
     const enrollments = toDocs<ClassEnrollment>(enrollSnap)
-    const studentIds = [...new Set(enrollments.map(e => e.studentId))]
+    const candidateIds = new Set<string>()
+    enrollments.forEach(e => candidateIds.add(e.studentId))
+    attendanceSnap.docs.forEach(d => {
+      const sid = (d.data() as any).studentId
+      if (sid) candidateIds.add(sid)
+    })
 
+    const studentIds = [...candidateIds]
     const studentDocs = await Promise.all(studentIds.map(id => db.collection(C.STUDENTS).doc(id).get()))
     const studentMap = new Map<string, Student>()
     studentDocs.forEach(d => { if (d.exists) studentMap.set(d.id, toObj<Student>(d)) })
@@ -225,13 +235,19 @@ router.get('/:testId/scores', async (req: AuthRequest, res: Response, next: Next
       .map(sid => {
         const stu = studentMap.get(sid)
         if (!stu || stu.status !== 'ACTIVE') return null
-        const enroll = enrollments.find(e => e.studentId === sid && e.status === 'ACTIVE')
-        if (!enroll) return null
+        const enroll = enrollments.find(e => e.studentId === sid)
+        // Skip rows where the student is formally dropped from the class before
+        // the test was held — they can't reasonably have a score for it.
+        if (enroll && enroll.status === 'DROPPED') {
+          const dropDate = (enroll as any).dropDate
+          if (dropDate && dropDate < test.testDate) return null
+        }
         const score = scoreMap.get(sid)
         return {
           studentId: sid,
           studentName: stu.fullName,
           gradeLevel: stu.gradeLevel,
+          enrollmentStatus: enroll?.status ?? 'ATTENDED',
           scoreId: score?.id,
           score: score?.score ?? null,
           notes: score?.notes ?? '',
