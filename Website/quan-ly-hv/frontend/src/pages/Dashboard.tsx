@@ -193,30 +193,6 @@ export default function Dashboard() {
           />
         </section>
 
-        {/* Revenue banner */}
-        <section className="bg-surface-container-lowest rounded-2xl p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border border-outline-variant/20">
-          <div className="flex items-center gap-5">
-            <div className="p-4 bg-tertiary/10 rounded-xl">
-              <span className="material-symbols-outlined text-tertiary text-3xl">account_balance_wallet</span>
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-wider text-on-surface-variant font-semibold">Doanh thu tháng {today.getMonth() + 1}/{today.getFullYear()}</p>
-              <h2 className="text-3xl font-headline font-black text-on-surface mt-1">
-                {stats ? formatFullVND(stats.revenueThisMonth) : '—'}
-              </h2>
-            </div>
-          </div>
-          {stats && stats.overdueCount > 0 && (
-            <button
-              onClick={() => navigate('/tuition?tab=overdue')}
-              className="flex items-center gap-2 px-4 py-2 bg-error/10 text-error rounded-xl hover:bg-error/20 transition-colors"
-            >
-              <span className="material-symbols-outlined text-lg">warning</span>
-              <span className="font-semibold text-sm">{stats.overdueCount} học phí quá hạn</span>
-            </button>
-          )}
-        </section>
-
         {/* Main Grid */}
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left column */}
