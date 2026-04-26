@@ -8,11 +8,24 @@ const router = Router()
 router.use(authenticate)
 const now = () => new Date().toISOString()
 
-router.get('/', async (_req, res: Response, next: NextFunction) => {
+router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const snap = await db.collection(C.TEACHERS).where('status', '==', 'ACTIVE').get()
-    const teachers = toDocs<Teacher>(snap).sort((a, b) => a.fullName.localeCompare(b.fullName))
-    res.json(teachers)
+    const status = (req.query.status as string) || 'ACTIVE'
+    let q: FirebaseFirestore.Query = db.collection(C.TEACHERS)
+    if (status !== 'ALL') q = q.where('status', '==', status)
+    const snap = await q.get()
+    const teachers = toDocs<Teacher>(snap).sort((a, b) => a.fullName.localeCompare(b.fullName, 'vi'))
+
+    // Đính kèm số lớp đang dạy cho từng giáo viên (1 query thay vì N)
+    const counts = new Map<string, number>()
+    if (teachers.length > 0) {
+      const classesSnap = await db.collection(C.CLASSES).where('status', '==', 'ACTIVE').get()
+      classesSnap.docs.forEach(d => {
+        const tid = (d.data() as any).teacherId
+        if (tid) counts.set(tid, (counts.get(tid) ?? 0) + 1)
+      })
+    }
+    res.json(teachers.map(t => ({ ...t, activeClassCount: counts.get(t.id) ?? 0 })))
   } catch (err) { next(err) }
 })
 
@@ -62,6 +75,23 @@ router.put('/:id', requireRole('ADMIN'), async (req: AuthRequest, res: Response,
     await db.collection(C.TEACHERS).doc(s(req.params.id)).update(updates)
     const updated = toObj<Teacher>(await db.collection(C.TEACHERS).doc(s(req.params.id)).get())
     res.json(updated)
+  } catch (err) { next(err) }
+})
+
+// Soft-delete: chuyển status về INACTIVE để giữ lịch sử lớp đã dạy
+router.delete('/:id', requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const teacherId = s(req.params.id)
+    const activeClassesSnap = await db.collection(C.CLASSES)
+      .where('teacherId', '==', teacherId)
+      .where('status', '==', 'ACTIVE')
+      .limit(1).get()
+    if (!activeClassesSnap.empty) {
+      res.status(400).json({ message: 'Giáo viên còn lớp đang dạy — không thể vô hiệu hoá' })
+      return
+    }
+    await db.collection(C.TEACHERS).doc(teacherId).update({ status: 'INACTIVE', updatedAt: now() })
+    res.json({ message: 'Đã vô hiệu hoá giáo viên' })
   } catch (err) { next(err) }
 })
 

@@ -12,6 +12,7 @@ const navItems: { path: string; icon: string; label: string; roles?: Role[] }[] 
   { path: '/exams', icon: 'quiz', label: 'Điểm kiểm tra' },
   { path: '/reviews', icon: 'rate_review', label: 'Nhận xét học viên' },
   { path: '/tuition', icon: 'payments', label: 'Học phí', roles: ['ADMIN', 'STAFF'] },
+  { path: '/teachers', icon: 'badge', label: 'Giáo viên', roles: ['ADMIN'] },
 ]
 
 export default function Sidebar() {
