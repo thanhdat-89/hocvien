@@ -7,6 +7,7 @@ const navItems = [
   { path: '/students', icon: 'group', label: 'Học viên' },
   { path: '/classes', icon: 'calendar_month', label: 'Lịch & Lớp học' },
   { path: '/private-schedule', icon: 'person_apron', label: 'Lịch học riêng' },
+  { path: '/exams', icon: 'quiz', label: 'Điểm kiểm tra' },
   { path: '/tuition', icon: 'payments', label: 'Học phí' },
   // { path: '/attendance', icon: 'assignment_turned_in', label: 'Chấm công' },
   // { path: '/notifications', icon: 'notifications', label: 'Thông báo' },

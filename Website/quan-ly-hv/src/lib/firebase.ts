@@ -70,6 +70,7 @@ export const C = {
   NOTIFICATIONS:       'notifications',
   LEADS:               'leads',
   PRIVATE_SCHEDULES:   'privateSchedules',
+  TESTS:               'tests',
   AGGREGATES:          'aggregates',
 } as const
 
