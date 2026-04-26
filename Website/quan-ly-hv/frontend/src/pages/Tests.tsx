@@ -84,33 +84,7 @@ export default function Tests() {
     <div className="space-y-6">
       <TopBar title="Điểm kiểm tra" />
 
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2 flex-wrap">
-          <select
-            value={filterGrade}
-            onChange={e => { setFilterGrade(e.target.value); setFilterClassId('') }}
-            className="bg-surface-container-low border border-outline-variant/20 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-          >
-            <option value="">Tất cả khối</option>
-            {grades.map(g => <option key={g} value={g}>Khối {g}</option>)}
-          </select>
-          <select
-            value={filterClassId}
-            onChange={e => setFilterClassId(e.target.value)}
-            className="bg-surface-container-low border border-outline-variant/20 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 min-w-[200px]"
-          >
-            <option value="">Tất cả lớp</option>
-            {classes
-              .filter(c => !filterGrade || c.gradeLevel === Number(filterGrade))
-              .map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          {(filterClassId || filterGrade) && (
-            <button
-              onClick={() => { setFilterClassId(''); setFilterGrade('') }}
-              className="text-sm text-outline hover:text-on-surface px-2 py-1"
-            >Xoá lọc</button>
-          )}
-        </div>
+      <div className="flex items-center justify-end">
         <button
           onClick={() => { setEditingTest(null); setShowCreate(true) }}
           className="btn-primary text-sm"
@@ -118,6 +92,68 @@ export default function Tests() {
           <span className="material-symbols-outlined text-base">add</span>
           Thêm bài KT
         </button>
+      </div>
+
+      <div className="bg-surface-container-low/60 rounded-2xl p-4 space-y-3">
+        <div className="flex items-start gap-3 flex-wrap">
+          <span className="text-[10px] font-bold text-outline uppercase tracking-wider w-20 pt-2 shrink-0">Khối lớp</span>
+          <div className="flex flex-wrap gap-2 flex-1">
+            <button
+              onClick={() => { setFilterGrade(''); setFilterClassId('') }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                filterGrade === ''
+                  ? 'bg-primary text-on-primary border-primary shadow-sm'
+                  : 'bg-surface text-on-surface-variant border-outline-variant/30 hover:border-primary/40 hover:text-primary'
+              }`}
+            >
+              Tất cả
+            </button>
+            {grades.map(g => (
+              <button
+                key={g}
+                onClick={() => { setFilterGrade(String(g)); setFilterClassId('') }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                  filterGrade === String(g)
+                    ? 'bg-primary text-on-primary border-primary shadow-sm'
+                    : 'bg-surface text-on-surface-variant border-outline-variant/30 hover:border-primary/40 hover:text-primary'
+                }`}
+              >
+                Lớp {g}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex items-start gap-3 flex-wrap">
+          <span className="text-[10px] font-bold text-outline uppercase tracking-wider w-20 pt-2 shrink-0">Lớp học</span>
+          <div className="flex flex-wrap gap-2 flex-1">
+            <button
+              onClick={() => setFilterClassId('')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                filterClassId === ''
+                  ? 'bg-primary text-on-primary border-primary shadow-sm'
+                  : 'bg-surface text-on-surface-variant border-outline-variant/30 hover:border-primary/40 hover:text-primary'
+              }`}
+            >
+              Tất cả
+            </button>
+            {classes
+              .filter(c => !filterGrade || c.gradeLevel === Number(filterGrade))
+              .map(c => (
+                <button
+                  key={c.id}
+                  onClick={() => setFilterClassId(c.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                    filterClassId === c.id
+                      ? 'bg-primary text-on-primary border-primary shadow-sm'
+                      : 'bg-surface text-on-surface-variant border-outline-variant/30 hover:border-primary/40 hover:text-primary'
+                  }`}
+                >
+                  {c.name}
+                </button>
+              ))}
+          </div>
+        </div>
       </div>
 
       {loading ? (
