@@ -51,7 +51,6 @@ export default function Tests() {
   const [tests, setTests] = useState<Test[]>([])
   const [classes, setClasses] = useState<ClassLite[]>([])
   const [filterClassId, setFilterClassId] = useState('')
-  const [filterGrade, setFilterGrade] = useState('')
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
   const [editingTest, setEditingTest] = useState<Test | null>(null)
@@ -63,8 +62,7 @@ export default function Tests() {
   const loadTests = () => {
     setLoading(true)
     const params = new URLSearchParams()
-    if (filterClassId) params.set('classId', filterClassId)
-    if (filterGrade)   params.set('gradeLevel', filterGrade)
+    if (filterClassId && filterClassId !== '__private__') params.set('classId', filterClassId)
     api.get(`/tests?${params.toString()}`)
       .then(r => setTests(Array.isArray(r.data) ? r.data : []))
       .catch(() => setTests([]))
@@ -72,19 +70,24 @@ export default function Tests() {
   }
 
   useEffect(() => { loadClasses() }, [])
-  useEffect(() => { loadTests() }, [filterClassId, filterGrade])
+  useEffect(() => { loadTests() }, [filterClassId])
 
-  const grades = useMemo(() => {
-    const set = new Set<number>()
-    classes.forEach(c => { if (c.gradeLevel != null) set.add(c.gradeLevel) })
-    return [...set].sort((a, b) => a - b)
-  }, [classes])
+  // Lọc client-side cho pill "Học riêng" — bài KT không thuộc danh sách lớp đã đăng ký
+  const visibleTests = useMemo(() => {
+    if (filterClassId !== '__private__') return tests
+    const ids = new Set(classes.map(c => c.id))
+    return tests.filter(t => !ids.has(t.classId))
+  }, [tests, classes, filterClassId])
 
   return (
     <div className="space-y-6">
       <TopBar title="Điểm kiểm tra" />
 
-      <div className="flex items-center justify-end">
+      <div className="flex items-end justify-between gap-3 flex-wrap">
+        <div>
+          <span className="text-[11px] font-bold text-primary tracking-[0.2em] uppercase mb-2 block">Đánh giá kết quả</span>
+          <h2 className="text-4xl font-black text-on-surface font-headline tracking-tight">Điểm kiểm tra</h2>
+        </div>
         <button
           onClick={() => { setEditingTest(null); setShowCreate(true) }}
           className="btn-primary text-sm"
@@ -94,36 +97,7 @@ export default function Tests() {
         </button>
       </div>
 
-      <div className="bg-surface-container-low/60 rounded-2xl p-4 space-y-3">
-        <div className="flex items-start gap-3 flex-wrap">
-          <span className="text-[10px] font-bold text-outline uppercase tracking-wider w-20 pt-2 shrink-0">Khối lớp</span>
-          <div className="flex flex-wrap gap-2 flex-1">
-            <button
-              onClick={() => { setFilterGrade(''); setFilterClassId('') }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
-                filterGrade === ''
-                  ? 'bg-primary text-on-primary border-primary shadow-sm'
-                  : 'bg-surface text-on-surface-variant border-outline-variant/30 hover:border-primary/40 hover:text-primary'
-              }`}
-            >
-              Tất cả
-            </button>
-            {grades.map(g => (
-              <button
-                key={g}
-                onClick={() => { setFilterGrade(String(g)); setFilterClassId('') }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
-                  filterGrade === String(g)
-                    ? 'bg-primary text-on-primary border-primary shadow-sm'
-                    : 'bg-surface text-on-surface-variant border-outline-variant/30 hover:border-primary/40 hover:text-primary'
-                }`}
-              >
-                Lớp {g}
-              </button>
-            ))}
-          </div>
-        </div>
-
+      <div className="bg-surface-container-low/60 rounded-2xl p-4">
         <div className="flex items-start gap-3 flex-wrap">
           <span className="text-[10px] font-bold text-outline uppercase tracking-wider w-20 pt-2 shrink-0">Lớp học</span>
           <div className="flex flex-wrap gap-2 flex-1">
@@ -137,21 +111,29 @@ export default function Tests() {
             >
               Tất cả
             </button>
-            {classes
-              .filter(c => !filterGrade || c.gradeLevel === Number(filterGrade))
-              .map(c => (
-                <button
-                  key={c.id}
-                  onClick={() => setFilterClassId(c.id)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
-                    filterClassId === c.id
-                      ? 'bg-primary text-on-primary border-primary shadow-sm'
-                      : 'bg-surface text-on-surface-variant border-outline-variant/30 hover:border-primary/40 hover:text-primary'
-                  }`}
-                >
-                  {c.name}
-                </button>
-              ))}
+            {classes.map(c => (
+              <button
+                key={c.id}
+                onClick={() => setFilterClassId(c.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                  filterClassId === c.id
+                    ? 'bg-primary text-on-primary border-primary shadow-sm'
+                    : 'bg-surface text-on-surface-variant border-outline-variant/30 hover:border-primary/40 hover:text-primary'
+                }`}
+              >
+                {c.name}
+              </button>
+            ))}
+            <button
+              onClick={() => setFilterClassId('__private__')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                filterClassId === '__private__'
+                  ? 'bg-tertiary text-on-tertiary border-tertiary shadow-sm'
+                  : 'bg-surface text-tertiary border-tertiary/30 hover:border-tertiary/60'
+              }`}
+            >
+              Học riêng
+            </button>
           </div>
         </div>
       </div>
@@ -160,7 +142,7 @@ export default function Tests() {
         <div className="flex justify-center py-16">
           <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary" />
         </div>
-      ) : tests.length === 0 ? (
+      ) : visibleTests.length === 0 ? (
         <div className="bg-surface-container-lowest rounded-2xl p-16 text-center shadow-sm">
           <span className="material-symbols-outlined text-6xl text-outline/40 block mb-3">quiz</span>
           <p className="text-base font-semibold text-on-surface mb-1">Chưa có bài kiểm tra nào</p>
@@ -168,7 +150,7 @@ export default function Tests() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {tests.map(t => (
+          {visibleTests.map(t => (
             <article
               key={t.id}
               onClick={() => setOpenTest(t)}
