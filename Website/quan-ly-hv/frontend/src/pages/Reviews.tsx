@@ -45,6 +45,7 @@ export default function Reviews() {
   const [month, setMonth] = useState(today.getMonth() + 1)
   const [filterGrade, setFilterGrade] = useState<string>('')
   const [filterClassId, setFilterClassId] = useState<string>('')
+  const [filterStatus, setFilterStatus] = useState<'all' | 'reviewed' | 'pending'>('all')
   const [search, setSearch] = useState('')
   const [rows, setRows] = useState<RowState[]>([])
   const [loading, setLoading] = useState(true)
@@ -98,10 +99,13 @@ export default function Reviews() {
     return rows.filter(r => {
       if (filterGrade && String(r.gradeLevel ?? '') !== filterGrade) return false
       if (filterClassId && !r.classes.some(c => c.classId === filterClassId)) return false
+      const hasReview = !!(r.review && r.review.content.trim())
+      if (filterStatus === 'reviewed' && !hasReview) return false
+      if (filterStatus === 'pending' && hasReview) return false
       if (q && !r.studentName.toLowerCase().includes(q)) return false
       return true
     })
-  }, [rows, filterGrade, filterClassId, search])
+  }, [rows, filterGrade, filterClassId, filterStatus, search])
 
   const updateRow = (sid: string, patch: Partial<RowState>) => {
     setRows(rs => rs.map(r => r.studentId === sid ? { ...r, ...patch, dirty: true } : r))
@@ -177,50 +181,56 @@ export default function Reviews() {
         <p className="text-[10px] uppercase tracking-widest text-primary font-bold mb-1">Đánh giá định kỳ</p>
         <h2 className="font-headline text-3xl font-black text-on-surface mb-6">Nhận xét học viên</h2>
 
-        <div className="flex items-start justify-between gap-3 flex-wrap mb-6">
-          <div className="flex items-center gap-2 flex-wrap">
-            <select
-              value={month}
-              onChange={e => setMonth(Number(e.target.value))}
-              className="bg-surface-container-low border border-outline-variant/20 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-            >
-              {months.map(m => <option key={m} value={m}>Tháng {m}</option>)}
-            </select>
-            <select
-              value={year}
-              onChange={e => setYear(Number(e.target.value))}
-              className="bg-surface-container-low border border-outline-variant/20 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-            >
-              {years.map(y => <option key={y} value={y}>{y}</option>)}
-            </select>
-            <input
-              type="text"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Tìm học viên..."
-              className="bg-surface-container-low border border-outline-variant/20 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 w-56"
-            />
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-outline">
-              Đã nhận xét: <b className="text-on-surface">{filledCount}</b> / {rows.length}
-            </span>
-            {dirtyCount > 0 && (
-              <button
-                onClick={saveAll}
-                className="bg-primary text-on-primary rounded-xl py-2 px-4 text-sm font-medium hover:bg-primary/90 transition-colors flex items-center gap-2"
+        <div className="bg-surface-container-low/60 rounded-2xl p-4 mb-6 space-y-4">
+          {/* Row 1 — Phạm vi & tìm kiếm */}
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] font-bold text-outline uppercase tracking-wider mr-1">Tháng</span>
+              <select
+                value={month}
+                onChange={e => setMonth(Number(e.target.value))}
+                className="bg-surface border border-outline-variant/30 rounded-lg py-1.5 px-3 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary/20"
               >
-                <span className="material-symbols-outlined text-base">save</span>
-                Lưu tất cả ({dirtyCount})
-              </button>
-            )}
+                {months.map(m => <option key={m} value={m}>Tháng {m}</option>)}
+              </select>
+              <select
+                value={year}
+                onChange={e => setYear(Number(e.target.value))}
+                className="bg-surface border border-outline-variant/30 rounded-lg py-1.5 px-3 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary/20"
+              >
+                {years.map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+              <div className="relative ml-2">
+                <span className="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-base text-outline pointer-events-none">search</span>
+                <input
+                  type="text"
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Tìm học viên..."
+                  className="bg-surface border border-outline-variant/30 rounded-lg py-1.5 pl-8 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 w-56"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-outline">
+                Đã nhận xét: <b className="text-on-surface">{filledCount}</b> / {rows.length}
+              </span>
+              {dirtyCount > 0 && (
+                <button
+                  onClick={saveAll}
+                  className="bg-primary text-on-primary rounded-xl py-2 px-4 text-sm font-medium hover:bg-primary/90 transition-colors flex items-center gap-2"
+                >
+                  <span className="material-symbols-outlined text-base">save</span>
+                  Lưu tất cả ({dirtyCount})
+                </button>
+              )}
+            </div>
           </div>
-        </div>
 
-        <div className="bg-surface-container-low/60 rounded-2xl p-4 mb-6 space-y-3">
-          <div>
-            <label className="text-[10px] font-bold text-outline uppercase tracking-wider mb-2 block">Khối lớp</label>
-            <div className="flex flex-wrap gap-2">
+          {/* Row 2 — Khối lớp */}
+          <div className="flex items-start gap-3 flex-wrap">
+            <span className="text-[10px] font-bold text-outline uppercase tracking-wider w-20 pt-2 shrink-0">Khối lớp</span>
+            <div className="flex flex-wrap gap-2 flex-1">
               <button
                 onClick={() => { setFilterGrade(''); setFilterClassId('') }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
@@ -246,10 +256,12 @@ export default function Reviews() {
               ))}
             </div>
           </div>
+
+          {/* Row 3 — Lớp học */}
           {classOptions.length > 0 && (
-            <div>
-              <label className="text-[10px] font-bold text-outline uppercase tracking-wider mb-2 block">Lớp học</label>
-              <div className="flex flex-wrap gap-2">
+            <div className="flex items-start gap-3 flex-wrap">
+              <span className="text-[10px] font-bold text-outline uppercase tracking-wider w-20 pt-2 shrink-0">Lớp học</span>
+              <div className="flex flex-wrap gap-2 flex-1">
                 <button
                   onClick={() => setFilterClassId('')}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
@@ -276,6 +288,37 @@ export default function Reviews() {
               </div>
             </div>
           )}
+
+          {/* Row 4 — Tình trạng nhận xét */}
+          <div className="flex items-start gap-3 flex-wrap">
+            <span className="text-[10px] font-bold text-outline uppercase tracking-wider w-20 pt-2 shrink-0">Tình trạng</span>
+            <div className="flex flex-wrap gap-2 flex-1">
+              {([
+                { v: 'all', label: 'Tất cả', count: rows.length },
+                { v: 'reviewed', label: 'Đã nhận xét', count: filledCount },
+                { v: 'pending', label: 'Chưa nhận xét', count: rows.length - filledCount },
+              ] as const).map(opt => {
+                const active = filterStatus === opt.v
+                const tone = opt.v === 'reviewed'
+                  ? (active ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm' : 'bg-surface text-emerald-700 border-emerald-200 hover:border-emerald-400')
+                  : opt.v === 'pending'
+                  ? (active ? 'bg-amber-500 text-white border-amber-500 shadow-sm' : 'bg-surface text-amber-700 border-amber-200 hover:border-amber-400')
+                  : (active ? 'bg-primary text-on-primary border-primary shadow-sm' : 'bg-surface text-on-surface-variant border-outline-variant/30 hover:border-primary/40 hover:text-primary')
+                return (
+                  <button
+                    key={opt.v}
+                    onClick={() => setFilterStatus(opt.v)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all flex items-center gap-1.5 ${tone}`}
+                  >
+                    {opt.label}
+                    <span className={`px-1.5 py-0.5 rounded-md text-[10px] ${active ? 'bg-white/20' : 'bg-surface-container-high text-outline'}`}>
+                      {opt.count}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
