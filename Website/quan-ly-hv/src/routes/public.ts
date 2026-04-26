@@ -228,11 +228,11 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
       db.collection(C.PRIVATE_SCHEDULES).where('studentId', '==', studentId).get(),
     ])
 
-    const today = new Date().toISOString().slice(0, 10)
+    const startOfMonth = new Date().toISOString().slice(0, 7) + '-01'
     const privateSchedules = toDocs<PrivateSession>(privateSessionsRaw)
-      .filter(p => p.status !== 'CANCELLED' && p.sessionDate >= today)
+      .filter(p => p.status !== 'CANCELLED' && p.sessionDate >= startOfMonth)
       .sort((a, b) => a.sessionDate.localeCompare(b.sessionDate))
-      .slice(0, 30)
+      .slice(0, 60)
       .map(p => ({
         id: p.id,
         sessionDate: p.sessionDate,
