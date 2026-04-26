@@ -44,6 +44,7 @@ export default function Reviews() {
   const [year, setYear] = useState(today.getFullYear())
   const [month, setMonth] = useState(today.getMonth() + 1)
   const [filterGrade, setFilterGrade] = useState<string>('')
+  const [filterClassId, setFilterClassId] = useState<string>('')
   const [search, setSearch] = useState('')
   const [rows, setRows] = useState<RowState[]>([])
   const [loading, setLoading] = useState(true)
@@ -77,14 +78,30 @@ export default function Reviews() {
     return [...set].sort((a, b) => a - b)
   }, [rows])
 
+  const classOptions = useMemo(() => {
+    const map = new Map<string, { classId: string; className: string; gradeLevel: number | null }>()
+    rows.forEach(r => {
+      if (filterGrade && String(r.gradeLevel ?? '') !== filterGrade) return
+      r.classes.forEach(c => {
+        if (!map.has(c.classId)) map.set(c.classId, { classId: c.classId, className: c.className, gradeLevel: r.gradeLevel })
+      })
+    })
+    return [...map.values()].sort((a, b) => a.className.localeCompare(b.className, 'vi'))
+  }, [rows, filterGrade])
+
+  useEffect(() => {
+    if (filterClassId && !classOptions.some(c => c.classId === filterClassId)) setFilterClassId('')
+  }, [classOptions, filterClassId])
+
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase()
     return rows.filter(r => {
       if (filterGrade && String(r.gradeLevel ?? '') !== filterGrade) return false
+      if (filterClassId && !r.classes.some(c => c.classId === filterClassId)) return false
       if (q && !r.studentName.toLowerCase().includes(q)) return false
       return true
     })
-  }, [rows, filterGrade, search])
+  }, [rows, filterGrade, filterClassId, search])
 
   const updateRow = (sid: string, patch: Partial<RowState>) => {
     setRows(rs => rs.map(r => r.studentId === sid ? { ...r, ...patch, dirty: true } : r))
@@ -160,7 +177,7 @@ export default function Reviews() {
         <p className="text-[10px] uppercase tracking-widest text-primary font-bold mb-1">Đánh giá định kỳ</p>
         <h2 className="font-headline text-3xl font-black text-on-surface mb-6">Nhận xét học viên</h2>
 
-        <div className="flex items-center justify-between gap-3 flex-wrap mb-6">
+        <div className="flex items-start justify-between gap-3 flex-wrap mb-6">
           <div className="flex items-center gap-2 flex-wrap">
             <select
               value={month}
@@ -175,14 +192,6 @@ export default function Reviews() {
               className="bg-surface-container-low border border-outline-variant/20 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
             >
               {years.map(y => <option key={y} value={y}>{y}</option>)}
-            </select>
-            <select
-              value={filterGrade}
-              onChange={e => setFilterGrade(e.target.value)}
-              className="bg-surface-container-low border border-outline-variant/20 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-            >
-              <option value="">Tất cả khối</option>
-              {grades.map(g => <option key={g} value={g}>Khối {g}</option>)}
             </select>
             <input
               type="text"
@@ -206,6 +215,67 @@ export default function Reviews() {
               </button>
             )}
           </div>
+        </div>
+
+        <div className="bg-surface-container-low/60 rounded-2xl p-4 mb-6 space-y-3">
+          <div>
+            <label className="text-[10px] font-bold text-outline uppercase tracking-wider mb-2 block">Khối lớp</label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => { setFilterGrade(''); setFilterClassId('') }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                  filterGrade === ''
+                    ? 'bg-primary text-on-primary border-primary shadow-sm'
+                    : 'bg-surface text-on-surface-variant border-outline-variant/30 hover:border-primary/40 hover:text-primary'
+                }`}
+              >
+                Tất cả
+              </button>
+              {grades.map(g => (
+                <button
+                  key={g}
+                  onClick={() => { setFilterGrade(String(g)); setFilterClassId('') }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                    filterGrade === String(g)
+                      ? 'bg-primary text-on-primary border-primary shadow-sm'
+                      : 'bg-surface text-on-surface-variant border-outline-variant/30 hover:border-primary/40 hover:text-primary'
+                  }`}
+                >
+                  Lớp {g}
+                </button>
+              ))}
+            </div>
+          </div>
+          {classOptions.length > 0 && (
+            <div>
+              <label className="text-[10px] font-bold text-outline uppercase tracking-wider mb-2 block">Lớp học</label>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => setFilterClassId('')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                    filterClassId === ''
+                      ? 'bg-primary text-on-primary border-primary shadow-sm'
+                      : 'bg-surface text-on-surface-variant border-outline-variant/30 hover:border-primary/40 hover:text-primary'
+                  }`}
+                >
+                  Tất cả
+                </button>
+                {classOptions.map(c => (
+                  <button
+                    key={c.classId}
+                    onClick={() => setFilterClassId(c.classId)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                      filterClassId === c.classId
+                        ? 'bg-primary text-on-primary border-primary shadow-sm'
+                        : 'bg-surface text-on-surface-variant border-outline-variant/30 hover:border-primary/40 hover:text-primary'
+                    }`}
+                  >
+                    {c.className}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="overflow-x-auto">
