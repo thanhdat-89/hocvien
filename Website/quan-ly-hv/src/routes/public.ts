@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { db, C, s, toDocs, toObj } from '../lib/firebase'
 import { computeTuitionSummary, loadStudentPromotions } from '../lib/tuition'
-import type { Student, ClassEnrollment, Class, Schedule, TuitionRecord, Payment } from '../types/models'
+import type { Student, ClassEnrollment, Class, Schedule, TuitionRecord, Payment, PrivateSession } from '../types/models'
 
 const router = Router()
 
@@ -222,14 +222,29 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
       }
     })
 
-    const [tuitionSummary, promotions] = await Promise.all([
+    const [tuitionSummary, promotions, privateSessionsRaw] = await Promise.all([
       computeTuitionSummary(studentId),
       loadStudentPromotions(studentId),
+      db.collection(C.PRIVATE_SCHEDULES).where('studentId', '==', studentId).get(),
     ])
+
+    const today = new Date().toISOString().slice(0, 10)
+    const privateSchedules = toDocs<PrivateSession>(privateSessionsRaw)
+      .filter(p => p.status !== 'CANCELLED' && p.sessionDate >= today)
+      .sort((a, b) => a.sessionDate.localeCompare(b.sessionDate))
+      .slice(0, 30)
+      .map(p => ({
+        id: p.id,
+        sessionDate: p.sessionDate,
+        startTime: p.startTime,
+        endTime: p.endTime,
+        teacherName: p.teacherName,
+      }))
 
     res.json({
       student: publicStudent,
       classes,
+      privateSchedules,
       tuition,
       tuitionSummary,
       promotions,
