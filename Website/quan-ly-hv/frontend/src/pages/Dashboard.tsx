@@ -105,7 +105,6 @@ export default function Dashboard() {
 
   const stats = data?.stats
   const sessionsToday = data?.sessionsToday ?? []
-  const recentPayments = data?.recentPayments ?? []
 
   const totalSessionsToday = (stats?.sessionsTodayCount ?? 0) + privateSessions.length
   const scheduledSessions = sessionsToday.filter(s => s.status === 'SCHEDULED')
@@ -297,6 +296,37 @@ export default function Dashboard() {
 
           {/* Right column */}
           <div className="space-y-6">
+            {/* Quick links — đặt trên cùng để dễ thấy */}
+            <div className="bg-surface-container-lowest rounded-2xl p-6">
+              <h3 className="text-lg font-headline font-bold text-on-surface mb-4">Truy cập nhanh</h3>
+              <div className="space-y-2">
+                {(canSeeFinance
+                  ? [
+                      { icon: 'person_add', label: 'Thêm học viên', path: '/students?new=1', color: 'text-primary' },
+                      { icon: 'add_circle', label: 'Tạo lớp mới', path: '/classes?new=1', color: 'text-secondary' },
+                      { icon: 'event_note', label: 'Lịch dạy riêng', path: '/private-schedule', color: 'text-tertiary' },
+                      { icon: 'notifications', label: 'Gửi thông báo', path: '/notifications', color: 'text-primary' },
+                    ]
+                  : [
+                      { icon: 'person_add', label: 'Thêm học viên', path: '/students?new=1', color: 'text-primary' },
+                      { icon: 'event_note', label: 'Lịch dạy riêng', path: '/private-schedule', color: 'text-tertiary' },
+                      { icon: 'quiz', label: 'Điểm kiểm tra', path: '/exams', color: 'text-primary' },
+                      { icon: 'rate_review', label: 'Nhận xét học viên', path: '/reviews', color: 'text-secondary' },
+                    ]
+                ).map((link) => (
+                  <button
+                    key={link.path}
+                    onClick={() => navigate(link.path)}
+                    className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-surface-container-low transition-colors text-left"
+                  >
+                    <span className={`material-symbols-outlined ${link.color}`}>{link.icon}</span>
+                    <span className="text-sm font-medium text-on-surface">{link.label}</span>
+                    <span className="material-symbols-outlined text-outline text-sm ml-auto">chevron_right</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Students by grade */}
             <div className="bg-surface-container-lowest rounded-2xl p-6">
               <h3 className="text-lg font-headline font-bold text-on-surface mb-4">Phân bố theo khối</h3>
@@ -337,58 +367,6 @@ export default function Dashboard() {
               )}
             </div>
 
-            {/* Recent payments */}
-            <div className="bg-surface-container-lowest rounded-2xl p-6">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-headline font-bold text-on-surface">Thanh toán gần đây</h3>
-                <button className="text-primary font-semibold text-xs hover:underline" onClick={() => navigate('/tuition')}>
-                  Xem tất cả
-                </button>
-              </div>
-              {recentPayments.length === 0 ? (
-                <div className="text-center py-6 text-outline text-sm">Chưa có giao dịch</div>
-              ) : (
-                <div className="space-y-3">
-                  {recentPayments.slice(0, 5).map((p) => (
-                    <div key={p.id} className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-secondary/10 flex items-center justify-center">
-                          <span className="material-symbols-outlined text-secondary text-sm">paid</span>
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold text-on-surface">{p.studentName || 'Học viên'}</p>
-                          <p className="text-[10px] text-on-surface-variant">{p.paymentDate}</p>
-                        </div>
-                      </div>
-                      <span className="text-sm font-bold text-secondary">+{formatVND(p.amount)}đ</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Quick links */}
-            <div className="bg-surface-container-lowest rounded-2xl p-6">
-              <h3 className="text-lg font-headline font-bold text-on-surface mb-4">Truy cập nhanh</h3>
-              <div className="space-y-2">
-                {[
-                  { icon: 'person_add', label: 'Thêm học viên', path: '/students?new=1', color: 'text-primary' },
-                  { icon: 'add_circle', label: 'Tạo lớp mới', path: '/classes?new=1', color: 'text-secondary' },
-                  { icon: 'event_note', label: 'Lịch dạy riêng', path: '/private-schedule', color: 'text-tertiary' },
-                  { icon: 'notifications', label: 'Gửi thông báo', path: '/notifications', color: 'text-primary' },
-                ].map((link) => (
-                  <button
-                    key={link.path}
-                    onClick={() => navigate(link.path)}
-                    className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-surface-container-low transition-colors text-left"
-                  >
-                    <span className={`material-symbols-outlined ${link.color}`}>{link.icon}</span>
-                    <span className="text-sm font-medium text-on-surface">{link.label}</span>
-                    <span className="material-symbols-outlined text-outline text-sm ml-auto">chevron_right</span>
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
         </section>
       </div>
