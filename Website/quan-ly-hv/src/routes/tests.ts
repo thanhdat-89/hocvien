@@ -203,20 +203,20 @@ router.get('/:testId/scores', async (req: AuthRequest, res: Response, next: Next
     if (!testDoc.exists) { res.status(404).json({ message: 'Không tìm thấy bài kiểm tra' }); return }
     const test = toObj<Test>(testDoc)
 
-    // Collect candidate studentIds from enrollments (any status — student may have
-    // dropped before/after but still owns a score) and from session attendance as
-    // a fallback for classes that track membership through sessions only.
-    const [enrollSnap, attendanceSnap] = await Promise.all([
-      db.collection(C.ENROLLMENTS).where('classId', '==', test.classId).get(),
-      db.collection(C.STUDENT_ATTENDANCES).where('classId', '==', test.classId).limit(500).get(),
-    ])
+    // Collect candidate studentIds from enrollments first; only fall back to
+    // attendance when the class has no enrollment records (rare).
+    const enrollSnap = await db.collection(C.ENROLLMENTS).where('classId', '==', test.classId).get()
     const enrollments = toDocs<ClassEnrollment>(enrollSnap)
     const candidateIds = new Set<string>()
     enrollments.forEach(e => candidateIds.add(e.studentId))
-    attendanceSnap.docs.forEach(d => {
-      const sid = (d.data() as any).studentId
-      if (sid) candidateIds.add(sid)
-    })
+    if (candidateIds.size === 0) {
+      const attendanceSnap = await db.collection(C.STUDENT_ATTENDANCES)
+        .where('classId', '==', test.classId).limit(500).get()
+      attendanceSnap.docs.forEach(d => {
+        const sid = (d.data() as any).studentId
+        if (sid) candidateIds.add(sid)
+      })
+    }
 
     const studentIds = [...candidateIds]
     const studentDocs = await Promise.all(studentIds.map(id => db.collection(C.STUDENTS).doc(id).get()))
@@ -273,6 +273,15 @@ router.put('/:testId/scores', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (r
     const teacherId = req.user?.role === 'TEACHER' ? req.user.userId : undefined
     const teacherName = req.body?.teacherName || test.teacherName || undefined
 
+    // Pre-fetch every existing score for this test in one collectionGroup query
+    // instead of one read per student in the loop below.
+    const existingScoresSnap = await db.collectionGroup('testScores').where('testId', '==', testId).get()
+    const existingByStudent = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>()
+    existingScoresSnap.docs.forEach(d => {
+      const sid = d.ref.parent.parent?.id
+      if (sid) existingByStudent.set(sid, d)
+    })
+
     const batch = db.batch()
     let kept = 0
     let total = 0
@@ -285,9 +294,7 @@ router.put('/:testId/scores', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (r
       const scoreVal = row?.score
       const isEmpty = scoreVal === null || scoreVal === undefined || scoreVal === ''
       const studentScoresRef = db.collection(C.STUDENTS).doc(studentId).collection('testScores')
-      // find existing score by testId
-      const existingSnap = await studentScoresRef.where('testId', '==', testId).limit(1).get()
-      const existingDoc = existingSnap.docs[0]
+      const existingDoc = existingByStudent.get(studentId)
 
       if (isEmpty) {
         if (existingDoc) batch.delete(existingDoc.ref)

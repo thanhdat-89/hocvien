@@ -8,6 +8,11 @@ const router = Router()
 router.use(authenticate)
 
 const DASHBOARD_TTL_MS = 5 * 60 * 1000 // 5 phút
+const REVENUE_TTL_MS = 12 * 60 * 60 * 1000 // 12 giờ
+const STUDENTS_BY_GRADE_TTL_MS = 10 * 60 * 1000 // 10 phút
+
+let revenueCache: { at: number; data: any[] } | null = null
+let studentsByGradeCache: { at: number; data: any[] } | null = null
 
 async function computeDashboard() {
   const today = new Date().toISOString().slice(0, 10)
@@ -95,6 +100,10 @@ router.post('/refresh', async (_req: AuthRequest, res: Response, next: NextFunct
 // GET /api/dashboard/revenue — Doanh thu 12 tháng gần nhất
 router.get('/revenue', async (_req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    if (revenueCache && Date.now() - revenueCache.at < REVENUE_TTL_MS) {
+      res.json(revenueCache.data)
+      return
+    }
     const today = new Date()
 
     // Tính khoảng 12 tháng
@@ -119,6 +128,7 @@ router.get('/revenue', async (_req: AuthRequest, res: Response, next: NextFuncti
       revenue: toDocs<Payment>(snaps[i]).reduce((sum, p) => sum + p.amount, 0),
     }))
 
+    revenueCache = { at: Date.now(), data: months }
     res.json(months)
   } catch (err) {
     next(err)
@@ -128,6 +138,10 @@ router.get('/revenue', async (_req: AuthRequest, res: Response, next: NextFuncti
 // GET /api/dashboard/students-by-grade
 router.get('/students-by-grade', async (_req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    if (studentsByGradeCache && Date.now() - studentsByGradeCache.at < STUDENTS_BY_GRADE_TTL_MS) {
+      res.json(studentsByGradeCache.data)
+      return
+    }
     const snap = await db.collection(C.STUDENTS).where('status', '==', 'ACTIVE').get()
     const students = toDocs<Student>(snap)
 
@@ -142,6 +156,7 @@ router.get('/students-by-grade', async (_req: AuthRequest, res: Response, next: 
       .map(([gradeLevel, count]) => ({ gradeLevel, count }))
       .sort((a, b) => a.gradeLevel - b.gradeLevel)
 
+    studentsByGradeCache = { at: Date.now(), data: result }
     res.json(result)
   } catch (err) {
     next(err)

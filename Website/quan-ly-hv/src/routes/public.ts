@@ -71,10 +71,22 @@ interface PublicReview {
   updatedAt: string
 }
 
+// In-memory response cache to reduce Firestore reads when parents refresh.
+// 60-second TTL is acceptable: admin updates show up within a minute.
+const publicCache = new Map<string, { at: number; payload: any }>()
+const PUBLIC_TTL_MS = 60_000
+
 // GET /api/public/student/:id — toàn bộ dữ liệu cần cho trang chia sẻ phụ huynh
 router.get('/student/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const studentId = s(req.params.id)
+
+    const cached = publicCache.get(studentId)
+    if (cached && Date.now() - cached.at < PUBLIC_TTL_MS) {
+      res.json(cached.payload)
+      return
+    }
+
     const studentDoc = await db.collection(C.STUDENTS).doc(studentId).get()
     if (!studentDoc.exists) {
       res.status(404).json({ message: 'Không tìm thấy học viên' })
@@ -256,7 +268,7 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
         teacherName: p.teacherName,
       }))
 
-    res.json({
+    const payload = {
       student: publicStudent,
       classes,
       privateSchedules,
@@ -265,7 +277,9 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
       promotions,
       reviews,
       testScores,
-    })
+    }
+    publicCache.set(studentId, { at: Date.now(), payload })
+    res.json(payload)
   } catch (err) { next(err) }
 })
 
