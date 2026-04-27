@@ -358,23 +358,21 @@ export default function Reviews() {
               <tr className="bg-surface-container-low/50">
                 <th className="table-header w-12 text-center">STT</th>
                 <th className="table-header">Học viên</th>
-                <th className="table-header">Khối lớp</th>
                 <th className="table-header">Lớp học</th>
                 <th className="table-header">Nội dung nhận xét</th>
-                <th className="table-header">Tình trạng</th>
                 <th className="table-header text-right">Thao tác</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-outline-variant/10">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="py-16 text-center">
+                  <td colSpan={5} className="py-16 text-center">
                     <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
                   </td>
                 </tr>
               ) : visible.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-16 text-center text-outline">
+                  <td colSpan={5} className="py-16 text-center text-outline">
                     <span className="material-symbols-outlined text-5xl block mb-3 opacity-30">search_off</span>
                     Không tìm thấy học viên nào
                   </td>
@@ -385,18 +383,10 @@ export default function Reviews() {
                   <td className="table-cell">
                     <button
                       onClick={() => navigate(`/students/${r.studentId}`)}
-                      className="flex items-center gap-3 hover:opacity-80 transition-opacity text-left"
+                      className="hover:opacity-80 transition-opacity text-left"
                     >
-                      <Avatar name={r.studentName} />
                       <p className="font-semibold text-on-surface">{r.studentName}</p>
                     </button>
-                  </td>
-                  <td className="table-cell">
-                    {r.gradeLevel != null ? (
-                      <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-surface-container-high text-xs font-bold text-primary">
-                        Lớp {r.gradeLevel}
-                      </span>
-                    ) : <span className="text-outline text-sm">—</span>}
                   </td>
                   <td className="table-cell">
                     {r.classes.length === 0 ? (
@@ -421,29 +411,6 @@ export default function Reviews() {
                       rows={2}
                       className={`w-full bg-surface-container-low rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 resize-y min-h-[44px] ${r.dirty ? 'ring-2 ring-amber-300' : ''}`}
                     />
-                    <input
-                      type="text"
-                      value={r.draftTeacher}
-                      onChange={e => updateRow(r.studentId, { draftTeacher: e.target.value })}
-                      placeholder="Tên giáo viên (không bắt buộc)"
-                      className="mt-1 w-full bg-transparent border-none text-xs text-outline focus:outline-none focus:text-on-surface px-1"
-                    />
-                  </td>
-                  <td className="table-cell">
-                    {r.review && r.review.content.trim() ? (
-                      <div className="space-y-1">
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-bold uppercase tracking-wider">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Đã nhận xét
-                        </span>
-                        {r.review.updatedAt && (
-                          <p className="text-[10px] text-outline">{fmtUpdated(r.review.updatedAt)}</p>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-surface-container-high text-outline text-[11px] font-bold uppercase tracking-wider">
-                        <span className="w-1.5 h-1.5 rounded-full bg-outline/40" /> Chưa nhận xét
-                      </span>
-                    )}
                   </td>
                   <td className="table-cell text-right">
                     <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
