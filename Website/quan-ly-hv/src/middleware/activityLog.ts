@@ -39,17 +39,31 @@ function deriveResourceType(path: string): string {
   return m ? m[1] : 'unknown'
 }
 
-function defaultDescription(method: string, action: ActivityAction, resourceType: string): string {
+function pickName(body: unknown): string | null {
+  if (!body || typeof body !== 'object') return null
+  const b = body as Record<string, unknown>
+  const candidates = ['fullName', 'name', 'title', 'className', 'studentName', 'testName', 'parentName']
+  for (const k of candidates) {
+    const v = b[k]
+    if (typeof v === 'string' && v.trim()) return v.trim()
+  }
+  return null
+}
+
+function defaultDescription(action: ActivityAction, resourceType: string, body?: unknown): string {
   const label = RESOURCE_LABEL[resourceType] ?? resourceType
-  if (action === 'CREATE') return `Thêm ${label}`
-  if (action === 'DELETE') return `Xoá ${label}`
-  return `Sửa ${label}`
+  const verb = action === 'CREATE' ? 'Thêm' : action === 'DELETE' ? 'Xoá' : 'Sửa'
+  const name = pickName(body)
+  return name ? `${verb} ${label}: ${name}` : `${verb} ${label}`
 }
 
 export function activityLogMiddleware(req: AuthRequest, res: Response, next: NextFunction): void {
   if (!MUTATION_METHODS.has(req.method)) return next()
   if (!req.path.startsWith('/api/')) return next()
   if (SKIP_PATTERNS.some(p => p.test(req.path))) return next()
+
+  // Snapshot body before route handlers can mutate it
+  const bodySnapshot = req.body
 
   res.on('finish', () => {
     if (res.statusCode < 200 || res.statusCode >= 300) return
@@ -61,7 +75,7 @@ export function activityLogMiddleware(req: AuthRequest, res: Response, next: Nex
 
     const hint: ActivityHint = req.activity ?? {}
     const resourceType = hint.resourceType ?? deriveResourceType(req.path)
-    const description = hint.description ?? defaultDescription(req.method, action, resourceType)
+    const description = hint.description ?? defaultDescription(action, resourceType, bodySnapshot)
 
     void logActivity({
       userId: req.user.userId,
