@@ -59,22 +59,28 @@ function defaultDescription(action: ActivityAction, resourceType: string, body?:
 
 export function activityLogMiddleware(req: AuthRequest, res: Response, next: NextFunction): void {
   if (!MUTATION_METHODS.has(req.method)) return next()
-  if (!req.path.startsWith('/api/')) return next()
-  if (SKIP_PATTERNS.some(p => p.test(req.path))) return next()
+
+  // Capture path NOW — Express sub-routers mutate req.path/req.url to be
+  // relative once routing dives into mounted routers, so res.on('finish')
+  // would otherwise see the inner-router path (e.g. "/abc123" not "/api/students/abc123").
+  const originalPath = (req.originalUrl || req.url || req.path).split('?')[0]
+  if (!originalPath.startsWith('/api/')) return next()
+  if (SKIP_PATTERNS.some(p => p.test(originalPath))) return next()
 
   // Snapshot body before route handlers can mutate it
   const bodySnapshot = req.body
+  const method = req.method
 
   res.on('finish', () => {
     if (res.statusCode < 200 || res.statusCode >= 300) return
     if (!req.user) return
 
     const action: ActivityAction =
-      req.method === 'POST' ? 'CREATE' :
-      req.method === 'DELETE' ? 'DELETE' : 'UPDATE'
+      method === 'POST' ? 'CREATE' :
+      method === 'DELETE' ? 'DELETE' : 'UPDATE'
 
     const hint: ActivityHint = req.activity ?? {}
-    const resourceType = hint.resourceType ?? deriveResourceType(req.path)
+    const resourceType = hint.resourceType ?? deriveResourceType(originalPath)
     const description = hint.description ?? defaultDescription(action, resourceType, bodySnapshot)
 
     void logActivity({
@@ -84,8 +90,8 @@ export function activityLogMiddleware(req: AuthRequest, res: Response, next: Nex
       resourceType,
       resourceId: hint.resourceId,
       description,
-      method: req.method,
-      path: req.path,
+      method,
+      path: originalPath,
       statusCode: res.statusCode,
       ip: req.ip,
       before: hint.before,
