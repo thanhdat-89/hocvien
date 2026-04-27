@@ -356,11 +356,11 @@ export default function Reviews() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-surface-container-low/50">
-                <th className="table-header w-12 text-center">STT</th>
-                <th className="table-header">Học viên</th>
-                <th className="table-header">Lớp học</th>
+                <th className="table-header w-px whitespace-nowrap text-center">STT</th>
+                <th className="table-header w-px whitespace-nowrap">Học viên</th>
+                <th className="table-header w-px whitespace-nowrap">Lớp học</th>
                 <th className="table-header">Nội dung nhận xét</th>
-                <th className="table-header text-right">Thao tác</th>
+                <th className="table-header w-px whitespace-nowrap text-right">Thao tác</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-outline-variant/10">
@@ -403,7 +403,7 @@ export default function Reviews() {
                       </div>
                     )}
                   </td>
-                  <td className="table-cell w-[40%] min-w-[280px]">
+                  <td className="table-cell w-auto">
                     <textarea
                       value={r.draft}
                       onChange={e => updateRow(r.studentId, { draft: e.target.value })}
