@@ -311,10 +311,12 @@ export interface Material {
   title: string
   description?: string
   type: MaterialType
-  // Khi type=LINK
+  // Khi type=LINK: url ngoài
+  // Khi type=FILE: secure_url public của Cloudinary
   url?: string
-  // Khi type=FILE
-  storagePath?: string
+  // Khi type=FILE — meta Cloudinary để xoá hoặc transform
+  cloudinaryPublicId?: string
+  cloudinaryResourceType?: 'image' | 'raw' | 'video'
   fileName?: string
   fileSize?: number
   mimeType?: string

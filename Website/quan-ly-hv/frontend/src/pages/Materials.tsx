@@ -10,7 +10,8 @@ interface Material {
   description?: string
   type: 'LINK' | 'FILE'
   url?: string
-  storagePath?: string
+  cloudinaryPublicId?: string
+  cloudinaryResourceType?: 'image' | 'raw' | 'video'
   fileName?: string
   fileSize?: number
   mimeType?: string
@@ -126,14 +127,8 @@ export default function Materials() {
     }
   }
 
-  const handleDownload = async (m: Material) => {
-    if (m.type === 'LINK' && m.url) { window.open(m.url, '_blank'); return }
-    try {
-      const r = await api.get(`/materials/${m.id}/download-url`)
-      if (r.data?.downloadUrl) window.open(r.data.downloadUrl, '_blank')
-    } catch (err: any) {
-      await alert({ title: 'Lỗi tải', message: err?.response?.data?.message ?? 'Không lấy được link tải.' })
-    }
+  const handleDownload = (m: Material) => {
+    if (m.url) window.open(m.url, '_blank')
   }
 
   const renderAudience = (m: Material) => {
@@ -365,32 +360,51 @@ function MaterialModal({ editing, students, classes, onClose, onSaved }: {
           audienceIds,
         })
       } else if (file) {
-        // 1. Lấy signed upload URL
-        const sign = await api.post('/materials/upload-url', {
-          fileName: file.name,
+        // 1. Xin Cloudinary signed params từ backend
+        const sign = await api.post('/materials/upload-signature', {
           mimeType: file.type || 'application/octet-stream',
           fileSize: file.size,
         })
-        const { id, storagePath, uploadUrl } = sign.data
-        // 2. PUT file thẳng lên Storage
-        const xhr = new XMLHttpRequest()
-        await new Promise<void>((resolve, reject) => {
-          xhr.upload.onprogress = (e) => { if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 100)) }
-          xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`Upload failed (${xhr.status})`))
-          xhr.onerror = () => reject(new Error('Upload network error'))
-          xhr.open('PUT', uploadUrl)
-          xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream')
-          xhr.send(file)
-        })
+        const { id, cloudName, apiKey, timestamp, signature, publicId, resourceType } = sign.data
+
+        // 2. Upload thẳng lên Cloudinary
+        const form = new FormData()
+        form.append('file', file)
+        form.append('api_key', apiKey)
+        form.append('timestamp', String(timestamp))
+        form.append('signature', signature)
+        form.append('public_id', publicId)
+
+        const cloudinaryUrl = `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`
+        const uploaded: { secure_url: string; public_id: string; bytes: number; resource_type: string } =
+          await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest()
+            xhr.upload.onprogress = (e) => { if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 100)) }
+            xhr.onload = () => {
+              if (xhr.status >= 200 && xhr.status < 300) {
+                try { resolve(JSON.parse(xhr.responseText)) } catch (e) { reject(e) }
+              } else {
+                let msg = `Upload failed (${xhr.status})`
+                try { msg = JSON.parse(xhr.responseText)?.error?.message ?? msg } catch {}
+                reject(new Error(msg))
+              }
+            }
+            xhr.onerror = () => reject(new Error('Upload network error'))
+            xhr.open('POST', cloudinaryUrl)
+            xhr.send(form)
+          })
+
         // 3. Tạo material record
         await api.post('/materials', {
           id,
           title: title.trim(),
           description: description.trim() || undefined,
           type: 'FILE',
-          storagePath,
+          url: uploaded.secure_url,
+          cloudinaryPublicId: uploaded.public_id,
+          cloudinaryResourceType: uploaded.resource_type,
           fileName: file.name,
-          fileSize: file.size,
+          fileSize: uploaded.bytes ?? file.size,
           mimeType: file.type || 'application/octet-stream',
           audienceType,
           audienceIds,

@@ -75,9 +75,6 @@ export const C = {
   AGGREGATES:          'aggregates',
 } as const
 
-// Firebase Storage bucket — dùng default bucket {project}.appspot.com
-export const storageBucket = admin.storage().bucket(`${PROJECT_ID}.appspot.com`)
-
 // ─── Helpers ──────────────────────────────────────────────────
 
 /** Chuyển Firestore document sang plain object có field `id` */
