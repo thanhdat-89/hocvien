@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import TopBar from '../components/TopBar'
 import { useAlert, useConfirm } from '../components/ConfirmDialog'
@@ -126,12 +126,43 @@ export default function Reviews() {
     })
   }, [scoped, filterStatus, search])
 
+  const rowsRef = useRef(rows)
+  useEffect(() => { rowsRef.current = rows }, [rows])
+
+  const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout> | undefined>>({})
+  const AUTOSAVE_DELAY = 800
+
+  const scheduleAutosave = (sid: string) => {
+    const existing = saveTimers.current[sid]
+    if (existing) clearTimeout(existing)
+    saveTimers.current[sid] = setTimeout(() => {
+      saveTimers.current[sid] = undefined
+      const row = rowsRef.current.find(r => r.studentId === sid)
+      if (row?.dirty && !row.saving) saveRow(sid)
+    }, AUTOSAVE_DELAY)
+  }
+
+  const flushAutosave = (sid: string) => {
+    const t = saveTimers.current[sid]
+    if (t) {
+      clearTimeout(t)
+      saveTimers.current[sid] = undefined
+    }
+    const row = rowsRef.current.find(r => r.studentId === sid)
+    if (row?.dirty && !row.saving) saveRow(sid)
+  }
+
+  useEffect(() => () => {
+    Object.values(saveTimers.current).forEach(t => t && clearTimeout(t))
+  }, [])
+
   const updateRow = (sid: string, patch: Partial<RowState>) => {
     setRows(rs => rs.map(r => r.studentId === sid ? { ...r, ...patch, dirty: true } : r))
+    scheduleAutosave(sid)
   }
 
   const saveRow = async (sid: string) => {
-    const row = rows.find(r => r.studentId === sid)
+    const row = rowsRef.current.find(r => r.studentId === sid)
     if (!row) return
     const content = row.draft.trim()
     const mk = monthKey(year, month)
@@ -183,11 +214,6 @@ export default function Reviews() {
     }
   }
 
-  const dirtyCount = rows.filter(r => r.dirty).length
-  const saveAll = async () => {
-    for (const r of rows.filter(r => r.dirty)) await saveRow(r.studentId)
-  }
-
   const months = Array.from({ length: 12 }, (_, i) => i + 1)
   const years = Array.from({ length: 6 }, (_, i) => today.getFullYear() - 2 + i)
 
@@ -233,15 +259,6 @@ export default function Reviews() {
               <span className="text-sm text-outline">
                 Đã nhận xét: <b className="text-on-surface">{scopedFilled}</b> / {scoped.length}
               </span>
-              {dirtyCount > 0 && (
-                <button
-                  onClick={saveAll}
-                  className="bg-primary text-on-primary rounded-xl py-2 px-4 text-sm font-medium hover:bg-primary/90 transition-colors flex items-center gap-2"
-                >
-                  <span className="material-symbols-outlined text-base">save</span>
-                  Lưu tất cả ({dirtyCount})
-                </button>
-              )}
             </div>
           </div>
 
@@ -407,39 +424,39 @@ export default function Reviews() {
                     <textarea
                       value={r.draft}
                       onChange={e => updateRow(r.studentId, { draft: e.target.value })}
+                      onBlur={() => flushAutosave(r.studentId)}
                       placeholder="Nhập nhận xét..."
                       rows={2}
-                      className={`w-full bg-surface-container-low rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 resize-y min-h-[44px] ${r.dirty ? 'ring-2 ring-amber-300' : ''}`}
+                      className="w-full bg-surface-container-low rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 resize-y min-h-[44px]"
                     />
                   </td>
                   <td className="table-cell text-right">
-                    <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={() => saveRow(r.studentId)}
-                        disabled={!r.dirty || r.saving}
-                        className="p-2 text-outline hover:text-primary hover:bg-primary-container/10 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-                        title="Lưu nhận xét"
+                    <div className="flex items-center justify-end gap-2">
+                      <span
+                        className="material-symbols-outlined text-[18px] text-outline transition-opacity"
+                        style={{ opacity: r.saving ? 1 : r.dirty ? 0.6 : 0 }}
+                        title={r.saving ? 'Đang lưu...' : r.dirty ? 'Sẽ tự lưu' : ''}
                       >
-                        <span className="material-symbols-outlined text-[20px]">
-                          {r.saving ? 'progress_activity' : 'save'}
-                        </span>
-                      </button>
-                      <button
-                        onClick={() => navigate(`/students/${r.studentId}`)}
-                        className="p-2 text-outline hover:text-primary hover:bg-primary-container/10 rounded-lg transition-all"
-                        title="Xem hồ sơ học viên"
-                      >
-                        <span className="material-symbols-outlined text-[20px]">visibility</span>
-                      </button>
-                      {r.review && (
+                        {r.saving ? 'progress_activity' : 'edit'}
+                      </span>
+                      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
-                          onClick={() => removeRow(r.studentId)}
-                          className="p-2 text-outline hover:text-error hover:bg-error-container/10 rounded-lg transition-all"
-                          title="Xoá nhận xét"
+                          onClick={() => navigate(`/students/${r.studentId}`)}
+                          className="p-2 text-outline hover:text-primary hover:bg-primary-container/10 rounded-lg transition-all"
+                          title="Xem hồ sơ học viên"
                         >
-                          <span className="material-symbols-outlined text-[20px]">delete</span>
+                          <span className="material-symbols-outlined text-[20px]">visibility</span>
                         </button>
-                      )}
+                        {r.review && (
+                          <button
+                            onClick={() => removeRow(r.studentId)}
+                            className="p-2 text-outline hover:text-error hover:bg-error-container/10 rounded-lg transition-all"
+                            title="Xoá nhận xét"
+                          >
+                            <span className="material-symbols-outlined text-[20px]">delete</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </td>
                 </tr>
