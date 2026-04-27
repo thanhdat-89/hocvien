@@ -17,6 +17,7 @@ import Tests from './pages/Tests'
 import Reviews from './pages/Reviews'
 import Materials from './pages/Materials'
 import Teachers from './pages/Teachers'
+import Activity from './pages/Activity'
 import RequireRole from './components/RequireRole'
 
 export default function App() {
@@ -41,6 +42,7 @@ export default function App() {
             <Route path="/attendance" element={<RequireRole roles={['ADMIN', 'STAFF']}><Attendance /></RequireRole>} />
             <Route path="/notifications" element={<RequireRole roles={['ADMIN', 'STAFF']}><Notifications /></RequireRole>} />
             <Route path="/leads" element={<RequireRole roles={['ADMIN', 'STAFF']}><Leads /></RequireRole>} />
+            <Route path="/activity" element={<RequireRole roles={['ADMIN', 'STAFF']}><Activity /></RequireRole>} />
           </Route>
         </Routes>
       </AuthProvider>

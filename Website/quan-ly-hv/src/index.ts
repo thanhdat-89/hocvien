@@ -22,8 +22,10 @@ import testScoreRoutes from './routes/testScores'
 import testRoutes from './routes/tests'
 import materialRoutes from './routes/materials'
 import publicRoutes from './routes/public'
+import activityRoutes from './routes/activity'
 
 import { errorHandler, notFound } from './middleware/errorHandler'
+import { activityLogMiddleware } from './middleware/activityLog'
 
 const app = express()
 const PORT = process.env.PORT || 3000
@@ -33,6 +35,7 @@ app.use(helmet())
 app.use(cors())
 app.use(morgan('dev'))
 app.use(express.json())
+app.use(activityLogMiddleware)
 
 // ─── Health check ─────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok' }))
@@ -70,6 +73,7 @@ app.use('/api/test-scores',    testScoreRoutes)
 app.use('/api/tests',          testRoutes)
 app.use('/api/materials',      materialRoutes)
 app.use('/api/public',         publicRoutes)
+app.use('/api/activity',       activityRoutes)
 
 // ─── Error handlers ───────────────────────────────────────────
 app.use(notFound)

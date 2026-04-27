@@ -73,6 +73,7 @@ export const C = {
   TESTS:               'tests',
   MATERIALS:           'materials',
   AGGREGATES:          'aggregates',
+  ACTIVITY_LOGS:       'activityLogs',
 } as const
 
 // ─── Helpers ──────────────────────────────────────────────────
