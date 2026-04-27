@@ -299,12 +299,14 @@ function MaterialModal({ editing, students, classes, onClose, onSaved }: {
   const [description, setDescription] = useState(editing?.description ?? '')
   const [type, setType] = useState<'LINK' | 'FILE'>(editing?.type ?? 'FILE')
   const [url, setUrl] = useState(editing?.url ?? '')
-  const [file, setFile] = useState<File | null>(null)
+  const [files, setFiles] = useState<File[]>([])
   const [audienceType, setAudienceType] = useState<'STUDENT' | 'CLASS'>(editing?.audienceType ?? 'CLASS')
   const [audienceIds, setAudienceIds] = useState<string[]>(editing?.audienceIds ?? [])
   const [audienceQuery, setAudienceQuery] = useState('')
   const [saving, setSaving] = useState(false)
-  const [progress, setProgress] = useState(0)
+  const [progress, setProgress] = useState<{ current: number; total: number; percent: number }>({ current: 0, total: 0, percent: 0 })
+
+  const stripExt = (name: string) => name.replace(/\.[^/.]+$/, '')
 
   const audienceOptions = useMemo(() => {
     const q = audienceQuery.trim().toLowerCase()
@@ -320,19 +322,33 @@ function MaterialModal({ editing, students, classes, onClose, onSaved }: {
     setAudienceIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
   }
 
-  const handleFilePick = (f: File | null) => {
-    if (!f) { setFile(null); return }
-    if (f.size > MAX_FILE_BYTES) { alert({ title: 'File quá lớn', message: `Tối đa ${MAX_FILE_BYTES / 1024 / 1024}MB.` }); return }
-    if (f.type && !ALLOWED_MIME.includes(f.type)) { alert({ title: 'Định dạng không hỗ trợ', message: f.type }); return }
-    setFile(f)
+  const handleFilesPick = (picked: FileList | null) => {
+    if (!picked || picked.length === 0) return
+    const accepted: File[] = []
+    const rejected: string[] = []
+    Array.from(picked).forEach(f => {
+      if (f.size > MAX_FILE_BYTES) { rejected.push(`${f.name}: quá ${MAX_FILE_BYTES / 1024 / 1024}MB`); return }
+      if (f.type && !ALLOWED_MIME.includes(f.type)) { rejected.push(`${f.name}: định dạng không hỗ trợ`); return }
+      accepted.push(f)
+    })
+    if (rejected.length) alert({ title: 'Một số file bị bỏ qua', message: rejected.join('\n') })
+    if (accepted.length) setFiles(prev => [...prev, ...accepted])
   }
+  const removeFileAt = (idx: number) => setFiles(prev => prev.filter((_, i) => i !== idx))
 
   const handleSubmit = async () => {
-    if (!title.trim()) { await alert({ title: 'Thiếu tiêu đề', message: 'Vui lòng nhập tiêu đề.' }); return }
     if (audienceIds.length === 0) { await alert({ title: 'Thiếu phạm vi', message: 'Chọn ít nhất một học viên hoặc lớp.' }); return }
     if (!editing) {
-      if (type === 'LINK' && !/^https?:\/\//.test(url.trim())) { await alert({ title: 'URL không hợp lệ', message: 'URL phải bắt đầu bằng http:// hoặc https://' }); return }
-      if (type === 'FILE' && !file) { await alert({ title: 'Chưa chọn file', message: 'Hãy chọn file để tải lên.' }); return }
+      if (type === 'LINK') {
+        if (!title.trim()) { await alert({ title: 'Thiếu tiêu đề', message: 'Vui lòng nhập tiêu đề.' }); return }
+        if (!/^https?:\/\//.test(url.trim())) { await alert({ title: 'URL không hợp lệ', message: 'URL phải bắt đầu bằng http:// hoặc https://' }); return }
+      }
+      if (type === 'FILE') {
+        if (files.length === 0) { await alert({ title: 'Chưa chọn file', message: 'Hãy chọn file để tải lên.' }); return }
+        if (files.length === 1 && !title.trim()) { await alert({ title: 'Thiếu tiêu đề', message: 'Vui lòng nhập tiêu đề.' }); return }
+      }
+    } else {
+      if (!title.trim()) { await alert({ title: 'Thiếu tiêu đề', message: 'Vui lòng nhập tiêu đề.' }); return }
     }
     setSaving(true)
     try {
@@ -359,63 +375,69 @@ function MaterialModal({ editing, students, classes, onClose, onSaved }: {
           audienceType,
           audienceIds,
         })
-      } else if (file) {
-        // 1. Xin Cloudinary signed params từ backend
-        const sign = await api.post('/materials/upload-signature', {
-          mimeType: file.type || 'application/octet-stream',
-          fileSize: file.size,
-        })
-        const { id, cloudName, apiKey, timestamp, signature, publicId, resourceType } = sign.data
+      } else if (files.length > 0) {
+        for (let i = 0; i < files.length; i++) {
+          const f = files[i]
+          setProgress({ current: i + 1, total: files.length, percent: 0 })
 
-        // 2. Upload thẳng lên Cloudinary
-        const form = new FormData()
-        form.append('file', file)
-        form.append('api_key', apiKey)
-        form.append('timestamp', String(timestamp))
-        form.append('signature', signature)
-        form.append('public_id', publicId)
-
-        const cloudinaryUrl = `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`
-        const uploaded: { secure_url: string; public_id: string; bytes: number; resource_type: string } =
-          await new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest()
-            xhr.upload.onprogress = (e) => { if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 100)) }
-            xhr.onload = () => {
-              if (xhr.status >= 200 && xhr.status < 300) {
-                try { resolve(JSON.parse(xhr.responseText)) } catch (e) { reject(e) }
-              } else {
-                let msg = `Upload failed (${xhr.status})`
-                try { msg = JSON.parse(xhr.responseText)?.error?.message ?? msg } catch {}
-                reject(new Error(msg))
-              }
-            }
-            xhr.onerror = () => reject(new Error('Upload network error'))
-            xhr.open('POST', cloudinaryUrl)
-            xhr.send(form)
+          // 1. Xin Cloudinary signed params từ backend
+          const sign = await api.post('/materials/upload-signature', {
+            mimeType: f.type || 'application/octet-stream',
+            fileSize: f.size,
           })
+          const { id, cloudName, apiKey, timestamp, signature, publicId, resourceType } = sign.data
 
-        // 3. Tạo material record
-        await api.post('/materials', {
-          id,
-          title: title.trim(),
-          description: description.trim() || undefined,
-          type: 'FILE',
-          url: uploaded.secure_url,
-          cloudinaryPublicId: uploaded.public_id,
-          cloudinaryResourceType: uploaded.resource_type,
-          fileName: file.name,
-          fileSize: uploaded.bytes ?? file.size,
-          mimeType: file.type || 'application/octet-stream',
-          audienceType,
-          audienceIds,
-        })
+          // 2. Upload thẳng lên Cloudinary
+          const form = new FormData()
+          form.append('file', f)
+          form.append('api_key', apiKey)
+          form.append('timestamp', String(timestamp))
+          form.append('signature', signature)
+          form.append('public_id', publicId)
+
+          const cloudinaryUrl = `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`
+          const uploaded: { secure_url: string; public_id: string; bytes: number; resource_type: string } =
+            await new Promise((resolve, reject) => {
+              const xhr = new XMLHttpRequest()
+              xhr.upload.onprogress = (e) => { if (e.lengthComputable) setProgress(p => ({ ...p, percent: Math.round((e.loaded / e.total) * 100) })) }
+              xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                  try { resolve(JSON.parse(xhr.responseText)) } catch (e) { reject(e) }
+                } else {
+                  let msg = `Upload failed (${xhr.status})`
+                  try { msg = JSON.parse(xhr.responseText)?.error?.message ?? msg } catch {}
+                  reject(new Error(msg))
+                }
+              }
+              xhr.onerror = () => reject(new Error('Upload network error'))
+              xhr.open('POST', cloudinaryUrl)
+              xhr.send(form)
+            })
+
+          // 3. Tạo material record — khi nhiều file: dùng tên file làm tiêu đề
+          const recordTitle = files.length === 1 ? title.trim() : (stripExt(f.name) || f.name)
+          await api.post('/materials', {
+            id,
+            title: recordTitle,
+            description: description.trim() || undefined,
+            type: 'FILE',
+            url: uploaded.secure_url,
+            cloudinaryPublicId: uploaded.public_id,
+            cloudinaryResourceType: uploaded.resource_type,
+            fileName: f.name,
+            fileSize: uploaded.bytes ?? f.size,
+            mimeType: f.type || 'application/octet-stream',
+            audienceType,
+            audienceIds,
+          })
+        }
       }
       onSaved()
     } catch (err: any) {
       await alert({ title: 'Lỗi lưu', message: err?.response?.data?.message ?? err?.message ?? 'Không lưu được.' })
     } finally {
       setSaving(false)
-      setProgress(0)
+      setProgress({ current: 0, total: 0, percent: 0 })
     }
   }
 
@@ -431,8 +453,12 @@ function MaterialModal({ editing, students, classes, onClose, onSaved }: {
 
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
           <div>
-            <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Tiêu đề *</label>
-            <input className="input" value={title} onChange={e => setTitle(e.target.value)} placeholder="VD: Đề cương ôn tập HK2" />
+            <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">
+              Tiêu đề {!editing && type === 'FILE' && files.length > 1 ? <span className="normal-case text-outline font-normal">(không dùng khi tải nhiều file)</span> : '*'}
+            </label>
+            <input className="input" value={title} onChange={e => setTitle(e.target.value)}
+              disabled={!editing && type === 'FILE' && files.length > 1}
+              placeholder={!editing && type === 'FILE' && files.length > 1 ? 'Tiêu đề lấy từ tên file' : 'VD: Đề cương ôn tập HK2'} />
           </div>
           <div>
             <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Mô tả</label>
@@ -462,27 +488,55 @@ function MaterialModal({ editing, students, classes, onClose, onSaved }: {
 
           {!editing && type === 'FILE' && (
             <div>
-              <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">File *</label>
-              <label className="block border-2 border-dashed border-outline-variant/30 rounded-xl p-6 text-center cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-all">
-                <input type="file" className="hidden" accept={ACCEPT_ATTR}
-                  onChange={e => handleFilePick(e.target.files?.[0] ?? null)} />
-                {file ? (
-                  <div>
-                    <span className="material-symbols-outlined text-3xl text-primary block mb-1">description</span>
-                    <p className="font-semibold text-sm text-on-surface">{file.name}</p>
-                    <p className="text-xs text-outline mt-1">{fmtSize(file.size)} · Bấm để chọn lại</p>
-                  </div>
-                ) : (
-                  <div>
-                    <span className="material-symbols-outlined text-3xl text-outline block mb-1">cloud_upload</span>
-                    <p className="text-sm text-on-surface">Bấm để chọn file</p>
-                    <p className="text-xs text-outline mt-1">PDF, DOCX, XLSX, PPTX, ZIP, ảnh — tối đa 25MB</p>
-                  </div>
-                )}
+              <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">
+                File *{files.length > 0 && <span className="ml-2 normal-case font-normal text-outline">({files.length} đã chọn)</span>}
               </label>
-              {progress > 0 && progress < 100 && (
-                <div className="mt-2 h-1.5 bg-outline-variant/20 rounded-full overflow-hidden">
-                  <div className="h-full bg-primary transition-all" style={{ width: `${progress}%` }} />
+              {files.length === 0 ? (
+                <label className="block border-2 border-dashed border-outline-variant/30 rounded-xl p-6 text-center cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-all">
+                  <input type="file" multiple className="hidden" accept={ACCEPT_ATTR}
+                    onChange={e => { handleFilesPick(e.target.files); e.target.value = '' }} />
+                  <span className="material-symbols-outlined text-3xl text-outline block mb-1">cloud_upload</span>
+                  <p className="text-sm text-on-surface">Bấm để chọn file (có thể chọn nhiều)</p>
+                  <p className="text-xs text-outline mt-1">PDF, DOCX, XLSX, PPTX, ZIP, ảnh — tối đa 25MB / file</p>
+                </label>
+              ) : (
+                <div>
+                  <ul className="space-y-1.5 mb-2">
+                    {files.map((f, i) => (
+                      <li key={`${f.name}-${i}`} className="flex items-center gap-2 p-2 bg-surface-container-low rounded-lg border border-outline-variant/20">
+                        <span className="material-symbols-outlined text-primary text-xl shrink-0">description</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-on-surface truncate">{f.name}</p>
+                          <p className="text-xs text-outline">{fmtSize(f.size)}</p>
+                        </div>
+                        <button type="button" onClick={() => removeFileAt(i)} disabled={saving}
+                          className="p-1 text-outline hover:text-error hover:bg-error-container/10 rounded transition-colors disabled:opacity-40">
+                          <span className="material-symbols-outlined text-base">close</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <label className="block text-center p-2 border border-dashed border-outline-variant/30 rounded-lg cursor-pointer text-sm text-primary hover:bg-primary/5 transition-colors">
+                    <input type="file" multiple className="hidden" accept={ACCEPT_ATTR}
+                      onChange={e => { handleFilesPick(e.target.files); e.target.value = '' }} />
+                    + Thêm file
+                  </label>
+                  {files.length > 1 && (
+                    <p className="text-xs text-outline mt-2 flex items-start gap-1">
+                      <span className="material-symbols-outlined text-sm shrink-0">info</span>
+                      <span>Mỗi file sẽ là 1 tài liệu riêng. Tiêu đề lấy theo tên file (bỏ qua ô tiêu đề ở trên).</span>
+                    </p>
+                  )}
+                </div>
+              )}
+              {progress.total > 0 && (
+                <div className="mt-2">
+                  <p className="text-xs text-outline mb-1">
+                    Đang tải file {progress.current}/{progress.total} — {progress.percent}%
+                  </p>
+                  <div className="h-1.5 bg-outline-variant/20 rounded-full overflow-hidden">
+                    <div className="h-full bg-primary transition-all" style={{ width: `${progress.percent}%` }} />
+                  </div>
                 </div>
               )}
             </div>
@@ -555,7 +609,11 @@ function MaterialModal({ editing, students, classes, onClose, onSaved }: {
         <div className="p-6 border-t border-outline-variant/10 flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-semibold text-on-surface-variant hover:bg-surface-container-low transition-colors">Huỷ</button>
           <button onClick={handleSubmit} disabled={saving} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
-            {saving ? (progress > 0 && progress < 100 ? `Đang upload ${progress}%` : 'Đang lưu...') : (editing ? 'Cập nhật' : 'Tải lên')}
+            {saving
+              ? (progress.total > 1
+                  ? `Đang tải ${progress.current}/${progress.total} (${progress.percent}%)`
+                  : (progress.percent > 0 ? `Đang upload ${progress.percent}%` : 'Đang lưu...'))
+              : (editing ? 'Cập nhật' : 'Tải lên')}
           </button>
         </div>
       </div>
