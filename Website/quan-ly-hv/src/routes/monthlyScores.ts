@@ -155,24 +155,9 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
     const month = parseInt(req.query.month as string) || (new Date().getMonth() + 1)
     const classId = (req.query.classId as string) || ''
 
-    // RBAC: TEACHER chỉ được xem lớp mình phụ trách (Class.teacherId === teacher doc ID)
+    // GET cho phép mọi role xem (trường nhỏ, giáo viên cần xem tổng quan)
+    // Quyền ghi (PUT) vẫn chặt: chỉ ADMIN/STAFF hoặc TEACHER của đúng lớp đó.
     const classFilter: string | undefined = classId || undefined
-    if (req.user?.role === 'TEACHER') {
-      const teacherSnap = await db.collection(C.TEACHERS).where('userId', '==', req.user.userId).limit(1).get()
-      const teacherDocId = teacherSnap.empty ? null : teacherSnap.docs[0].id
-      const allowedClassesSnap = teacherDocId
-        ? await db.collection(C.CLASSES).where('teacherId', '==', teacherDocId).get()
-        : null
-      const allowed = new Set(allowedClassesSnap?.docs.map(d => d.id) ?? [])
-
-      if (classFilter && classFilter !== PRIVATE_CLASS_ID && !allowed.has(classFilter)) {
-        res.status(403).json({ message: 'Không có quyền xem lớp này' }); return
-      }
-      const rows = await buildRows(year, month, classFilter)
-      const filtered = rows.filter(r => allowed.has(r.classId) || r.classId === PRIVATE_CLASS_ID)
-      res.json({ year, month, rows: filtered }); return
-    }
-
     const rows = await buildRows(year, month, classFilter)
     res.json({ year, month, rows })
   } catch (err) { next(err) }
