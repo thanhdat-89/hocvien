@@ -18,11 +18,10 @@ import dashboardRoutes from './routes/dashboard'
 import { notificationRouter, webhookRouter } from './routes/notifications'
 import leadRoutes from './routes/leads'
 import reviewRoutes from './routes/reviews'
-import testScoreRoutes from './routes/testScores'
-import testRoutes from './routes/tests'
 import materialRoutes from './routes/materials'
 import publicRoutes from './routes/public'
 import activityRoutes from './routes/activity'
+import monthlyScoresRoutes from './routes/monthlyScores'
 
 import { errorHandler, notFound } from './middleware/errorHandler'
 import { activityLogMiddleware } from './middleware/activityLog'
@@ -69,11 +68,10 @@ app.use('/api/notifications',  notificationRouter)
 app.use('/api/leads',          leadRoutes)
 app.use('/api/zalo',           webhookRouter)
 app.use('/api/reviews',        reviewRoutes)
-app.use('/api/test-scores',    testScoreRoutes)
-app.use('/api/tests',          testRoutes)
 app.use('/api/materials',      materialRoutes)
 app.use('/api/public',         publicRoutes)
 app.use('/api/activity',       activityRoutes)
+app.use('/api/monthly-scores', monthlyScoresRoutes)
 
 // ─── Error handlers ───────────────────────────────────────────
 app.use(notFound)

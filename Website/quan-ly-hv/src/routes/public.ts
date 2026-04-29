@@ -222,9 +222,9 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
       })
 
     // ─── Nhận xét theo tháng ───────────────────────────────────
-    const [reviewSnap, testScoreSnap] = await Promise.all([
+    const [reviewSnap, monthlyScoresSnap] = await Promise.all([
       db.collection(C.STUDENTS).doc(studentId).collection('reviews').orderBy('month', 'desc').get(),
-      db.collection(C.STUDENTS).doc(studentId).collection('testScores').get(),
+      db.collection(C.MONTHLY_SCORES).where('studentId', '==', studentId).get(),
     ])
     const reviews: PublicReview[] = reviewSnap.docs.map(d => {
       const data = d.data()
@@ -236,18 +236,18 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
         updatedAt: data.updatedAt,
       }
     })
-    const testScores = testScoreSnap.docs
+    const monthlyScores = monthlyScoresSnap.docs
       .map(d => ({ id: d.id, ...d.data() } as any))
-      .sort((a, b) => (b.testDate || '').localeCompare(a.testDate || ''))
-      .map(t => ({
-        id: t.id,
-        testName: t.testName,
-        testDate: t.testDate,
-        score: t.score,
-        maxScore: t.maxScore,
-        className: t.className,
-        teacherName: t.teacherName,
-        notes: t.notes,
+      .sort((a, b) => (b.year - a.year) || (b.month - a.month) || (a.className ?? '').localeCompare(b.className ?? '', 'vi'))
+      .map(m => ({
+        id: m.id,
+        classId: m.classId,
+        className: m.className,
+        year: m.year,
+        month: m.month,
+        expectedCount: m.expectedCount,
+        scores: m.scores ?? [],
+        notes: m.notes,
       }))
 
     const [tuitionSummary, promotions, privateSessionsRaw] = await Promise.all([
@@ -279,7 +279,7 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
       tuitionSummary,
       promotions,
       reviews,
-      testScores,
+      monthlyScores,
       materials,
     }
     publicCache.set(studentId, { at: Date.now(), payload })

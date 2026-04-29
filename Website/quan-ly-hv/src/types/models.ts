@@ -329,3 +329,22 @@ export interface Material {
   createdAt: string
   updatedAt: string
 }
+
+// ─── MonthlyScores ─────────────────────────────────────────────
+// 1 doc = (học viên × lớp × tháng). Số ô = số buổi học của lớp đó trong tháng.
+// classId = "private" cho học viên học riêng (không thuộc lớp).
+export interface MonthlyScores {
+  id: string                      // `${studentId}_${classId|private}_${YYYYMM}`
+  studentId: string
+  studentName: string             // denorm
+  classId: string                 // "private" cho học riêng
+  className: string               // denorm; "Học riêng" cho private
+  year: number
+  month: number                   // 1–12
+  expectedCount: number           // số buổi học trong tháng (= cột KT1..KT(x))
+  scores: (number | null)[]       // length === expectedCount
+  maxScore: number                // luôn 10 (V1)
+  notes?: string                  // ghi chú chung cho cả tháng
+  updatedAt: string
+  updatedBy: string
+}

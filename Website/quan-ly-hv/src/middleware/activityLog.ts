@@ -30,8 +30,8 @@ const SKIP_PATTERNS: RegExp[] = [
 const RESOURCE_LABEL: Record<string, string> = {
   students: 'học viên', classes: 'lớp học', schedules: 'lịch học', sessions: 'buổi học',
   attendance: 'điểm danh', tuition: 'học phí', teachers: 'giáo viên', subjects: 'môn học',
-  parents: 'phụ huynh', leads: 'lead', reviews: 'nhận xét', 'test-scores': 'điểm kiểm tra',
-  tests: 'bài kiểm tra', materials: 'tài liệu', notifications: 'thông báo',
+  parents: 'phụ huynh', leads: 'lead', reviews: 'nhận xét', 'monthly-scores': 'điểm kiểm tra tháng',
+  materials: 'tài liệu', notifications: 'thông báo',
 }
 
 function deriveResourceType(path: string): string {

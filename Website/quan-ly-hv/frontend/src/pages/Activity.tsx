@@ -39,8 +39,7 @@ const RESOURCE_OPTIONS: { value: string; label: string }[] = [
   { value: 'parents',       label: 'Phụ huynh' },
   { value: 'leads',         label: 'Lead' },
   { value: 'reviews',       label: 'Nhận xét' },
-  { value: 'test-scores',   label: 'Điểm kiểm tra' },
-  { value: 'tests',         label: 'Bài kiểm tra' },
+  { value: 'monthly-scores', label: 'Điểm kiểm tra' },
   { value: 'materials',     label: 'Tài liệu' },
   { value: 'notifications', label: 'Thông báo' },
 ]

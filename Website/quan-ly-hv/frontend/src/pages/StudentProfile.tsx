@@ -981,139 +981,46 @@ function ReviewsTab({ studentId }: { studentId: string }) {
   )
 }
 
-// ─── Tab: Test Scores ────────────────────────────────────────────────────────
+// ─── Tab: Test Scores (theo tháng) ───────────────────────────────────────────
 
-interface TestScore {
+interface MonthlyScoresDoc {
   id: string
-  testName: string
-  testDate: string
-  score: number
-  maxScore: number
-  classId?: string
-  className?: string
+  studentId: string
+  studentName: string
+  classId: string
+  className: string
+  year: number
+  month: number
+  expectedCount: number
+  scores: (number | null)[]
   notes?: string
-  teacherName?: string
+  updatedAt: string
 }
 
-function ScoresTab({ studentId, enrollments }: { studentId: string; enrollments: ClassEnrollment[] }) {
-  const confirm = useConfirm()
-  const alert = useAlert()
-  const today = new Date().toISOString().slice(0, 10)
-  const [list, setList] = useState<TestScore[]>([])
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function ScoresTab({ studentId, enrollments: _enrollments }: { studentId: string; enrollments: ClassEnrollment[] }) {
+  const [list, setList] = useState<MonthlyScoresDoc[]>([])
   const [loading, setLoading] = useState(true)
-  const [editing, setEditing] = useState<TestScore | null>(null)
-  const [showForm, setShowForm] = useState(false)
 
-  const [testName, setTestName] = useState('')
-  const [testDate, setTestDate] = useState(today)
-  const [score, setScore] = useState('')
-  const [maxScore, setMaxScore] = useState('10')
-  const [classId, setClassId] = useState('')
-  const [notes, setNotes] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  const activeEnrollments = enrollments.filter(e => e.status === 'ACTIVE')
-
-  const load = () => {
+  useEffect(() => {
     setLoading(true)
-    api.get(`/test-scores/${studentId}`)
+    api.get(`/monthly-scores/student/${studentId}`)
       .then(r => setList(r.data ?? []))
       .catch(() => setList([]))
       .finally(() => setLoading(false))
-  }
+  }, [studentId])
 
-  useEffect(() => { load() }, [studentId])
-
-  const resetForm = () => {
-    setTestName('')
-    setTestDate(today)
-    setScore('')
-    setMaxScore('10')
-    setClassId('')
-    setNotes('')
-    setEditing(null)
-  }
-
-  const openAdd = () => { resetForm(); setShowForm(true) }
-  const openEdit = (s: TestScore) => {
-    setEditing(s)
-    setTestName(s.testName)
-    setTestDate(s.testDate)
-    setScore(String(s.score))
-    setMaxScore(String(s.maxScore))
-    setClassId(s.classId ?? '')
-    setNotes(s.notes ?? '')
-    setShowForm(true)
-  }
-  const closeForm = () => { setShowForm(false); resetForm() }
-
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!testName.trim()) { await alert({ title: 'Thiếu tên bài', message: 'Vui lòng nhập tên bài kiểm tra.' }); return }
-    const sNum = Number(score), mNum = Number(maxScore)
-    if (!Number.isFinite(sNum) || sNum < 0) { await alert({ title: 'Điểm không hợp lệ', message: 'Điểm phải là số không âm.' }); return }
-    if (!Number.isFinite(mNum) || mNum <= 0) { await alert({ title: 'Thang điểm không hợp lệ', message: 'Thang điểm phải lớn hơn 0.' }); return }
-    if (sNum > mNum) { await alert({ title: 'Quá thang điểm', message: `Điểm không được lớn hơn ${mNum}.` }); return }
-
-    const cls = activeEnrollments.find(en => en.classId === classId)
-    const payload = {
-      testName: testName.trim(),
-      testDate,
-      score: sNum,
-      maxScore: mNum,
-      classId: classId || undefined,
-      className: cls?.className || undefined,
-      notes: notes.trim() || undefined,
-    }
-
-    setSaving(true)
-    try {
-      if (editing) await api.put(`/test-scores/${studentId}/${editing.id}`, payload)
-      else         await api.post(`/test-scores/${studentId}`, payload)
-      load()
-      closeForm()
-    } catch {
-      await alert({ title: 'Lỗi', message: 'Không lưu được điểm. Thử lại sau.' })
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleDelete = async (s: TestScore) => {
-    const ok = await confirm({
-      title: 'Xoá điểm',
-      message: `Xoá điểm "${s.testName}" (${s.score}/${s.maxScore})?`,
-      confirmLabel: 'Xoá',
-      danger: true,
-    })
-    if (!ok) return
-    try { await api.delete(`/test-scores/${studentId}/${s.id}`); load() }
-    catch { await alert({ title: 'Lỗi', message: 'Không xoá được điểm.' }) }
-  }
-
-  const scoreColor = (s: number, m: number) => {
-    const pct = m > 0 ? (s / m) * 100 : 0
-    if (pct >= 80) return 'text-emerald-600'
-    if (pct >= 65) return 'text-primary'
-    if (pct >= 50) return 'text-amber-600'
+  const scoreColor = (s: number | null) => {
+    if (s == null) return ''
+    if (s >= 8) return 'text-emerald-600'
+    if (s >= 6.5) return 'text-primary'
+    if (s >= 5) return 'text-amber-600'
     return 'text-error'
-  }
-
-  const fmtTestDate = (d: string) => {
-    if (!d) return ''
-    const [y, m, dd] = d.split('-')
-    return `${dd}/${m}/${y}`
   }
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h3 className="font-headline text-lg font-bold text-on-surface">Điểm kiểm tra</h3>
-        <button onClick={openAdd} className="btn-primary text-sm">
-          <span className="material-symbols-outlined text-base">add</span>Thêm điểm
-        </button>
-      </div>
-
+      <h3 className="font-headline text-lg font-bold text-on-surface">Điểm kiểm tra</h3>
       {loading ? (
         <div className="flex justify-center py-8">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
@@ -1122,115 +1029,49 @@ function ScoresTab({ studentId, enrollments }: { studentId: string; enrollments:
         <div className="bg-surface-container-lowest rounded-xl p-10 text-center shadow-sm">
           <span className="material-symbols-outlined text-5xl text-outline/40 block mb-2">grade</span>
           <p className="text-sm text-outline">Chưa có điểm kiểm tra nào</p>
+          <p className="text-xs text-outline/70 mt-1">Vào trang "Điểm kiểm tra" để chấm điểm theo tháng</p>
         </div>
-      ) : (
-        <div className="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="border-b border-outline-variant/10 text-[10px] uppercase font-bold text-outline tracking-widest">
-                <th className="py-3 px-4">Bài kiểm tra</th>
-                <th className="py-3 px-4">Lớp</th>
-                <th className="py-3 px-4 text-center">Ngày</th>
-                <th className="py-3 px-4 text-right">Điểm</th>
-                <th className="py-3 px-4 w-20"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-outline-variant/5">
-              {list.map(s => (
-                <tr key={s.id} className="hover:bg-surface-container-low/30">
-                  <td className="py-3 px-4 text-sm">
-                    <div className="font-semibold text-on-surface">{s.testName}</div>
-                    {s.notes && <div className="text-xs text-outline mt-0.5">{s.notes}</div>}
-                  </td>
-                  <td className="py-3 px-4 text-sm text-on-surface-variant">{s.className ?? '—'}</td>
-                  <td className="py-3 px-4 text-sm text-center text-on-surface-variant">{fmtTestDate(s.testDate)}</td>
-                  <td className="py-3 px-4 text-sm text-right font-bold whitespace-nowrap">
-                    <span className={scoreColor(s.score, s.maxScore)}>{s.score}</span>
-                    <span className="text-outline">/{s.maxScore}</span>
-                  </td>
-                  <td className="py-3 px-4 text-right whitespace-nowrap">
-                    <button onClick={() => openEdit(s)} className="p-1.5 hover:bg-primary/10 text-outline hover:text-primary rounded-lg transition-colors">
-                      <span className="material-symbols-outlined text-sm">edit</span>
-                    </button>
-                    <button onClick={() => handleDelete(s)} className="p-1.5 hover:bg-error/10 text-outline hover:text-error rounded-lg transition-colors">
-                      <span className="material-symbols-outlined text-sm">delete</span>
-                    </button>
-                  </td>
-                </tr>
+      ) : list.map(m => {
+        const valid = m.scores.filter((x): x is number => x != null)
+        const avg = valid.length > 0 ? valid.reduce((a, b) => a + b, 0) / valid.length : null
+        return (
+          <div key={m.id} className="bg-surface-container-lowest rounded-xl p-4 shadow-sm">
+            <div className="flex items-baseline justify-between gap-3 mb-3 flex-wrap">
+              <div>
+                <h4 className="font-bold text-on-surface text-sm">Tháng {m.month}/{m.year}</h4>
+                <p className="text-xs text-outline">{m.className}</p>
+              </div>
+              {avg != null && (
+                <div className="text-right">
+                  <p className="text-[10px] text-outline uppercase tracking-wider">TB</p>
+                  <p className={`text-xl font-extrabold ${scoreColor(avg)}`}>{avg.toFixed(1)}</p>
+                </div>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {m.scores.map((s, i) => (
+                <span key={i}
+                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-bold border border-outline-variant/20 ${
+                    s == null ? 'text-outline/50' : scoreColor(s)
+                  } bg-surface-container-low/50`}>
+                  <span className="text-[10px] opacity-60">KT{i + 1}</span>
+                  <span>{s == null ? '—' : s}</span>
+                </span>
               ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {showForm && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={closeForm}>
-          <form
-            onSubmit={handleSave}
-            onClick={e => e.stopPropagation()}
-            className="bg-surface rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4"
-          >
-            <h3 className="font-headline text-lg font-bold text-on-surface">
-              {editing ? 'Sửa điểm' : 'Thêm điểm kiểm tra'}
-            </h3>
-
-            <div>
-              <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Tên bài kiểm tra</label>
-              <input type="text" value={testName} onChange={e => setTestName(e.target.value)} required
-                placeholder="VD: KT 15 phút - Hàm số bậc 2"
-                className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
             </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Ngày kiểm tra</label>
-                <input type="date" value={testDate} onChange={e => setTestDate(e.target.value)} required
-                  className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Lớp <span className="text-outline/50 font-normal normal-case">(không bắt buộc)</span></label>
-                <select value={classId} onChange={e => setClassId(e.target.value)}
-                  className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
-                  <option value="">— Không gắn lớp —</option>
-                  {activeEnrollments.map(en => (
-                    <option key={en.classId} value={en.classId}>{en.className}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Điểm</label>
-                <input type="number" step="0.25" min="0" value={score} onChange={e => setScore(e.target.value)} required
-                  className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Thang điểm</label>
-                <input type="number" step="1" min="1" value={maxScore} onChange={e => setMaxScore(e.target.value)} required
-                  className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
-              </div>
-            </div>
-
-            <div>
-              <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Ghi chú <span className="text-outline/50 font-normal normal-case">(không bắt buộc)</span></label>
-              <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
-                placeholder="VD: Còn yếu phần xét dấu, cần luyện thêm bài tập..."
-                className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 resize-y" />
-            </div>
-
-            <div className="flex gap-3 pt-2">
-              <button type="button" onClick={closeForm} className="flex-1 btn-secondary justify-center">Huỷ</button>
-              <button type="submit" disabled={saving} className="flex-1 btn-primary justify-center disabled:opacity-60">
-                {saving ? 'Đang lưu...' : (editing ? 'Cập nhật' : 'Lưu')}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
+            {m.notes && (
+              <p className="text-xs text-on-surface-variant bg-surface-container-low/40 rounded-lg p-2 mt-3 leading-relaxed whitespace-pre-wrap">
+                <span className="material-symbols-outlined align-text-bottom text-outline mr-1" style={{ fontSize: 14 }}>edit_note</span>
+                {m.notes}
+              </p>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
+
 
 // ─── Tab: Tuition ────────────────────────────────────────────────────────────
 
