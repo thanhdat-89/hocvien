@@ -291,4 +291,58 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
   } catch (err) { next(err) }
 })
 
+// GET /api/public/payments/:studentId?month=&year=
+// Trả về tóm tắt thanh toán tháng để public page polling realtime.
+// Không cache — caller dùng để check trạng thái sau khi CK.
+router.get('/payments/:studentId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const studentId = s(req.params.studentId)
+    const month = Number(req.query.month) || (new Date().getMonth() + 1)
+    const year = Number(req.query.year) || new Date().getFullYear()
+
+    const studentDoc = await db.collection(C.STUDENTS).doc(studentId).get()
+    if (!studentDoc.exists || (studentDoc.data() as Student).status !== 'ACTIVE') {
+      res.status(404).json({ message: 'Học viên không khả dụng' })
+      return
+    }
+
+    const recordsSnap = await db.collection(C.TUITION_RECORDS)
+      .where('studentId', '==', studentId)
+      .where('billingMonth', '==', month)
+      .where('billingYear', '==', year)
+      .get()
+
+    const records = toDocs<TuitionRecord>(recordsSnap)
+    if (records.length === 0) {
+      res.json({ month, year, records: [], totalFinalAmount: 0, totalPaid: 0 })
+      return
+    }
+
+    const recordIds = records.map(r => r.id)
+    const paymentsSnap = await db.collection(C.PAYMENTS)
+      .where('tuitionRecordId', 'in', recordIds.slice(0, 10))
+      .get()
+    const payments = toDocs<Payment>(paymentsSnap)
+
+    const result = records.map(r => {
+      const paid = payments.filter(p => p.tuitionRecordId === r.id)
+        .reduce((sum, p) => sum + (p.amount || 0), 0)
+      return {
+        id: r.id,
+        classId: r.classId,
+        className: r.className,
+        finalAmount: r.finalAmount,
+        totalPaid: paid,
+        status: r.status,
+      }
+    })
+
+    const totalFinalAmount = result.reduce((s, r) => s + r.finalAmount, 0)
+    const totalPaid = result.reduce((s, r) => s + r.totalPaid, 0)
+    res.json({ month, year, records: result, totalFinalAmount, totalPaid })
+  } catch (err) {
+    next(err)
+  }
+})
+
 export default router
