@@ -65,7 +65,6 @@ export default function Tests() {
     setLoading(true)
     try {
       const params = new URLSearchParams({ year: String(year), month: String(month) })
-      if (classFilter) params.set('classId', classFilter)
       const res = await api.get(`/monthly-scores?${params.toString()}`)
       const data = res.data as ListResponse
       setRows(data.rows ?? [])
@@ -76,8 +75,9 @@ export default function Tests() {
       setLoading(false)
     }
   }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [year, month, classFilter])
+  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [year, month])
 
+  // Pills derived from FULL row set (so mọi lớp luôn hiển thị bất kể đang filter gì)
   const classPills = useMemo(() => {
     const seen = new Map<string, string>()
     rows.forEach(r => { if (!seen.has(r.classId)) seen.set(r.classId, r.className) })
@@ -88,7 +88,13 @@ export default function Tests() {
     })
   }, [rows])
 
-  const maxCols = useMemo(() => rows.reduce((m, r) => Math.max(m, r.expectedCount), 0), [rows])
+  // Filter client-side for instant switching
+  const visibleRows = useMemo(
+    () => classFilter ? rows.filter(r => r.classId === classFilter) : rows,
+    [rows, classFilter]
+  )
+
+  const maxCols = useMemo(() => visibleRows.reduce((m, r) => Math.max(m, r.expectedCount), 0), [visibleRows])
 
   const queueSave = (rowId: string, payload: object, key: number | 'notes') => {
     const k = cellKey(rowId, key)
@@ -203,14 +209,14 @@ export default function Tests() {
                     <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
                   </td>
                 </tr>
-              ) : rows.length === 0 ? (
+              ) : visibleRows.length === 0 ? (
                 <tr>
                   <td colSpan={maxCols + 4} className="py-16 text-center text-outline">
                     <span className="material-symbols-outlined text-5xl block mb-3 opacity-30">grading</span>
-                    Tháng này chưa có buổi học nào
+                    {classFilter ? 'Lớp này chưa có buổi học trong tháng' : 'Tháng này chưa có buổi học nào'}
                   </td>
                 </tr>
-              ) : rows.map((r, i) => {
+              ) : visibleRows.map((r, i) => {
                 const valid = r.scores.filter((x): x is number => x != null)
                 const avg = valid.length > 0 ? valid.reduce((a, b) => a + b, 0) / valid.length : null
                 return (
