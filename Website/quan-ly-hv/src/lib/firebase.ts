@@ -75,6 +75,7 @@ export const C = {
   AGGREGATES:          'aggregates',
   ACTIVITY_LOGS:       'activityLogs',
   MONTHLY_SCORES:      'monthlyScores',
+  BANK_TRANSACTIONS:   'bankTransactions',
 } as const
 
 // ─── Helpers ──────────────────────────────────────────────────

@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express'
 import { db, C, s, toDocs, toObj } from '../lib/firebase'
 import { computeTuitionSummary, loadStudentPromotions } from '../lib/tuition'
 import { listMaterialsForStudent } from './materials'
+import { studentShortId } from '../services/sepayMatcher'
 import type { Student, ClassEnrollment, Class, Schedule, TuitionRecord, Payment, PrivateSession } from '../types/models'
 
 const router = Router()
@@ -12,6 +13,7 @@ const router = Router()
 
 interface PublicStudent {
   id: string
+  shortId: string
   fullName: string
   dateOfBirth?: string
   gender?: string
@@ -21,6 +23,7 @@ interface PublicStudent {
   status: string
   avatarUrl?: string
 }
+
 
 interface PublicClass {
   id: string
@@ -103,6 +106,7 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
 
     const publicStudent: PublicStudent = {
       id: student.id,
+      shortId: studentShortId(student.id),
       fullName: student.fullName,
       dateOfBirth: student.dateOfBirth,
       gender: student.gender,

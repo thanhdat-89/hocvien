@@ -22,6 +22,7 @@ import materialRoutes from './routes/materials'
 import publicRoutes from './routes/public'
 import activityRoutes from './routes/activity'
 import monthlyScoresRoutes from './routes/monthlyScores'
+import sepayWebhookRoutes from './routes/webhooks'
 
 import { errorHandler, notFound } from './middleware/errorHandler'
 import { activityLogMiddleware } from './middleware/activityLog'
@@ -72,6 +73,7 @@ app.use('/api/materials',      materialRoutes)
 app.use('/api/public',         publicRoutes)
 app.use('/api/activity',       activityRoutes)
 app.use('/api/monthly-scores', monthlyScoresRoutes)
+app.use('/api/webhooks',       sepayWebhookRoutes)
 
 // ─── Error handlers ───────────────────────────────────────────
 app.use(notFound)

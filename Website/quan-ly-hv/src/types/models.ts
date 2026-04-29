@@ -265,6 +265,28 @@ export interface Payment {
   createdAt: string
 }
 
+export type BankTxStatus = 'matched' | 'unmatched' | 'duplicate' | 'ignored_outbound'
+
+export interface BankTransaction {
+  id: string                     // = SePay transaction id (string form)
+  sepayId: number
+  gateway: string                // bank name e.g. "VPBank"
+  accountNumber: string
+  transferType: 'in' | 'out'
+  transferAmount: number
+  accumulated: number
+  content: string
+  referenceCode: string
+  description: string
+  transactionDate: string        // "YYYY-MM-DD HH:mm:ss"
+  receivedAt: string             // ISO timestamp when our server processed it
+  status: BankTxStatus
+  matchedStudentId?: string
+  matchedTuitionRecordId?: string
+  matchedPaymentId?: string
+  matchReason?: string           // human-readable explanation
+}
+
 export interface Holiday {
   id: string
   date: string
