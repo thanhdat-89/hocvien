@@ -16,6 +16,10 @@ export async function calculateTuitionForStudent(
   const fromDate = `${monthStr}-01`
   const toDate = `${year}-${String(month).padStart(2, '0')}-${new Date(year, month, 0).getDate()}`
 
+  if (classId === 'private') {
+    return calculatePrivateTuition(studentId, month, year, fromDate, toDate)
+  }
+
   // Enrollment để lấy customTuitionRate
   const enrollSnap = await db.collection(C.ENROLLMENTS)
     .where('classId', '==', classId)
@@ -131,20 +135,132 @@ export async function calculateTuitionForStudent(
 }
 
 /**
+ * Tính học phí cho học viên Học riêng (classId='private') 1 tháng.
+ * Tổng tiền = sum(ratePerSession) của các buổi không CANCELLED trong tháng.
+ */
+async function calculatePrivateTuition(
+  studentId: string,
+  month: number,
+  year: number,
+  fromDate: string,
+  toDate: string,
+): Promise<{ tuitionRecord: TuitionRecord & { id: string }; isNew: boolean }> {
+  const sessionsSnap = await db.collection(C.PRIVATE_SCHEDULES)
+    .where('studentId', '==', studentId)
+    .where('sessionDate', '>=', fromDate)
+    .where('sessionDate', '<=', toDate)
+    .get()
+  const validSessions = sessionsSnap.docs
+    .map(d => ({ id: d.id, ...(d.data() as any) }))
+    .filter(s => s.status !== 'CANCELLED')
+
+  if (validSessions.length === 0) {
+    throw new Error(`Học viên ${studentId} không có buổi học riêng nào trong T${month}/${year}`)
+  }
+
+  const totalSessions = validSessions.length
+  const baseAmount = validSessions.reduce((sum, s) => sum + (Number(s.ratePerSession) || 0), 0)
+  const avgRate = totalSessions > 0 ? Math.round(baseAmount / totalSessions) : 0
+
+  // Khuyến mãi cho học riêng (classId='private')
+  const promoSnap = await db.collection(C.STUDENT_PROMOTIONS)
+    .where('studentId', '==', studentId)
+    .where('classId', '==', 'private')
+    .where('appliedFrom', '<=', toDate)
+    .get()
+  const activePromos = toDocs<StudentPromotion>(promoSnap).filter(p =>
+    !p.appliedTo || p.appliedTo >= fromDate
+  )
+
+  let discountAmount = 0
+  for (const sp of activePromos) {
+    if (sp.promotionType === 'PERCENTAGE') {
+      discountAmount += (baseAmount * sp.promotionValue) / 100
+    } else if (sp.promotionType === 'FIXED_AMOUNT') {
+      discountAmount += sp.promotionValue
+    } else if (sp.promotionType === 'FREE_SESSIONS') {
+      discountAmount += sp.promotionValue * avgRate
+    }
+  }
+  discountAmount = Math.min(discountAmount, baseAmount)
+  const finalAmount = baseAmount - discountAmount
+
+  const studentDoc = await db.collection(C.STUDENTS).doc(studentId).get()
+
+  const existingSnap = await db.collection(C.TUITION_RECORDS)
+    .where('studentId', '==', studentId)
+    .where('classId', '==', 'private')
+    .where('billingMonth', '==', month)
+    .where('billingYear', '==', year)
+    .limit(1).get()
+  const isNew = existingSnap.empty
+
+  const recordData = {
+    studentId, studentName: studentDoc.data()!.fullName as string,
+    classId: 'private', className: 'Học riêng',
+    billingMonth: month, billingYear: year,
+    totalSessions, chargedSessions: totalSessions,
+    baseAmount, discountAmount, finalAmount,
+    status: 'PENDING' as const,
+    dueDate: `${year}-${String(month).padStart(2, '0')}-25`,
+    updatedAt: now(),
+  }
+
+  let recordId: string
+  if (isNew) {
+    const ref = await db.collection(C.TUITION_RECORDS).add({ ...recordData, createdAt: now() })
+    recordId = ref.id
+  } else {
+    recordId = existingSnap.docs[0].id
+    await db.collection(C.TUITION_RECORDS).doc(recordId).update(recordData)
+  }
+  await refreshTuitionStatus(recordId)
+
+  const doc = await db.collection(C.TUITION_RECORDS).doc(recordId).get()
+  return {
+    tuitionRecord: { id: doc.id, ...doc.data() } as TuitionRecord & { id: string },
+    isNew,
+  }
+}
+
+/**
  * Tính học phí cho tất cả học viên active trong 1 lớp / 1 tháng
  */
 export async function calculateTuitionForClass(
   classId: string, month: number, year: number
 ): Promise<{ created: number; updated: number }> {
-  const enrollSnap = await db.collection(C.ENROLLMENTS)
-    .where('classId', '==', classId)
-    .where('status', '==', 'ACTIVE')
-    .get()
+  let studentIds: string[]
+
+  if (classId === 'private') {
+    const monthStr = `${year}-${String(month).padStart(2, '0')}`
+    const fromDate = `${monthStr}-01`
+    const toDate = `${year}-${String(month).padStart(2, '0')}-${new Date(year, month, 0).getDate()}`
+    const sessionsSnap = await db.collection(C.PRIVATE_SCHEDULES)
+      .where('sessionDate', '>=', fromDate)
+      .where('sessionDate', '<=', toDate)
+      .get()
+    const ids = new Set<string>()
+    sessionsSnap.docs.forEach(d => {
+      const data = d.data() as any
+      if (data.status !== 'CANCELLED' && data.studentId) ids.add(data.studentId as string)
+    })
+    studentIds = Array.from(ids)
+  } else {
+    const enrollSnap = await db.collection(C.ENROLLMENTS)
+      .where('classId', '==', classId)
+      .where('status', '==', 'ACTIVE')
+      .get()
+    studentIds = enrollSnap.docs.map(d => d.data().studentId as string)
+  }
 
   let created = 0, updated = 0
-  for (const doc of enrollSnap.docs) {
-    const { isNew } = await calculateTuitionForStudent(doc.data().studentId as string, classId, month, year)
-    isNew ? created++ : updated++
+  for (const sid of studentIds) {
+    try {
+      const { isNew } = await calculateTuitionForStudent(sid, classId, month, year)
+      isNew ? created++ : updated++
+    } catch (e) {
+      console.error('[calculateTuitionForClass] failed for student', sid, classId, e)
+    }
   }
   return { created, updated }
 }
