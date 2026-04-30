@@ -40,27 +40,22 @@ export async function calculateTuitionForStudent(
     }
   }
 
-  // Sessions COMPLETED trong tháng
+  // Sessions không CANCELLED trong tháng (theo lịch dự kiến)
   const sessionsSnap = await db.collection(C.SESSIONS)
     .where('classId', '==', classId)
-    .where('status', '==', 'COMPLETED')
     .where('sessionDate', '>=', fromDate)
     .where('sessionDate', '<=', toDate)
     .get()
-  const totalSessions = sessionsSnap.size
-
-  // Đếm buổi PRESENT + LATE (tính tiền)
-  const attendanceSnap = await db.collection(C.STUDENT_ATTENDANCES)
-    .where('studentId', '==', studentId)
-    .where('classId', '==', classId)
-    .where('sessionDate', '>=', fromDate)
-    .where('sessionDate', '<=', toDate)
-    .get()
-
-  const chargedSessions = attendanceSnap.docs.filter(d => {
-    const status = d.data().status as string
-    return status === 'PRESENT' || status === 'LATE'
-  }).length
+  const validSessions = sessionsSnap.docs.filter(d => {
+    const data = d.data()
+    if (data.status === 'CANCELLED') return false
+    if (enrollment.enrollmentDate && data.sessionDate < enrollment.enrollmentDate) return false
+    if (enrollment.status === 'DROPPED' && (enrollment as any).dropDate
+        && data.sessionDate > (enrollment as any).dropDate) return false
+    return true
+  })
+  const totalSessions = validSessions.length
+  const chargedSessions = totalSessions
 
   const baseAmount = chargedSessions * ratePerSession
 
