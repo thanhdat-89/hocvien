@@ -636,22 +636,13 @@ export default function Students() {
                           <span className="material-symbols-outlined text-[20px]">calendar_month</span>
                         </button>
                         {canManageStudents && (
-                          <>
-                            <button
-                              onClick={() => { setEditStudent(student); setShowModal(true) }}
-                              className="p-2 text-outline hover:text-primary hover:bg-primary-container/10 rounded-lg transition-all"
-                              title="Chỉnh sửa"
-                            >
-                              <span className="material-symbols-outlined text-[20px]">edit_square</span>
-                            </button>
-                            <button
-                              onClick={() => handleDelete(student)}
-                              className="p-2 text-outline hover:text-error hover:bg-error-container/10 rounded-lg transition-all"
-                              title="Xóa"
-                            >
-                              <span className="material-symbols-outlined text-[20px]">delete</span>
-                            </button>
-                          </>
+                          <button
+                            onClick={() => handleDelete(student)}
+                            className="p-2 text-outline hover:text-error hover:bg-error-container/10 rounded-lg transition-all"
+                            title="Xóa"
+                          >
+                            <span className="material-symbols-outlined text-[20px]">delete</span>
+                          </button>
                         )}
                       </div>
                     </td>
