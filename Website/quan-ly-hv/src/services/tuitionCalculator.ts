@@ -120,6 +120,9 @@ export async function calculateTuitionForStudent(
     await db.collection(C.TUITION_RECORDS).doc(recordId).update(recordData)
   }
 
+  // Recompute status từ payments thực tế (PENDING/PARTIAL/PAID)
+  await refreshTuitionStatus(recordId)
+
   const doc = await db.collection(C.TUITION_RECORDS).doc(recordId).get()
   return {
     tuitionRecord: { id: doc.id, ...doc.data() } as TuitionRecord & { id: string },

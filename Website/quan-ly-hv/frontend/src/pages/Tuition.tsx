@@ -84,6 +84,14 @@ export default function Tuition() {
   const [bulkCreating, setBulkCreating] = useState(false)
 
   const createRecordForRow = async (row: ScheduleRow) => {
+    const isRecalc = !!row.tuitionRecord
+    if (isRecalc) {
+      const ok = window.confirm(
+        `Tính lại phiếu cho ${row.studentName} - ${row.className} T${month}/${year}?\n\n` +
+        `Số tiền sẽ cập nhật theo lịch hiện tại. Các giao dịch đã thanh toán được giữ nguyên.`
+      )
+      if (!ok) return
+    }
     const key = `${row.studentId}-${row.classId}`
     setCreatingRow(key)
     try {
@@ -92,7 +100,7 @@ export default function Tuition() {
       })
       loadData()
     } catch (e: any) {
-      alert(e?.response?.data?.message || 'Tạo phiếu thất bại')
+      alert(e?.response?.data?.message || (isRecalc ? 'Tính lại phiếu thất bại' : 'Tạo phiếu thất bại'))
     } finally {
       setCreatingRow(null)
     }
@@ -356,7 +364,17 @@ export default function Tuition() {
                           </td>
                           <td className="table-cell text-center">
                             {r.tuitionRecord ? (
-                              <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 text-xs font-bold">Đã tạo</span>
+                              <div className="flex items-center justify-center gap-2">
+                                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 text-xs font-bold">Đã tạo</span>
+                                <button
+                                  onClick={() => createRecordForRow(r)}
+                                  disabled={creatingRow === `${r.studentId}-${r.classId}`}
+                                  className="px-2 py-0.5 rounded-md text-[11px] font-bold text-secondary hover:bg-secondary/10 transition-all disabled:opacity-40"
+                                  title="Tính lại học phí dựa trên lịch học hiện tại (giữ nguyên các giao dịch đã thanh toán)"
+                                >
+                                  {creatingRow === `${r.studentId}-${r.classId}` ? '...' : 'Tính lại'}
+                                </button>
+                              </div>
                             ) : (
                               <button
                                 onClick={() => createRecordForRow(r)}
