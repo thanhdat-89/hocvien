@@ -553,11 +553,51 @@ router.get('/:id/schedule', async (req: AuthRequest, res: Response, next: NextFu
 })
 
 // GET /api/students/:id/tuition-summary
-// Tính học phí từ sessions thực tế, không cần phiếu học phí
+// Tính học phí từ sessions thực tế + đính kèm tuitionRecord (nếu có) để admin biết phiếu đã tạo chưa.
 router.get('/:id/tuition-summary', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const result = await computeTuitionSummary(s(req.params.id))
-    res.json(result)
+    const studentId = s(req.params.id)
+    const summary = await computeTuitionSummary(studentId)
+
+    const recordsSnap = await db.collection(C.TUITION_RECORDS)
+      .where('studentId', '==', studentId)
+      .get()
+    const recordsByKey = new Map<string, any>()
+    recordsSnap.forEach(doc => {
+      const d = { id: doc.id, ...(doc.data() as any) }
+      recordsByKey.set(`${d.billingYear}-${d.billingMonth}-${d.classId}`, d)
+    })
+
+    const recordIds = Array.from(recordsByKey.values()).map((r: any) => r.id as string)
+    const paidByRecord = new Map<string, number>()
+    for (let i = 0; i < recordIds.length; i += 10) {
+      const chunk = recordIds.slice(i, i + 10)
+      if (chunk.length === 0) continue
+      const paySnap = await db.collection(C.PAYMENTS)
+        .where('tuitionRecordId', 'in', chunk).get()
+      paySnap.forEach(p => {
+        const data = p.data() as any
+        paidByRecord.set(data.tuitionRecordId, (paidByRecord.get(data.tuitionRecordId) || 0) + (data.amount || 0))
+      })
+    }
+
+    const enriched = summary.map((row: any) => {
+      const rec = recordsByKey.get(`${row.year}-${row.month}-${row.classId}`)
+      if (!rec) return { ...row, tuitionRecord: null }
+      const paid = paidByRecord.get(rec.id) || 0
+      return {
+        ...row,
+        tuitionRecord: {
+          id: rec.id,
+          finalAmount: rec.finalAmount,
+          status: rec.status,
+          paidAmount: paid,
+          remainingAmount: Math.max(0, rec.finalAmount - paid),
+        },
+      }
+    })
+
+    res.json(enriched)
   } catch (err) {
     next(err)
   }

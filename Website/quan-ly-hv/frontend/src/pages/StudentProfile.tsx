@@ -1080,6 +1080,13 @@ interface TuitionRow {
   classId: string; className: string
   totalSessions: number; ratePerSession: number
   discountAmount: number; baseAmount: number; finalAmount: number
+  tuitionRecord: {
+    id: string
+    finalAmount: number
+    status: 'PENDING' | 'PARTIAL' | 'PAID' | 'OVERDUE'
+    paidAmount: number
+    remainingAmount: number
+  } | null
 }
 
 interface PromoModalProps {
@@ -1220,6 +1227,30 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
   const [showPromoModal, setShowPromoModal] = useState(false)
   const [filterMonth, setFilterMonth] = useState(now.getMonth() + 1)
   const [filterYear, setFilterYear] = useState(now.getFullYear())
+  const [creatingKey, setCreatingKey] = useState<string | null>(null)
+
+  const createRecord = async (row: TuitionRow) => {
+    const isRecalc = !!row.tuitionRecord
+    if (isRecalc) {
+      const ok = window.confirm(
+        `Tính lại phiếu cho ${row.className} T${row.month}/${row.year}?\n\n` +
+        `Số tiền sẽ cập nhật theo lịch hiện tại. Các giao dịch đã thanh toán được giữ nguyên.`
+      )
+      if (!ok) return
+    }
+    const key = `${row.monthKey}__${row.classId}`
+    setCreatingKey(key)
+    try {
+      await api.post('/tuition/calculate', {
+        studentId, classId: row.classId, month: row.month, year: row.year,
+      })
+      load()
+    } catch (e: any) {
+      alert(e?.response?.data?.message || (isRecalc ? 'Tính lại phiếu thất bại' : 'Tạo phiếu thất bại'))
+    } finally {
+      setCreatingKey(null)
+    }
+  }
 
   const loadRows = () => api.get(`/students/${studentId}/tuition-summary`)
     .then(r => setRows(r.data ?? [])).catch(() => setRows([]))
@@ -1360,28 +1391,57 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
                   <th className="pb-3 pr-6 text-center">Số buổi học</th>
                   <th className="pb-3 pr-6 text-right">Học phí/buổi</th>
                   <th className="pb-3 pr-6 text-right">Khuyến mại & Giảm giá</th>
-                  <th className="pb-3 text-right">Thành tiền</th>
+                  <th className="pb-3 pr-6 text-right">Thành tiền</th>
+                  <th className="pb-3 text-center">Phiếu</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant/5">
-                {filteredRows.map(r => (
-                  <tr key={`${r.monthKey}__${r.classId}`} className="hover:bg-surface-container-low/30 transition-colors">
-                    <td className="py-3 pr-6 text-sm">{r.className}</td>
-                    <td className="py-3 pr-6 text-sm text-center font-semibold">{r.totalSessions}</td>
-                    <td className="py-3 pr-6 text-sm text-right">{r.ratePerSession ? fmtMoney(r.ratePerSession) : '—'}</td>
-                    <td className="py-3 pr-6 text-sm text-right">
-                      {r.discountAmount > 0
-                        ? <span className="text-secondary font-medium">-{fmtMoney(r.discountAmount)}</span>
-                        : <span className="text-outline">—</span>}
-                    </td>
-                    <td className="py-3 text-sm font-bold text-right">{fmtMoney(r.finalAmount)}</td>
-                  </tr>
-                ))}
+                {filteredRows.map(r => {
+                  const key = `${r.monthKey}__${r.classId}`
+                  const busy = creatingKey === key
+                  return (
+                    <tr key={key} className="hover:bg-surface-container-low/30 transition-colors">
+                      <td className="py-3 pr-6 text-sm">{r.className}</td>
+                      <td className="py-3 pr-6 text-sm text-center font-semibold">{r.totalSessions}</td>
+                      <td className="py-3 pr-6 text-sm text-right">{r.ratePerSession ? fmtMoney(r.ratePerSession) : '—'}</td>
+                      <td className="py-3 pr-6 text-sm text-right">
+                        {r.discountAmount > 0
+                          ? <span className="text-secondary font-medium">-{fmtMoney(r.discountAmount)}</span>
+                          : <span className="text-outline">—</span>}
+                      </td>
+                      <td className="py-3 pr-6 text-sm font-bold text-right">{fmtMoney(r.finalAmount)}</td>
+                      <td className="py-3 text-center">
+                        {r.tuitionRecord ? (
+                          <div className="flex items-center justify-center gap-2">
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 text-[11px] font-bold">Đã tạo</span>
+                            <button
+                              onClick={() => createRecord(r)}
+                              disabled={busy}
+                              className="px-2 py-0.5 rounded-md text-[11px] font-bold text-secondary hover:bg-secondary/10 transition-all disabled:opacity-40"
+                              title="Tính lại học phí dựa trên lịch học hiện tại (giữ nguyên các giao dịch đã thanh toán)"
+                            >
+                              {busy ? '...' : 'Tính lại'}
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => createRecord(r)}
+                            disabled={busy}
+                            className="px-2.5 py-1 rounded-lg bg-primary/10 text-primary text-[11px] font-bold hover:bg-primary/20 transition-all disabled:opacity-40"
+                          >
+                            {busy ? '...' : 'Tạo phiếu'}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-outline-variant/20">
                   <td colSpan={4} className="pt-3 text-sm font-bold text-outline uppercase tracking-wider">Tổng cộng</td>
                   <td className="pt-3 text-sm font-bold text-right text-primary">{fmtMoney(totalFee)}</td>
+                  <td className="pt-3" />
                 </tr>
               </tfoot>
             </table>
