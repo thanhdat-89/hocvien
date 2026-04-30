@@ -27,12 +27,17 @@ export async function calculateTuitionForStudent(
 
   const enrollment = { id: enrollSnap.docs[0].id, ...enrollSnap.docs[0].data() } as ClassEnrollment
 
-  // Đơn giá: ưu tiên customTuitionRate của enrollment
+  // Đơn giá: ưu tiên customTuitionRate → class.tuitionRate → subject.tuitionRatePerSession
   let ratePerSession = enrollment.customTuitionRate ?? 0
   if (!ratePerSession) {
     const classDoc = await db.collection(C.CLASSES).doc(classId).get()
-    const subjectDoc = await db.collection(C.SUBJECTS).doc(classDoc.data()!.subjectId as string).get()
-    ratePerSession = Number(subjectDoc.data()!.tuitionRatePerSession)
+    const classData = classDoc.data() || {}
+    if (classData.tuitionRate) {
+      ratePerSession = Number(classData.tuitionRate)
+    } else if (classData.subjectId) {
+      const subjectDoc = await db.collection(C.SUBJECTS).doc(classData.subjectId as string).get()
+      ratePerSession = Number(subjectDoc.data()?.tuitionRatePerSession || 0)
+    }
   }
 
   // Sessions COMPLETED trong tháng
