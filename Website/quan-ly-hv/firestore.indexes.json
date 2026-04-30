@@ -57,6 +57,15 @@
       ]
     },
     {
+      "collectionGroup": "studentAttendances",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "studentId", "order": "ASCENDING" },
+        { "fieldPath": "classId", "order": "ASCENDING" },
+        { "fieldPath": "sessionDate", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "classEnrollments",
       "queryScope": "COLLECTION",
       "fields": [
