@@ -583,11 +583,21 @@ function InfoTab({
                             <span className="material-symbols-outlined text-sm">phone</span>{p.phone}
                           </a>
                         )}
-                        {p.zalo && (
-                          <p className="text-sm text-blue-500 flex items-center gap-1">
-                            <span className="material-symbols-outlined text-sm">chat</span>Zalo: {p.zalo}
-                          </p>
-                        )}
+                        {(() => {
+                          const zaloUrl = buildZaloUrl(p.zalo || p.phone)
+                          return zaloUrl ? (
+                            <a
+                              href={zaloUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-sm text-blue-500 flex items-center gap-1 hover:underline"
+                              title="Mở Zalo để nhắn tin"
+                            >
+                              <span className="material-symbols-outlined text-sm">chat</span>
+                              Nhắn Zalo{p.zalo ? `: ${p.zalo}` : ''}
+                            </a>
+                          ) : null
+                        })()}
                         {p.email && (
                           <a href={`mailto:${p.email}`} className="text-sm text-on-surface-variant flex items-center gap-1 hover:text-primary transition-colors">
                             <span className="material-symbols-outlined text-sm">mail</span>{p.email}
@@ -2109,6 +2119,14 @@ function buildParentUrl(studentId: string) {
   return IS_LOCAL
     ? `http://localhost:5174/hoc-vien/index.html?id=${encodeURIComponent(studentId)}`
     : `https://hocthemtoan.vn/hoc-vien/${encodeURIComponent(studentId)}`
+}
+
+function buildZaloUrl(phone?: string | null): string | null {
+  if (!phone) return null
+  const digits = phone.replace(/\D/g, '')
+  if (!digits) return null
+  const intl = digits.startsWith('0') ? '84' + digits.slice(1) : digits
+  return `https://zalo.me/${intl}`
 }
 
 function ShareLinkBox({ studentId }: { studentId: string }) {

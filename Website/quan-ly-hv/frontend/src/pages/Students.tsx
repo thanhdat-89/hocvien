@@ -346,6 +346,14 @@ function buildParentUrl(studentId: string) {
     : `https://hocthemtoan.vn/hoc-vien/${encodeURIComponent(studentId)}`
 }
 
+function buildZaloUrl(phone?: string | null): string | null {
+  if (!phone) return null
+  const digits = phone.replace(/\D/g, '')
+  if (!digits) return null
+  const intl = digits.startsWith('0') ? '84' + digits.slice(1) : digits
+  return `https://zalo.me/${intl}`
+}
+
 export default function Students() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -605,6 +613,21 @@ export default function Students() {
                             {copiedId === student.id ? 'check' : 'share'}
                           </span>
                         </button>
+                        {(() => {
+                          const phone = student.primaryParent?.zalo || student.primaryParent?.phone
+                          const zaloUrl = buildZaloUrl(phone)
+                          return zaloUrl ? (
+                            <a
+                              href={zaloUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-2 text-outline hover:text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all"
+                              title={`Nhắn tin Zalo cho ${phone}`}
+                            >
+                              <span className="material-symbols-outlined text-[20px]">chat</span>
+                            </a>
+                          ) : null
+                        })()}
                         <button
                           onClick={() => setPrivateModalStudent(student)}
                           className="p-2 text-outline hover:text-tertiary hover:bg-tertiary-container/10 rounded-lg transition-all"
