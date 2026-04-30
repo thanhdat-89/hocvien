@@ -101,16 +101,16 @@ export default function Tuition() {
   const createRecordsBulk = async () => {
     const classIds = [...new Set(filtered.map(r => r.classId))]
     if (classIds.length === 0) return
-    const password = window.prompt(
+    const phrase = window.prompt(
       `Tạo phiếu học phí cho ${classIds.length} lớp tháng ${month}/${year}.\n` +
       `Hành động này tạo/cập nhật phiếu cho TOÀN BỘ học viên trong các lớp đang hiển thị.\n\n` +
-      `Nhập mật khẩu xác nhận:`
+      `Gõ "xacnhan" để xác nhận:`
     )
-    if (password === null) return
+    if (phrase === null) return
     setBulkCreating(true)
     try {
       const res = await api.post('/tuition/calculate-bulk', {
-        month, year, classIds, password,
+        month, year, classIds, password: phrase,
       })
       const { created, updated, failed } = res.data
       alert(`Tạo ${created} phiếu mới, cập nhật ${updated} phiếu${failed ? `, ${failed} lớp lỗi` : ''}.`)
