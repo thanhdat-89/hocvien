@@ -212,6 +212,46 @@ router.get('/schedule-summary', async (req: AuthRequest, res: Response, next: Ne
       })
     }
 
+    // ─── Enrich rows với tuitionRecord + payment status ───────
+    const recordsSnap = await db.collection(C.TUITION_RECORDS)
+      .where('billingMonth', '==', m)
+      .where('billingYear', '==', y)
+      .get()
+    const recordsByKey = new Map<string, TuitionRecord>()
+    recordsSnap.forEach(doc => {
+      const d = { id: doc.id, ...(doc.data() as any) } as TuitionRecord
+      recordsByKey.set(`${d.studentId}-${d.classId}`, d)
+    })
+
+    const recordIds = Array.from(recordsByKey.values()).map(r => r.id)
+    const paidByRecord = new Map<string, number>()
+    for (let i = 0; i < recordIds.length; i += 10) {
+      const chunk = recordIds.slice(i, i + 10)
+      if (chunk.length === 0) continue
+      const paySnap = await db.collection(C.PAYMENTS)
+        .where('tuitionRecordId', 'in', chunk).get()
+      paySnap.forEach(p => {
+        const data = p.data() as Payment
+        paidByRecord.set(data.tuitionRecordId, (paidByRecord.get(data.tuitionRecordId) || 0) + (data.amount || 0))
+      })
+    }
+
+    rows.forEach(row => {
+      const rec = recordsByKey.get(`${row.studentId}-${row.classId}`)
+      if (rec) {
+        const paid = paidByRecord.get(rec.id) || 0
+        row.tuitionRecord = {
+          id: rec.id,
+          finalAmount: rec.finalAmount,
+          status: rec.status,
+          paidAmount: paid,
+          remainingAmount: Math.max(0, rec.finalAmount - paid),
+        }
+      } else {
+        row.tuitionRecord = null
+      }
+    })
+
     rows.sort((a, b) => a.studentName.localeCompare(b.studentName, 'vi'))
     res.json(rows)
   } catch (err) { next(err) }
@@ -300,6 +340,41 @@ router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) =
 
     const paymentStatus = await getPaymentStatus(record.id)
     res.json({ ...record, payments: toDocs<Payment>(paymentsSnap), paymentStatus })
+  } catch (err) { next(err) }
+})
+
+// POST /api/tuition/calculate-bulk — tạo phiếu cho nhiều lớp cùng lúc, có password gate
+router.post('/calculate-bulk', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { month, year, classIds, password } = req.body as {
+      month: number; year: number; classIds: string[]; password: string
+    }
+    if (!month || !year || !Array.isArray(classIds) || classIds.length === 0) {
+      res.status(400).json({ message: 'Cần month, year, classIds[]' })
+      return
+    }
+    const expected = process.env.TUITION_BULK_PASSWORD
+    if (!expected) {
+      res.status(500).json({ message: 'Chưa cấu hình TUITION_BULK_PASSWORD trên server' })
+      return
+    }
+    if ((password || '') !== expected) {
+      res.status(401).json({ message: 'Mật khẩu xác nhận không đúng' })
+      return
+    }
+
+    let created = 0, updated = 0, failed = 0
+    for (const classId of classIds) {
+      try {
+        const r = await calculateTuitionForClass(classId, Number(month), Number(year))
+        created += r.created
+        updated += r.updated
+      } catch (e) {
+        failed++
+        console.error('[bulk-create] failed for class', classId, e)
+      }
+    }
+    res.json({ created, updated, failed, classCount: classIds.length })
   } catch (err) { next(err) }
 })
 

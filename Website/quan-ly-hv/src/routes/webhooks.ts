@@ -148,22 +148,26 @@ router.post('/sepay', async (req: Request, res: Response, next: NextFunction) =>
     const records = await findTuitionRecords(student.id, parsed.month, txYear)
 
     if (records.length === 0) {
+      const reason = `HV "${student.fullName}" (${student.id}) chưa có phiếu HP T${parsed.month}/${txYear} — admin vào trang Học phí bấm "Tạo phiếu" cho HV này, sau đó CK sẽ tự khớp lại.`
       const record: BankTransaction = {
         id: docId, ...baseRecord, status: 'unmatched',
         matchedStudentId: student.id,
-        matchReason: `Không có phiếu HP nào cho HV ${student.id} tháng ${parsed.month}/${txYear}`,
+        matchReason: reason,
       }
       await txRef.set(record)
+      await notifyAdminUnmatched({ amount: Number(body.transferAmount) || 0, reason })
       res.json({ success: true, status: 'unmatched' })
       return
     }
     if (records.length > 1) {
+      const reason = `HV "${student.fullName}" (${student.id}) có ${records.length} phiếu HP T${parsed.month}/${txYear} — admin cần phân bổ tay.`
       const record: BankTransaction = {
         id: docId, ...baseRecord, status: 'unmatched',
         matchedStudentId: student.id,
-        matchReason: `HV ${student.id} có ${records.length} phiếu HP tháng ${parsed.month}/${txYear} — admin cần phân bổ tay`,
+        matchReason: reason,
       }
       await txRef.set(record)
+      await notifyAdminUnmatched({ amount: Number(body.transferAmount) || 0, reason })
       res.json({ success: true, status: 'unmatched' })
       return
     }
@@ -243,6 +247,16 @@ async function notifyAfterMatch(params: {
   const adminZalo = process.env.SEPAY_NOTIFY_ADMIN_ZALO
   if (adminZalo) {
     await sendZaloMessage(adminZalo, adminMsg)
+  }
+}
+
+async function notifyAdminUnmatched(params: { amount: number; reason: string }): Promise<void> {
+  const adminZalo = process.env.SEPAY_NOTIFY_ADMIN_ZALO
+  const msg = `[SePay] CK ${params.amount.toLocaleString('vi-VN')}đ chưa khớp được:\n${params.reason}`
+  if (adminZalo) {
+    await sendZaloMessage(adminZalo, msg)
+  } else {
+    console.log('[SePay] Unmatched (no admin notify configured):', msg)
   }
 }
 

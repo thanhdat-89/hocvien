@@ -3,6 +3,14 @@ import TopBar from '../components/TopBar'
 import api from '../services/api'
 import * as XLSX from 'xlsx'
 
+interface TuitionRecordSummary {
+  id: string
+  finalAmount: number
+  status: 'PENDING' | 'PARTIAL' | 'PAID' | 'OVERDUE'
+  paidAmount: number
+  remainingAmount: number
+}
+
 interface ScheduleRow {
   studentId: string
   studentName: string
@@ -14,6 +22,7 @@ interface ScheduleRow {
   discountAmount: number
   baseAmount: number
   finalAmount: number
+  tuitionRecord: TuitionRecordSummary | null
 }
 
 export default function Tuition() {
@@ -70,6 +79,48 @@ export default function Tuition() {
   const uniqueStudents = new Set(filtered.map(r => r.studentId)).size
 
   const years = Array.from({ length: 4 }, (_, i) => thisYear - 1 + i)
+
+  const [creatingRow, setCreatingRow] = useState<string | null>(null)
+  const [bulkCreating, setBulkCreating] = useState(false)
+
+  const createRecordForRow = async (row: ScheduleRow) => {
+    const key = `${row.studentId}-${row.classId}`
+    setCreatingRow(key)
+    try {
+      await api.post('/tuition/calculate', {
+        studentId: row.studentId, classId: row.classId, month, year,
+      })
+      loadData()
+    } catch (e: any) {
+      alert(e?.response?.data?.message || 'Tạo phiếu thất bại')
+    } finally {
+      setCreatingRow(null)
+    }
+  }
+
+  const createRecordsBulk = async () => {
+    const classIds = [...new Set(filtered.map(r => r.classId))]
+    if (classIds.length === 0) return
+    const password = window.prompt(
+      `Tạo phiếu học phí cho ${classIds.length} lớp tháng ${month}/${year}.\n` +
+      `Hành động này tạo/cập nhật phiếu cho TOÀN BỘ học viên trong các lớp đang hiển thị.\n\n` +
+      `Nhập mật khẩu xác nhận:`
+    )
+    if (password === null) return
+    setBulkCreating(true)
+    try {
+      const res = await api.post('/tuition/calculate-bulk', {
+        month, year, classIds, password,
+      })
+      const { created, updated, failed } = res.data
+      alert(`Tạo ${created} phiếu mới, cập nhật ${updated} phiếu${failed ? `, ${failed} lớp lỗi` : ''}.`)
+      loadData()
+    } catch (e: any) {
+      alert(e?.response?.data?.message || 'Tạo phiếu hàng loạt thất bại')
+    } finally {
+      setBulkCreating(false)
+    }
+  }
 
   const exportExcel = () => {
     // Build flat rows grouped by student
@@ -131,6 +182,15 @@ export default function Tuition() {
             <h2 className="text-4xl font-black text-on-surface font-headline tracking-tight">Quản lý Học phí</h2>
           </div>
           <div className="flex items-center gap-3">
+            <button
+              onClick={createRecordsBulk}
+              disabled={filtered.length === 0 || bulkCreating}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary/10 text-primary text-sm font-semibold hover:bg-primary/20 transition-all disabled:opacity-40"
+              title="Tạo/cập nhật phiếu học phí cho mọi lớp đang hiển thị"
+            >
+              <span className="material-symbols-outlined text-[18px]">{bulkCreating ? 'sync' : 'receipt_long'}</span>
+              {bulkCreating ? 'Đang tạo...' : 'Tạo phiếu cả tháng'}
+            </button>
             <button
               onClick={exportExcel}
               disabled={filtered.length === 0}
@@ -257,6 +317,8 @@ export default function Tuition() {
                     <th className="table-header text-right">Học phí/buổi</th>
                     <th className="table-header text-right">Khuyến mại</th>
                     <th className="table-header text-right">Thành tiền</th>
+                    <th className="table-header text-center">Phiếu</th>
+                    <th className="table-header text-center">Thanh toán</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -292,13 +354,39 @@ export default function Tuition() {
                           <td className="table-cell text-sm text-right font-bold text-on-surface">
                             {r.finalAmount.toLocaleString('vi-VN')}đ
                           </td>
+                          <td className="table-cell text-center">
+                            {r.tuitionRecord ? (
+                              <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 text-xs font-bold">Đã tạo</span>
+                            ) : (
+                              <button
+                                onClick={() => createRecordForRow(r)}
+                                disabled={creatingRow === `${r.studentId}-${r.classId}`}
+                                className="px-2.5 py-1 rounded-lg bg-primary/10 text-primary text-xs font-bold hover:bg-primary/20 transition-all disabled:opacity-40"
+                              >
+                                {creatingRow === `${r.studentId}-${r.classId}` ? '...' : 'Tạo phiếu'}
+                              </button>
+                            )}
+                          </td>
+                          <td className="table-cell text-center text-xs">
+                            {!r.tuitionRecord ? (
+                              <span className="text-outline">—</span>
+                            ) : r.tuitionRecord.status === 'PAID' || r.tuitionRecord.remainingAmount === 0 ? (
+                              <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 font-bold">Đã đủ</span>
+                            ) : r.tuitionRecord.paidAmount > 0 ? (
+                              <span className="px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-700 font-bold" title={`${r.tuitionRecord.paidAmount.toLocaleString('vi-VN')}đ / ${r.tuitionRecord.finalAmount.toLocaleString('vi-VN')}đ`}>
+                                Một phần
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-0.5 rounded-full bg-rose-500/10 text-rose-700 font-bold">Chưa đóng</span>
+                            )}
+                          </td>
                         </tr>
                       )
                     })
                   })()}
                   {filtered.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="py-16 text-center text-outline">
+                      <td colSpan={10} className="py-16 text-center text-outline">
                         <span className="material-symbols-outlined text-5xl block mb-3 opacity-30">payments</span>
                         {classFilter || gradeFilter != null
                           ? `Không có dữ liệu cho bộ lọc đang chọn`
@@ -321,6 +409,10 @@ export default function Tuition() {
                       <td className="table-cell text-right font-black text-primary text-base">
                         {totalAmount.toLocaleString('vi-VN')}đ
                       </td>
+                      <td className="table-cell text-center text-xs text-outline">
+                        {filtered.filter(r => r.tuitionRecord).length}/{filtered.length}
+                      </td>
+                      <td className="table-cell" />
                     </tr>
                   </tfoot>
                 )}
