@@ -336,10 +336,22 @@ function ImportExcelModal({ onClose, onImported }: { onClose: () => void; onImpo
   )
 }
 
+const IS_LOCAL =
+  typeof location !== 'undefined' &&
+  (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+
+function buildParentUrl(studentId: string) {
+  return IS_LOCAL
+    ? `http://localhost:5174/hoc-vien/index.html?id=${encodeURIComponent(studentId)}`
+    : `https://hocthemtoan.vn/hoc-vien/${encodeURIComponent(studentId)}`
+}
+
 export default function Students() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const confirm = useConfirm()
+  const showAlert = useAlert()
+  const [copiedId, setCopiedId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [gradeLevel, setGradeLevel] = useState('')
@@ -393,6 +405,20 @@ export default function Students() {
 
   const handlePageChange = (p: number) => {
     setPage(p)
+  }
+
+  const copyShareLink = async (student: Student) => {
+    const url = buildParentUrl(student.id)
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopiedId(student.id)
+      setTimeout(() => setCopiedId(prev => prev === student.id ? null : prev), 1500)
+    } catch {
+      await showAlert({
+        title: 'Không sao chép được',
+        message: `Trình duyệt chặn clipboard. Hãy copy thủ công:\n${url}`,
+      })
+    }
   }
 
   const handleDelete = async (student: Student) => {
@@ -567,6 +593,17 @@ export default function Students() {
                           title="Xem hồ sơ"
                         >
                           <span className="material-symbols-outlined text-[20px]">visibility</span>
+                        </button>
+                        <button
+                          onClick={() => copyShareLink(student)}
+                          className={`p-2 rounded-lg transition-all ${copiedId === student.id
+                            ? 'text-secondary bg-secondary-container/15'
+                            : 'text-outline hover:text-secondary hover:bg-secondary-container/10'}`}
+                          title={copiedId === student.id ? 'Đã sao chép link' : 'Sao chép link chia sẻ phụ huynh'}
+                        >
+                          <span className="material-symbols-outlined text-[20px]">
+                            {copiedId === student.id ? 'check' : 'share'}
+                          </span>
                         </button>
                         <button
                           onClick={() => setPrivateModalStudent(student)}
