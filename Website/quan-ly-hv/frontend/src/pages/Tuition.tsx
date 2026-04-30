@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import TopBar from '../components/TopBar'
 import api from '../services/api'
 import * as XLSX from 'xlsx'
+import { useAlert, useConfirm, usePrompt } from '../components/ConfirmDialog'
 
 interface TuitionRecordSummary {
   id: string
@@ -82,14 +83,20 @@ export default function Tuition() {
 
   const [creatingRow, setCreatingRow] = useState<string | null>(null)
   const [bulkCreating, setBulkCreating] = useState(false)
+  const showAlert = useAlert()
+  const showConfirm = useConfirm()
+  const showPrompt = usePrompt()
 
   const createRecordForRow = async (row: ScheduleRow) => {
     const isRecalc = !!row.tuitionRecord
     if (isRecalc) {
-      const ok = window.confirm(
-        `Tính lại phiếu cho ${row.studentName} - ${row.className} T${month}/${year}?\n\n` +
-        `Số tiền sẽ cập nhật theo lịch hiện tại. Các giao dịch đã thanh toán được giữ nguyên.`
-      )
+      const ok = await showConfirm({
+        title: 'Tính lại phiếu',
+        message:
+          `Tính lại phiếu cho ${row.studentName} - ${row.className} T${month}/${year}?\n\n` +
+          `Số tiền sẽ cập nhật theo lịch hiện tại. Các giao dịch đã thanh toán được giữ nguyên.`,
+        confirmLabel: 'Tính lại',
+      })
       if (!ok) return
     }
     const key = `${row.studentId}-${row.classId}`
@@ -100,7 +107,10 @@ export default function Tuition() {
       })
       loadData()
     } catch (e: any) {
-      alert(e?.response?.data?.message || (isRecalc ? 'Tính lại phiếu thất bại' : 'Tạo phiếu thất bại'))
+      await showAlert({
+        title: 'Lỗi',
+        message: e?.response?.data?.message || (isRecalc ? 'Tính lại phiếu thất bại' : 'Tạo phiếu thất bại'),
+      })
     } finally {
       setCreatingRow(null)
     }
@@ -109,11 +119,15 @@ export default function Tuition() {
   const createRecordsBulk = async () => {
     const classIds = [...new Set(filtered.map(r => r.classId))]
     if (classIds.length === 0) return
-    const phrase = window.prompt(
-      `Tạo phiếu học phí cho ${classIds.length} lớp tháng ${month}/${year}.\n` +
-      `Hành động này tạo/cập nhật phiếu cho TOÀN BỘ học viên trong các lớp đang hiển thị.\n\n` +
-      `Gõ "xacnhan" để xác nhận:`
-    )
+    const phrase = await showPrompt({
+      title: 'Tạo phiếu cả tháng',
+      message:
+        `Tạo phiếu học phí cho ${classIds.length} lớp tháng ${month}/${year}.\n` +
+        `Hành động này tạo/cập nhật phiếu cho TOÀN BỘ học viên trong các lớp đang hiển thị.\n\n` +
+        `Gõ "xacnhan" để xác nhận:`,
+      placeholder: 'xacnhan',
+      confirmLabel: 'Tạo phiếu',
+    })
     if (phrase === null) return
     setBulkCreating(true)
     try {
@@ -121,10 +135,16 @@ export default function Tuition() {
         month, year, classIds, password: phrase,
       })
       const { created, updated, failed } = res.data
-      alert(`Tạo ${created} phiếu mới, cập nhật ${updated} phiếu${failed ? `, ${failed} lớp lỗi` : ''}.`)
+      await showAlert({
+        title: 'Hoàn tất',
+        message: `Tạo ${created} phiếu mới, cập nhật ${updated} phiếu${failed ? `, ${failed} lớp lỗi` : ''}.`,
+      })
       loadData()
     } catch (e: any) {
-      alert(e?.response?.data?.message || 'Tạo phiếu hàng loạt thất bại')
+      await showAlert({
+        title: 'Lỗi',
+        message: e?.response?.data?.message || 'Tạo phiếu hàng loạt thất bại',
+      })
     } finally {
       setBulkCreating(false)
     }

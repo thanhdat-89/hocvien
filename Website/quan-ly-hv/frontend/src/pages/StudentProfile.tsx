@@ -1220,6 +1220,7 @@ function PromoModal({ studentId, enrollments, hasPrivate, onClose, onSaved }: Pr
 
 function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments: ClassEnrollment[] }) {
   const confirm = useConfirm()
+  const showAlert = useAlert()
   const now = new Date()
   const [rows, setRows] = useState<TuitionRow[]>([])
   const [promos, setPromos] = useState<StudentPromotion[]>([])
@@ -1232,10 +1233,13 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
   const createRecord = async (row: TuitionRow) => {
     const isRecalc = !!row.tuitionRecord
     if (isRecalc) {
-      const ok = window.confirm(
-        `Tính lại phiếu cho ${row.className} T${row.month}/${row.year}?\n\n` +
-        `Số tiền sẽ cập nhật theo lịch hiện tại. Các giao dịch đã thanh toán được giữ nguyên.`
-      )
+      const ok = await confirm({
+        title: 'Tính lại phiếu',
+        message:
+          `Tính lại phiếu cho ${row.className} T${row.month}/${row.year}?\n\n` +
+          `Số tiền sẽ cập nhật theo lịch hiện tại. Các giao dịch đã thanh toán được giữ nguyên.`,
+        confirmLabel: 'Tính lại',
+      })
       if (!ok) return
     }
     const key = `${row.monthKey}__${row.classId}`
@@ -1246,7 +1250,10 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
       })
       load()
     } catch (e: any) {
-      alert(e?.response?.data?.message || (isRecalc ? 'Tính lại phiếu thất bại' : 'Tạo phiếu thất bại'))
+      await showAlert({
+        title: 'Lỗi',
+        message: e?.response?.data?.message || (isRecalc ? 'Tính lại phiếu thất bại' : 'Tạo phiếu thất bại'),
+      })
     } finally {
       setCreatingKey(null)
     }
