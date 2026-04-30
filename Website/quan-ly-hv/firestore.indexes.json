@@ -41,6 +41,15 @@
       ]
     },
     {
+      "collectionGroup": "studentPromotions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "studentId", "order": "ASCENDING" },
+        { "fieldPath": "classId", "order": "ASCENDING" },
+        { "fieldPath": "appliedFrom", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "teacherAttendances",
       "queryScope": "COLLECTION",
       "fields": [
