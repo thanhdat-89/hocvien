@@ -1,4 +1,4 @@
-import { Router, Response, NextFunction } from 'express'
+import { Router, Request, Response, NextFunction } from 'express'
 import { db, C, s, toDocs, toObj } from '../lib/firebase'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
@@ -6,6 +6,41 @@ import type { Schedule } from '../types/models'
 import { generateSessionsFromSchedule, generateSessionsForClassMonth } from '../services/sessionGenerator'
 
 const router = Router()
+
+// Cron: sinh buổi học cho tháng hiện tại + tháng kế tiếp cho mọi lớp ACTIVE.
+// Đăng ký TRƯỚC authenticate để Vercel Cron (Authorization: Bearer <CRON_SECRET>) gọi được.
+router.get('/cron/generate-monthly', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const expected = process.env.CRON_SECRET
+    const header = req.headers.authorization
+    if (!expected || header !== `Bearer ${expected}`) {
+      res.status(401).json({ message: 'Unauthorized' }); return
+    }
+
+    const classesSnap = await db.collection(C.CLASSES).where('status', '==', 'ACTIVE').get()
+    const classIds = classesSnap.docs.map(d => d.id)
+
+    const now = new Date()
+    const cur = { year: now.getFullYear(), month: now.getMonth() + 1 }
+    const nxtDate = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+    const nxt = { year: nxtDate.getFullYear(), month: nxtDate.getMonth() + 1 }
+
+    const results = await Promise.all(
+      classIds.flatMap(id => [
+        generateSessionsForClassMonth(id, cur.year, cur.month).catch(() => 0),
+        generateSessionsForClassMonth(id, nxt.year, nxt.month).catch(() => 0),
+      ])
+    )
+    const created = results.reduce((sum, n) => sum + n, 0)
+
+    res.json({
+      classes: classIds.length,
+      months: [cur, nxt],
+      sessionsCreated: created,
+    })
+  } catch (err) { next(err) }
+})
+
 router.use(authenticate)
 const now = () => new Date().toISOString()
 
