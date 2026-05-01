@@ -52,9 +52,9 @@ const USE_CASE_LABEL: Record<UseCase, string> = {
 }
 
 const USE_CASE_PARAMS: Record<UseCase, string[]> = {
-  A: ['ten_hoc_vien','thang_nam','so_buoi','don_gia','tong_tien','han_thanh_toan','ma_phieu','link_pp'],
+  A: ['ten_hoc_vien','thang_nam','so_buoi','don_gia','tong_tien','han_thanh_toan','ma_phieu','student_id'],
   B: ['ten_hoc_vien','thang_nam','so_tien_da_nhan','thoi_gian_nhan','ma_phieu'],
-  C: ['ten_hoc_vien','thang_nam','so_tien_can_thanh_toan','so_ngay_qua_han','ma_phieu','link_pp'],
+  C: ['ten_hoc_vien','thang_nam','so_tien_can_thanh_toan','so_ngay_qua_han','ma_phieu','student_id'],
   TEST: [],
 }
 

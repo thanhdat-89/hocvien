@@ -245,7 +245,10 @@ router.get('/logs/:id', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, 
 
 // ─── Case A: Gửi thông báo học phí mới ───────────────────────
 
-const STUDENT_PORTAL_URL = process.env.STUDENT_PORTAL_URL ?? 'https://hocthemtoan.vn/hoc-vien'
+// Backend gửi student_id thuần (không kèm domain). Template ZBS tự ghép URL:
+//   https://hocthemtoan.vn/hoc-vien/<student_id>
+// trong nút thao tác hoặc trong nội dung. Format này được Zalo chấp nhận
+// vì URL có prefix hợp lệ + biến chỉ chèn vào path.
 
 function fmtMonth(m: number, y: number): string {
   return `${m}/${y}`
@@ -371,7 +374,6 @@ router.post('/tuition-notice', requireRole('ADMIN', 'STAFF'), async (req: AuthRe
     const base      = Number(record.baseAmount)      || 0
     const final     = Number(record.finalAmount)     || 0
     const unitPrice = charged > 0 ? Math.round(base / charged) : 0
-    const linkPp    = `${STUDENT_PORTAL_URL}/${record.studentId}`
 
     let params: ZnsParams
     if (useCase === 'A') {
@@ -383,7 +385,7 @@ router.post('/tuition-notice', requireRole('ADMIN', 'STAFF'), async (req: AuthRe
         tong_tien:       final,
         han_thanh_toan:  fmtDate(record.dueDate),
         ma_phieu:        shortInvoiceId(record.id),
-        link_pp:         linkPp,
+        student_id:      record.studentId,
       }
     } else {
       // useCase === 'C' — overdue reminder. Tính số tiền còn lại + số ngày quá hạn.
@@ -405,7 +407,7 @@ router.post('/tuition-notice', requireRole('ADMIN', 'STAFF'), async (req: AuthRe
         so_tien_can_thanh_toan:    remaining,
         so_ngay_qua_han:           overdueDays,
         ma_phieu:                  shortInvoiceId(record.id),
-        link_pp:                   linkPp,
+        student_id:                record.studentId,
       }
     }
 
