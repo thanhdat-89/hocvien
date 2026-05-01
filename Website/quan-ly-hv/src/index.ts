@@ -23,6 +23,7 @@ import publicRoutes from './routes/public'
 import activityRoutes from './routes/activity'
 import monthlyScoresRoutes from './routes/monthlyScores'
 import sepayWebhookRoutes from './routes/webhooks'
+import znsRoutes from './routes/zns'
 
 import { errorHandler, notFound } from './middleware/errorHandler'
 import { activityLogMiddleware } from './middleware/activityLog'
@@ -74,6 +75,7 @@ app.use('/api/public',         publicRoutes)
 app.use('/api/activity',       activityRoutes)
 app.use('/api/monthly-scores', monthlyScoresRoutes)
 app.use('/api/webhooks',       sepayWebhookRoutes)
+app.use('/api/zns',            znsRoutes)
 
 // ─── Error handlers ───────────────────────────────────────────
 app.use(notFound)

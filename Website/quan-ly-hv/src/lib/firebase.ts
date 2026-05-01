@@ -76,6 +76,9 @@ export const C = {
   ACTIVITY_LOGS:       'activityLogs',
   MONTHLY_SCORES:      'monthlyScores',
   BANK_TRANSACTIONS:   'bankTransactions',
+  ZNS_TEMPLATES:       'znsTemplates',
+  ZNS_LOGS:            'znsLogs',
+  ADMIN_ALERTS:        'adminAlerts',
 } as const
 
 // ─── Helpers ──────────────────────────────────────────────────

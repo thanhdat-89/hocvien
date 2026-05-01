@@ -213,3 +213,185 @@ export function verifyWebhookSignature(rawBody: string, mac: string): boolean {
     return false
   }
 }
+
+// ================================================================
+// ZNS — Zalo Notification Service
+// ================================================================
+// Khác biệt với OA CS Message ở trên:
+//   - OA Message: cần PH follow OA + chỉ trong cửa sổ 48h
+//   - ZNS: gửi tới SĐT bất kỳ qua template được duyệt sẵn (transaction notice)
+// Tài liệu: https://developers.zalo.me/docs/zns
+//
+// ZNS dùng app riêng (khác OA app), token quản lý độc lập.
+
+const ZNS_TPL_API   = 'https://business.openapi.zalo.me/message/template'
+const ZNS_TOKEN_API = 'https://oauth.zaloapp.com/v4/oa/access_token'
+
+export const ZNS_ENABLED = Boolean(
+  process.env.ZNS_APP_ID && process.env.ZNS_ACCESS_TOKEN
+)
+
+let _znsTokenExpiresAt = 0
+
+export async function refreshZnsAccessToken(): Promise<boolean> {
+  const appId        = process.env.ZNS_APP_ID       ?? ''
+  const secretKey    = process.env.ZNS_APP_SECRET   ?? ''
+  const refreshToken = process.env.ZNS_REFRESH_TOKEN ?? ''
+
+  if (!appId || !secretKey || !refreshToken) {
+    console.warn('[ZNS] Thiếu ZNS_APP_ID / ZNS_APP_SECRET / ZNS_REFRESH_TOKEN — bỏ qua refresh')
+    return false
+  }
+
+  try {
+    const body = new URLSearchParams({
+      refresh_token: refreshToken,
+      app_id: appId,
+      grant_type: 'refresh_token',
+    })
+
+    const res = await fetch(ZNS_TOKEN_API, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        secret_key: secretKey,
+      },
+      body: body.toString(),
+    })
+
+    const data = await res.json() as {
+      access_token?: string
+      refresh_token?: string
+      expires_in?: number
+      error?: number
+      message?: string
+    }
+
+    if (!data.access_token) {
+      console.error('[ZNS] Refresh token thất bại:', data.message ?? JSON.stringify(data))
+      return false
+    }
+
+    process.env.ZNS_ACCESS_TOKEN = data.access_token
+    if (data.refresh_token) process.env.ZNS_REFRESH_TOKEN = data.refresh_token
+
+    const expiresIn = data.expires_in ?? 86400
+    _znsTokenExpiresAt = Date.now() + expiresIn * 1000 - 5 * 60 * 1000
+
+    console.log('[ZNS] Token làm mới thành công, hết hạn:', new Date(_znsTokenExpiresAt).toISOString())
+    return true
+  } catch (err) {
+    console.error('[ZNS] Lỗi khi refresh token:', err)
+    return false
+  }
+}
+
+async function getZnsToken(): Promise<string> {
+  if (_znsTokenExpiresAt > 0 && Date.now() >= _znsTokenExpiresAt) {
+    await refreshZnsAccessToken()
+  }
+  return process.env.ZNS_ACCESS_TOKEN ?? ''
+}
+
+/** Chuyển SĐT VN sang format quốc tế (84xxx). Trả '' nếu input rỗng. */
+export function normalizeVnPhone(raw: string | null | undefined): string {
+  const digits = (raw ?? '').replace(/\D+/g, '')
+  if (!digits) return ''
+  if (digits.startsWith('84')) return digits
+  if (digits.startsWith('0'))  return '84' + digits.slice(1)
+  return '84' + digits
+}
+
+export type ZnsParams = Record<string, string | number | null | undefined>
+
+export interface ZnsSendResult {
+  success: boolean
+  msgId?: string
+  error?: string
+  quotaRemaining?: number
+  rawResponse?: unknown
+}
+
+/**
+ * Gửi 1 tin ZNS theo template đã duyệt.
+ * Param values sẽ được ép sang string (ZNS yêu cầu string).
+ */
+export async function sendZnsTemplate(
+  phone: string,
+  templateId: string,
+  params: ZnsParams,
+  trackingId?: string
+): Promise<ZnsSendResult> {
+  if (!ZNS_ENABLED) {
+    console.warn('[ZNS] Chưa cấu hình env vars — bỏ qua gửi.')
+    return { success: false, error: 'ZNS_NOT_CONFIGURED' }
+  }
+
+  const phone84 = normalizeVnPhone(phone)
+  if (!phone84 || phone84.length < 10) {
+    return { success: false, error: 'INVALID_PHONE' }
+  }
+  if (!templateId) {
+    return { success: false, error: 'MISSING_TEMPLATE_ID' }
+  }
+
+  const template_data: Record<string, string> = {}
+  for (const [k, v] of Object.entries(params)) {
+    template_data[k] = String(v ?? '')
+  }
+
+  try {
+    const token = await getZnsToken()
+    const res = await fetch(ZNS_TPL_API, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        access_token: token,
+      },
+      body: JSON.stringify({
+        phone: phone84,
+        template_id: templateId,
+        template_data,
+        ...(trackingId ? { tracking_id: trackingId } : {}),
+      }),
+    })
+
+    const data = await res.json() as {
+      error: number
+      message: string
+      data?: { msg_id?: string; sent_quota?: number; remaining_quota?: number }
+    }
+
+    if (data.error !== 0) {
+      console.error('[ZNS] Lỗi gửi:', data.error, data.message)
+      return { success: false, error: data.message, rawResponse: data }
+    }
+
+    return {
+      success: true,
+      msgId: data.data?.msg_id,
+      quotaRemaining: data.data?.remaining_quota,
+      rawResponse: data,
+    }
+  } catch (err) {
+    console.error('[ZNS] Lỗi kết nối API:', err)
+    return { success: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/** Verify chữ ký HMAC-SHA256 webhook ZNS. */
+export function verifyZnsWebhookSignature(rawBody: string, mac: string): boolean {
+  const secret = process.env.ZNS_WEBHOOK_SECRET ?? ''
+  if (!secret) return true
+
+  const expected = crypto
+    .createHmac('sha256', secret)
+    .update(rawBody)
+    .digest('hex')
+
+  try {
+    return crypto.timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(mac, 'hex'))
+  } catch {
+    return false
+  }
+}

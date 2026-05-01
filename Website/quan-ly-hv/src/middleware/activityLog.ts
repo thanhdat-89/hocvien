@@ -25,13 +25,14 @@ const SKIP_PATTERNS: RegExp[] = [
   /^\/api\/materials\/upload-signature$/,
   /^\/api\/notifications\/zalo\//,
   /^\/api\/activity/,
+  /^\/api\/zns\/test-send$/,
 ]
 
 const RESOURCE_LABEL: Record<string, string> = {
   students: 'học viên', classes: 'lớp học', schedules: 'lịch học', sessions: 'buổi học',
   attendance: 'điểm danh', tuition: 'học phí', teachers: 'giáo viên', subjects: 'môn học',
   parents: 'phụ huynh', leads: 'lead', reviews: 'nhận xét', 'monthly-scores': 'điểm kiểm tra tháng',
-  materials: 'tài liệu', notifications: 'thông báo',
+  materials: 'tài liệu', notifications: 'thông báo', zns: 'template ZNS',
 }
 
 function deriveResourceType(path: string): string {
