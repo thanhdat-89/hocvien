@@ -16,6 +16,7 @@ interface ScheduleRow {
   studentId: string
   studentName: string
   gradeLevel: number | null
+  primaryParent: { fullName: string; phone: string | null; zalo: string | null } | null
   classId: string
   className: string
   totalSessions: number
@@ -24,6 +25,24 @@ interface ScheduleRow {
   baseAmount: number
   finalAmount: number
   tuitionRecord: TuitionRecordSummary | null
+}
+
+const IS_LOCAL =
+  typeof location !== 'undefined' &&
+  (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+
+function buildParentUrl(studentId: string) {
+  return IS_LOCAL
+    ? `http://localhost:5174/hoc-vien/index.html?id=${encodeURIComponent(studentId)}`
+    : `https://hocthemtoan.vn/hoc-vien/${encodeURIComponent(studentId)}`
+}
+
+function buildZaloUrl(phone?: string | null): string | null {
+  if (!phone) return null
+  const digits = phone.replace(/\D/g, '')
+  if (!digits) return null
+  const intl = digits.startsWith('0') ? '84' + digits.slice(1) : digits
+  return `https://zalo.me/${intl}`
 }
 
 export default function Tuition() {
@@ -83,8 +102,23 @@ export default function Tuition() {
 
   const [creatingRow, setCreatingRow] = useState<string | null>(null)
   const [bulkCreating, setBulkCreating] = useState(false)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
   const showAlert = useAlert()
   const showConfirm = useConfirm()
+
+  const copyShareLink = async (studentId: string) => {
+    const url = buildParentUrl(studentId)
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopiedId(studentId)
+      setTimeout(() => setCopiedId(prev => prev === studentId ? null : prev), 1500)
+    } catch {
+      await showAlert({
+        title: 'Không sao chép được',
+        message: `Trình duyệt chặn clipboard. Hãy copy thủ công:\n${url}`,
+      })
+    }
+  }
   const showPrompt = usePrompt()
 
   const createRecordForRow = async (row: ScheduleRow) => {
@@ -347,6 +381,7 @@ export default function Tuition() {
                     <th className="table-header text-right">Thành tiền</th>
                     <th className="table-header text-center">Phiếu</th>
                     <th className="table-header text-center">Thanh toán</th>
+                    <th className="table-header text-center">Thao tác</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -408,13 +443,45 @@ export default function Tuition() {
                               <span className="px-2.5 py-0.5 rounded-full bg-rose-500/10 text-rose-700 font-bold">Chưa đóng</span>
                             )}
                           </td>
+                          {isFirst && (
+                            <td className="table-cell text-center align-top" rowSpan={span}>
+                              <div className="inline-flex items-center gap-1">
+                                <button
+                                  onClick={() => copyShareLink(r.studentId)}
+                                  className={`p-2 rounded-lg transition-all ${copiedId === r.studentId
+                                    ? 'text-secondary bg-secondary-container/15'
+                                    : 'text-outline hover:text-secondary hover:bg-secondary-container/10'}`}
+                                  title={copiedId === r.studentId ? 'Đã sao chép link' : 'Sao chép link chia sẻ phụ huynh'}
+                                >
+                                  <span className="material-symbols-outlined text-[20px]">
+                                    {copiedId === r.studentId ? 'check' : 'share'}
+                                  </span>
+                                </button>
+                                {(() => {
+                                  const phone = r.primaryParent?.zalo || r.primaryParent?.phone
+                                  const zaloUrl = buildZaloUrl(phone)
+                                  return zaloUrl ? (
+                                    <a
+                                      href={zaloUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="p-2 text-outline hover:text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all"
+                                      title={`Nhắn tin Zalo cho ${phone}`}
+                                    >
+                                      <span className="material-symbols-outlined text-[20px]">chat</span>
+                                    </a>
+                                  ) : null
+                                })()}
+                              </div>
+                            </td>
+                          )}
                         </tr>
                       )
                     })
                   })()}
                   {filtered.length === 0 && (
                     <tr>
-                      <td colSpan={10} className="py-16 text-center text-outline">
+                      <td colSpan={11} className="py-16 text-center text-outline">
                         <span className="material-symbols-outlined text-5xl block mb-3 opacity-30">payments</span>
                         {classFilter || gradeFilter != null
                           ? `Không có dữ liệu cho bộ lọc đang chọn`
@@ -440,6 +507,7 @@ export default function Tuition() {
                       <td className="table-cell text-center text-xs text-outline">
                         {filtered.filter(r => r.tuitionRecord).length}/{filtered.length}
                       </td>
+                      <td className="table-cell" />
                       <td className="table-cell" />
                     </tr>
                   </tfoot>

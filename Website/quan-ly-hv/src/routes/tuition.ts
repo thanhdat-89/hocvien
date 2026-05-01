@@ -105,6 +105,14 @@ router.get('/schedule-summary', async (req: AuthRequest, res: Response, next: Ne
 
     // 7. Tính từng enrollment
     const rows: any[] = []
+    const buildPrimaryParent = (stu: any) => stu.primaryParentName
+      ? {
+          fullName: stu.primaryParentName as string,
+          phone: (stu.primaryParentPhone as string | null) ?? null,
+          zalo: (stu.primaryParentZalo as string | null) ?? null,
+        }
+      : null
+
     for (const enrollment of relevantEnrollments) {
       const cls = classMap[enrollment.classId]
       const student = studentMap[enrollment.studentId]
@@ -138,6 +146,7 @@ router.get('/schedule-summary', async (req: AuthRequest, res: Response, next: Ne
         studentId: enrollment.studentId,
         studentName: student.fullName,
         gradeLevel: student.gradeLevel ?? null,
+        primaryParent: buildPrimaryParent(student),
         classId: enrollment.classId,
         className: cls.name,
         totalSessions,
@@ -202,6 +211,7 @@ router.get('/schedule-summary', async (req: AuthRequest, res: Response, next: Ne
         studentId: sid,
         studentName: student.fullName,
         gradeLevel: student.gradeLevel ?? null,
+        primaryParent: buildPrimaryParent(student),
         classId: 'private',
         className: 'Học riêng',
         totalSessions,
