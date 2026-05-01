@@ -159,26 +159,29 @@ function ParentModal({ studentId, parent, onClose, onSaved }: {
   const [form, setForm] = useState({
     fullName: parent?.fullName ?? '',
     relationship: parent?.relationship ?? '',
-    phone: parent?.phone ?? '',
-    zalo: parent?.zalo ?? '',
+    phone: parent?.phone ?? parent?.zalo ?? '',
     email: parent?.email ?? '',
-    isPrimaryContact: parent?.isPrimaryContact ?? false,
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-    setForm(f => ({ ...f, [k]: e.target.type === 'checkbox' ? (e.target as HTMLInputElement).checked : e.target.value }))
+    setForm(f => ({ ...f, [k]: e.target.value }))
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.fullName.trim()) { setError('Vui lòng nhập tên phụ huynh'); return }
     setSaving(true); setError('')
+    const payload = {
+      ...form,
+      zalo: form.phone,
+      isPrimaryContact: true,
+    }
     try {
       if (isEdit) {
-        await api.put(`/parents/${studentId}/${parent!.id}`, form)
+        await api.put(`/parents/${studentId}/${parent!.id}`, payload)
       } else {
-        await api.post('/parents', { ...form, studentId })
+        await api.post('/parents', { ...payload, studentId })
       }
       onSaved()
     } catch (err: any) {
@@ -208,21 +211,13 @@ function ParentModal({ studentId, parent, onClose, onSaved }: {
               <option value="Người giám hộ">Người giám hộ</option>
             </select>
           </Field>
-          <Field label="Số điện thoại">
+          <Field label="Số điện thoại / Zalo">
             <input value={form.phone} onChange={set('phone')} type="tel" className="input" placeholder="0901 234 567" />
-          </Field>
-          <Field label="Zalo">
-            <input value={form.zalo} onChange={set('zalo')} className="input" placeholder="0901 234 567" />
           </Field>
           <Field label="Email">
             <input value={form.email} onChange={set('email')} type="email" className="input" placeholder="email@example.com" />
           </Field>
         </div>
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input type="checkbox" checked={form.isPrimaryContact} onChange={set('isPrimaryContact')}
-            className="w-4 h-4 accent-primary" />
-          <span className="text-sm font-medium text-on-surface">Đặt là liên hệ chính</span>
-        </label>
         <div className="flex gap-3 pt-2">
           <button type="button" onClick={onClose} className="flex-1 btn-secondary justify-center">Huỷ</button>
           <button type="submit" disabled={saving} className="flex-1 btn-primary justify-center disabled:opacity-60">
@@ -594,7 +589,7 @@ function InfoTab({
                               title="Mở Zalo để nhắn tin"
                             >
                               <span className="material-symbols-outlined text-sm">chat</span>
-                              Nhắn Zalo{p.zalo ? `: ${p.zalo}` : ''}
+                              Nhắn Zalo
                             </a>
                           ) : null
                         })()}
