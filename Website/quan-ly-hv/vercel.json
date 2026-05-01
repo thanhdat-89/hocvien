@@ -18,6 +18,7 @@
   ],
   "crons": [
     { "path": "/api/activity/cleanup", "schedule": "0 3 * * 0" },
-    { "path": "/api/schedules/cron/generate-monthly", "schedule": "0 1 1 * *" }
+    { "path": "/api/schedules/cron/generate-monthly", "schedule": "0 1 1 * *" },
+    { "path": "/api/zns/cron/remind-overdue", "schedule": "0 1 * * *" }
   ]
 }

@@ -6,7 +6,7 @@
 // lưu mapping (templateId → name + paramKeys + useCase) vào Firestore
 // để các luồng nghiệp vụ (Case A/B/C) tham chiếu.
 
-import { Router, Response, NextFunction } from 'express'
+import { Router, Request, Response, NextFunction } from 'express'
 import { db, C, serverTimestamp, toDocs, toObj, paginate, s } from '../lib/firebase'
 import { authenticate, requireRole } from '../middleware/auth'
 import type { AuthRequest } from '../types'
@@ -19,7 +19,26 @@ import {
 
 const router = Router()
 
-// Đăng nhập là bắt buộc; quyền theo từng endpoint.
+// ─── Cron: nhắc nhở học phí quá hạn (Case C) ─────────────────
+// Đăng ký TRƯỚC authenticate để Vercel Cron gọi được bằng Bearer CRON_SECRET.
+// Quy tắc: gửi reminder 5 ngày sau khi tạo phiếu, lặp lại mỗi 5 ngày,
+// cap tối đa 5 lần. Sau cap → tạo admin_alert.
+router.get('/cron/remind-overdue', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const expected = process.env.CRON_SECRET
+    if (!expected || req.headers.authorization !== `Bearer ${expected}`) {
+      res.status(401).json({ message: 'Unauthorized' })
+      return
+    }
+
+    const result = await runOverdueReminderCron()
+    res.json(result)
+  } catch (err) {
+    next(err)
+  }
+})
+
+// Đăng nhập là bắt buộc cho mọi endpoint còn lại; quyền theo từng endpoint.
 router.use(authenticate)
 
 type UseCase = 'A' | 'B' | 'C' | 'TEST'
@@ -277,7 +296,7 @@ interface ResolvedRecipient {
   parentName?: string
 }
 
-async function resolveRecipient(studentId: string): Promise<ResolvedRecipient> {
+export async function resolveRecipient(studentId: string): Promise<ResolvedRecipient> {
   const studentDoc = await db.collection(C.STUDENTS).doc(studentId).get()
   if (!studentDoc.exists) return { phone: '', source: 'none' }
   const stu = studentDoc.data() as Record<string, unknown>
@@ -307,7 +326,7 @@ async function resolveRecipient(studentId: string): Promise<ResolvedRecipient> {
   return { phone: '', source: 'none' }
 }
 
-async function findActiveTemplate(useCase: UseCase): Promise<{ id: string; name: string } | null> {
+export async function findActiveTemplate(useCase: UseCase): Promise<{ id: string; name: string } | null> {
   // In-memory filter để không cần composite index
   const snap = await db.collection(C.ZNS_TEMPLATES).get()
   for (const doc of snap.docs) {
@@ -520,4 +539,163 @@ export async function sendZnsAndLog(input: SendAndLogInput): Promise<SendAndLogR
     msgId: result.msgId,
     error: result.error,
   }
+}
+
+// ─── Cron: Case C overdue reminder runner ────────────────────
+
+const REMINDER_INTERVAL_DAYS = 5
+const REMINDER_CAP            = 5
+
+interface OverdueCronResult {
+  total:        number
+  sent:         number
+  skippedTooSoon: number
+  skippedNoPhone: number
+  skippedNoTemplate: number
+  capped:       number
+  failed:       number
+  details:      Array<{ invoiceId: string; status: string; reason?: string }>
+}
+
+async function runOverdueReminderCron(): Promise<OverdueCronResult> {
+  const result: OverdueCronResult = {
+    total: 0, sent: 0, skippedTooSoon: 0, skippedNoPhone: 0,
+    skippedNoTemplate: 0, capped: 0, failed: 0, details: [],
+  }
+
+  const template = await findActiveTemplate('C')
+  if (!template) {
+    console.warn('[ZNS][cron] Skip: chưa có template active cho use case C')
+    result.skippedNoTemplate = -1 // signal toàn bộ skip do thiếu template
+    return result
+  }
+
+  // Lấy tất cả phiếu chưa thanh toán đủ
+  const recordsSnap = await db.collection(C.TUITION_RECORDS)
+    .where('status', 'in', ['PENDING', 'PARTIAL', 'OVERDUE'])
+    .get()
+  result.total = recordsSnap.size
+
+  const nowMs = Date.now()
+  const dayMs = 1000 * 60 * 60 * 24
+
+  for (const rDoc of recordsSnap.docs) {
+    const rec = toObj<{
+      studentId: string
+      studentName?: string
+      billingMonth: number
+      billingYear: number
+      finalAmount: number
+      dueDate?: string
+      createdAt?: string
+      status: string
+    }>(rDoc)
+
+    // Đếm số reminder Case C đã gửi (sent + delivered)
+    const priorSnap = await db.collection(C.ZNS_LOGS)
+      .where('invoiceId', '==', rec.id)
+      .where('useCase', '==', 'C')
+      .get()
+    let priorCount  = 0
+    let lastSentMs  = 0
+    for (const lDoc of priorSnap.docs) {
+      const lg = toObj<{ status: string; sentAt?: string }>(lDoc)
+      if (lg.status === 'sent' || lg.status === 'delivered') {
+        priorCount++
+        const ms = lg.sentAt ? Date.parse(lg.sentAt) : 0
+        if (ms > lastSentMs) lastSentMs = ms
+      }
+    }
+
+    // Cap: đã gửi 5 lần → tạo admin_alert (idempotent), skip
+    if (priorCount >= REMINDER_CAP) {
+      const alertSnap = await db.collection(C.ADMIN_ALERTS)
+        .where('type', '==', 'overdue_reminder_cap')
+        .where('invoiceId', '==', rec.id)
+        .limit(1)
+        .get()
+      if (alertSnap.empty) {
+        await db.collection(C.ADMIN_ALERTS).add({
+          type:        'overdue_reminder_cap',
+          invoiceId:   rec.id,
+          studentId:   rec.studentId,
+          studentName: rec.studentName ?? '',
+          billingMonth: rec.billingMonth,
+          billingYear:  rec.billingYear,
+          reminderCount: priorCount,
+          message: `Phiếu T${rec.billingMonth}/${rec.billingYear} của ${rec.studentName ?? ''} đã gửi đủ ${REMINDER_CAP} lần nhắc Zalo nhưng chưa thanh toán.`,
+          read:        false,
+          createdAt:   serverTimestamp(),
+        })
+      }
+      result.capped++
+      result.details.push({ invoiceId: rec.id, status: 'capped' })
+      continue
+    }
+
+    // Tính ngày tham chiếu: lần gửi gần nhất, hoặc createdAt
+    const refMs = lastSentMs > 0 ? lastSentMs : (rec.createdAt ? Date.parse(rec.createdAt) : 0)
+    if (!refMs) {
+      result.skippedTooSoon++
+      result.details.push({ invoiceId: rec.id, status: 'skipped', reason: 'no createdAt' })
+      continue
+    }
+    const daysSinceRef = (nowMs - refMs) / dayMs
+    if (daysSinceRef < REMINDER_INTERVAL_DAYS) {
+      result.skippedTooSoon++
+      continue
+    }
+
+    // Compute remaining + overdue days
+    const paymentsSnap = await db.collection(C.PAYMENTS)
+      .where('tuitionRecordId', '==', rec.id).get()
+    const totalPaid = paymentsSnap.docs.reduce((s, d) => s + (Number(d.data().amount) || 0), 0)
+    const remaining = Math.max((Number(rec.finalAmount) || 0) - totalPaid, 0)
+    if (remaining <= 0) {
+      // Đã trả đủ nhưng status chưa cập nhật — skip (sẽ refresh lần sau).
+      result.details.push({ invoiceId: rec.id, status: 'skipped', reason: 'remaining=0' })
+      continue
+    }
+
+    const overdueRef = rec.dueDate || rec.createdAt
+    const overdueDays = overdueRef
+      ? Math.max(0, Math.floor((nowMs - Date.parse(overdueRef)) / dayMs))
+      : 0
+
+    // Resolve recipient
+    const recipient = await resolveRecipient(rec.studentId)
+    if (!recipient.phone) {
+      result.skippedNoPhone++
+      result.details.push({ invoiceId: rec.id, status: 'skipped', reason: 'no phone' })
+      continue
+    }
+
+    const sendResult = await sendZnsAndLog({
+      studentId:     rec.studentId,
+      parentPhone:   recipient.phone,
+      templateId:    template.id,
+      useCase:       'C',
+      invoiceId:     rec.id,
+      reminderCount: priorCount + 1,
+      params: {
+        ten_hoc_vien:           rec.studentName ?? '',
+        thang_nam:              `${rec.billingMonth}/${rec.billingYear}`,
+        so_tien_can_thanh_toan: remaining,
+        so_ngay_qua_han:        overdueDays,
+        ma_phieu:               rec.id.slice(-8).toUpperCase(),
+        student_id:             rec.studentId,
+      },
+    })
+
+    if (sendResult.success) {
+      result.sent++
+      result.details.push({ invoiceId: rec.id, status: 'sent' })
+    } else {
+      result.failed++
+      result.details.push({ invoiceId: rec.id, status: 'failed', reason: sendResult.error })
+    }
+  }
+
+  console.log('[ZNS][cron] Overdue reminder run:', result)
+  return result
 }

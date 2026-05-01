@@ -6,6 +6,7 @@ import { Router, Request, Response, NextFunction } from 'express'
 import { db, C } from '../lib/firebase'
 import { refreshTuitionStatus, getPaymentStatus } from '../services/tuitionCalculator'
 import { sendMessage as sendZaloMessage } from '../services/zaloService'
+import { sendZnsAndLog, findActiveTemplate, resolveRecipient } from './zns'
 import {
   parseTransferNote,
   findStudentsByShortId,
@@ -209,6 +210,16 @@ router.post('/sepay', async (req: Request, res: Response, next: NextFunction) =>
       tuitionRecordId: target.id,
     })
 
+    // Case B — gửi ZNS xác nhận đã nhận thanh toán cho phụ huynh.
+    // Wrapped trong try/catch để lỗi ZNS không phá response webhook.
+    sendCaseBNotice({
+      studentId:    student.id,
+      studentName:  student.fullName,
+      record:       target,
+      amount,
+      txDate:       body.transactionDate || now,
+    }).catch(err => console.error('[ZNS] Case B failed:', err))
+
     res.json({ success: true, status: 'matched', paymentId: paymentRef.id })
   } catch (err) {
     next(err)
@@ -248,6 +259,57 @@ async function notifyAfterMatch(params: {
   if (adminZalo) {
     await sendZaloMessage(adminZalo, adminMsg)
   }
+}
+
+/**
+ * Case B — gửi ZNS xác nhận đã nhận thanh toán cho phụ huynh chính.
+ * Skip gracefully khi:
+ *   - Chưa cấu hình ZNS env vars
+ *   - Chưa có template active cho use case B
+ *   - Học viên không có SĐT phụ huynh
+ */
+async function sendCaseBNotice(input: {
+  studentId:   string
+  studentName: string
+  record:      { id: string; billingMonth: number; billingYear: number }
+  amount:      number
+  txDate:      string
+}): Promise<void> {
+  const template = await findActiveTemplate('B')
+  if (!template) {
+    console.log('[ZNS] Case B skip: chưa có template active cho use case B')
+    return
+  }
+
+  const recipient = await resolveRecipient(input.studentId)
+  if (!recipient.phone) {
+    console.warn(`[ZNS] Case B skip: HV ${input.studentId} không có SĐT phụ huynh`)
+    return
+  }
+
+  // Format thời gian nhận: "DD/MM/YYYY HH:mm" (ICT input giả định)
+  const d = new Date(input.txDate)
+  const fmtTime = isNaN(d.getTime())
+    ? input.txDate
+    : `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()} ` +
+      `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+
+  const shortInvoiceId = input.record.id.slice(-8).toUpperCase()
+
+  await sendZnsAndLog({
+    studentId:    input.studentId,
+    parentPhone:  recipient.phone,
+    templateId:   template.id,
+    useCase:      'B',
+    invoiceId:    input.record.id,
+    params: {
+      ten_hoc_vien:    input.studentName,
+      thang_nam:       `${input.record.billingMonth}/${input.record.billingYear}`,
+      so_tien_da_nhan: input.amount,
+      thoi_gian_nhan:  fmtTime,
+      ma_phieu:        shortInvoiceId,
+    },
+  })
 }
 
 async function notifyAdminUnmatched(params: { amount: number; reason: string }): Promise<void> {
