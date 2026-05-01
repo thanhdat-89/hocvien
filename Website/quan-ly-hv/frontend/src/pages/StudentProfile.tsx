@@ -1234,6 +1234,37 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
   const [filterMonth, setFilterMonth] = useState(now.getMonth() + 1)
   const [filterYear, setFilterYear] = useState(now.getFullYear())
   const [creatingKey, setCreatingKey] = useState<string | null>(null)
+  const [sendingZnsId, setSendingZnsId] = useState<string | null>(null)
+
+  const sendZnsNotice = async (recordId: string) => {
+    const ok = await confirm({
+      title: 'Gửi thông báo Zalo',
+      message: 'Gửi thông báo học phí (ZNS) cho phụ huynh học viên này?',
+      confirmLabel: 'Gửi',
+    })
+    if (!ok) return
+
+    setSendingZnsId(recordId)
+    try {
+      const r = await api.post('/zns/tuition-notice', { tuitionRecordId: recordId, useCase: 'A' })
+      const data = r.data as { success: boolean; error?: string; recipientSource?: string; recipientName?: string }
+      if (data.success) {
+        const fallbackNote = data.recipientSource === 'fallback'
+          ? `\n(Đã dùng SĐT của ${data.recipientName ?? 'phụ huynh phụ'} vì PH chính chưa có SĐT)`
+          : ''
+        await showAlert({ title: '✅ Đã gửi', message: `Thông báo đã gửi thành công.${fallbackNote}` })
+      } else {
+        await showAlert({ title: 'Gửi thất bại', message: data.error || 'Không xác định' })
+      }
+    } catch (e: any) {
+      await showAlert({
+        title: 'Lỗi',
+        message: e?.response?.data?.message || 'Không gọi được API gửi ZNS',
+      })
+    } finally {
+      setSendingZnsId(null)
+    }
+  }
 
   const createRecord = async (row: TuitionRow) => {
     const isRecalc = !!row.tuitionRecord
@@ -1433,6 +1464,16 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
                               title="Tính lại học phí dựa trên lịch học hiện tại (giữ nguyên các giao dịch đã thanh toán)"
                             >
                               {busy ? '...' : 'Tính lại'}
+                            </button>
+                            <button
+                              onClick={() => sendZnsNotice(r.tuitionRecord!.id)}
+                              disabled={sendingZnsId === r.tuitionRecord.id}
+                              className="p-1 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded transition-all disabled:opacity-40"
+                              title="Gửi thông báo Zalo cho phụ huynh"
+                            >
+                              <span className="material-symbols-outlined text-[18px]">
+                                {sendingZnsId === r.tuitionRecord.id ? 'hourglass_top' : 'campaign'}
+                              </span>
                             </button>
                           </div>
                         ) : (

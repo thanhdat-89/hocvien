@@ -1,16 +1,14 @@
 /**
  * ZNS OAuth Bootstrap — chạy 1 lần để lấy access_token + refresh_token.
  *
- * Phiên bản này dùng "manual paste" mode: redirect tới qlhv.cqt.vn (đã verified
- * + đã thêm vào "Miền ứng dụng" của ZNS app), sau đó user copy URL từ thanh
- * địa chỉ paste vào terminal — không cần local HTTP server.
- *
  * Trước khi chạy:
- *   1. Trên developers.zalo.me → app ZNS → Cài đặt → "Miền ứng dụng" có
- *      qlhv.cqt.vn (đã làm) + Lưu thay đổi.
- *   2. Đặt ZNS_APP_ID + ZNS_APP_SECRET trong .env (gốc project).
- *   3. Đăng nhập tài khoản Zalo cá nhân của ADMIN OA Math Center sẵn trong
- *      browser default (script sẽ mở browser tới trang xin quyền).
+ *   1. ZNS_APP_ID + ZNS_APP_SECRET trong .env (gốc project).
+ *   2. Trên developers.zalo.me → app ZNS:
+ *      - Cài đặt → "Miền ứng dụng" có qlhv.cqt.vn (đã làm)
+ *      - Sản phẩm → Official Account → Thiết lập chung →
+ *        "Official Account Callback Url" = https://qlhv.cqt.vn (đã set + Cập nhật)
+ *      - Tick "Quyền: Gửi tin qua số điện thoại" + "Quyền: Quản lý Message Template"
+ *   3. Đăng nhập tài khoản Zalo cá nhân của ADMIN OA Math Center sẵn trong browser.
  *
  * Chạy:
  *   cd /Users/thanhdat/Website/quan-ly-hv
@@ -20,6 +18,9 @@
  * paste cả 2 vào Vercel env vars (Production của hocvien-backend) → Redeploy.
  *
  * Refresh token sống ~90 ngày; backend tự refresh access_token trong khoảng đó.
+ *
+ * Lưu ý: KHÔNG dùng PKCE (code_challenge/code_verifier) vì Zalo OA OAuth v4
+ * không hỗ trợ PKCE qua URL params. Bảo vệ CSRF bằng state.
  */
 
 import 'dotenv/config'
@@ -29,18 +30,12 @@ import { spawn } from 'child_process'
 import { URL } from 'url'
 
 const REDIRECT_URI =
-  process.env.ZNS_OAUTH_REDIRECT_URI ?? 'https://qlhv.cqt.vn/zns-oauth-callback'
+  process.env.ZNS_OAUTH_REDIRECT_URI ?? 'https://qlhv.cqt.vn'
 const AUTH_URL  = 'https://oauth.zaloapp.com/v4/oa/permission'
 const TOKEN_URL = 'https://oauth.zaloapp.com/v4/oa/access_token'
 
 function base64Url(buf: Buffer): string {
   return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-}
-
-function makePkce() {
-  const verifier  = base64Url(crypto.randomBytes(48))
-  const challenge = base64Url(crypto.createHash('sha256').update(verifier).digest())
-  return { verifier, challenge }
 }
 
 function tryOpenBrowser(url: string) {
@@ -75,7 +70,6 @@ interface TokenResponse {
 
 async function exchangeCode(
   code: string,
-  verifier: string,
   appId: string,
   secret: string,
 ): Promise<TokenResponse> {
@@ -83,7 +77,6 @@ async function exchangeCode(
     code,
     app_id: appId,
     grant_type: 'authorization_code',
-    code_verifier: verifier,
   })
 
   const res = await fetch(TOKEN_URL, {
@@ -104,36 +97,32 @@ async function main() {
 
   if (!appId || !secret) {
     console.error('❌ Cần set ZNS_APP_ID và ZNS_APP_SECRET trong .env trước.')
-    console.error('   Lấy từ developers.zalo.me → app của bạn → Cài đặt')
     process.exit(1)
   }
 
-  const { verifier, challenge } = makePkce()
+  // State chỉ để chống CSRF, không bắt buộc nhưng dùng cho an toàn.
   const state = base64Url(crypto.randomBytes(16))
 
   const authUrl =
     `${AUTH_URL}?app_id=${encodeURIComponent(appId)}` +
     `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
-    `&code_challenge=${encodeURIComponent(challenge)}` +
     `&state=${encodeURIComponent(state)}`
 
   console.log('═══════════════════════════════════════════════════════════')
-  console.log('🔑 ZNS OAuth Bootstrap (manual paste mode)')
+  console.log('🔑 ZNS OAuth Bootstrap (no PKCE — Zalo OA v4)')
   console.log('═══════════════════════════════════════════════════════════\n')
   console.log(`App ID:       ${appId}`)
   console.log(`Redirect URI: ${REDIRECT_URI}\n`)
-  console.log('Bước 1. Mở URL sau (script đang tự mở browser):\n')
+  console.log('Bước 1. Browser sẽ tự mở (nếu không, copy URL bên dưới):\n')
   console.log(`  ${authUrl}\n`)
-  console.log('Bước 2. Đăng nhập tài khoản Zalo cá nhân của ADMIN OA → bấm "Đồng ý"\n')
-  console.log('Bước 3. Browser sẽ redirect tới một URL kiểu:')
-  console.log(`  ${REDIRECT_URI}?code=XXXXX&state=YYYY\n`)
-  console.log('  Trang có thể hiển thị app React hoặc 404 — KHÔNG SAO. Cái cần là URL.')
-  console.log('  → COPY toàn bộ URL từ thanh địa chỉ trình duyệt rồi paste vào đây:\n')
+  console.log('Bước 2. Đăng nhập tài khoản Zalo của ADMIN OA → bấm "Cho phép"/"Đồng ý"\n')
+  console.log('Bước 3. Browser sẽ redirect tới:')
+  console.log(`  ${REDIRECT_URI}/?code=XXXXX&state=YYYY  (hoặc có oa_id=...)\n`)
+  console.log('  Copy TOÀN BỘ URL từ thanh địa chỉ paste vào đây:\n')
 
   tryOpenBrowser(authUrl)
 
   const callbackUrl = await prompt('Paste callback URL: ')
-
   if (!callbackUrl) {
     console.error('❌ Bạn chưa paste URL.')
     process.exit(1)
@@ -158,12 +147,11 @@ async function main() {
     process.exit(1)
   }
   if (!code) {
-    console.error('❌ URL không có ?code= — bạn paste sai URL hoặc OAuth thất bại.')
+    console.error('❌ URL không có ?code= — paste sai URL hoặc OAuth thất bại.')
     process.exit(1)
   }
-  if (recvState !== state) {
-    console.error('❌ State mismatch — có khả năng paste URL từ session khác,')
-    console.error('   hoặc bị CSRF. Chạy lại script và dùng URL mới.')
+  if (recvState && recvState !== state) {
+    console.error('❌ State mismatch — paste URL từ session khác. Chạy lại script.')
     process.exit(1)
   }
 
@@ -171,7 +159,7 @@ async function main() {
 
   let tokens: TokenResponse
   try {
-    tokens = await exchangeCode(code, verifier, appId, secret)
+    tokens = await exchangeCode(code, appId, secret)
   } catch (err) {
     console.error('❌ Lỗi gọi Zalo API:', err)
     process.exit(1)

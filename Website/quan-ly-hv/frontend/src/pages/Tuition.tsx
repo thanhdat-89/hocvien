@@ -103,6 +103,7 @@ export default function Tuition() {
   const [creatingRow, setCreatingRow] = useState<string | null>(null)
   const [bulkCreating, setBulkCreating] = useState(false)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [sendingZnsId, setSendingZnsId] = useState<string | null>(null)
   const showAlert = useAlert()
   const showConfirm = useConfirm()
 
@@ -120,6 +121,36 @@ export default function Tuition() {
     }
   }
   const showPrompt = usePrompt()
+
+  const sendZnsNotice = async (recordId: string, studentName: string) => {
+    const ok = await showConfirm({
+      title: 'Gửi thông báo Zalo',
+      message: `Gửi thông báo học phí (ZNS) cho phụ huynh học viên ${studentName}?`,
+      confirmLabel: 'Gửi',
+    })
+    if (!ok) return
+
+    setSendingZnsId(recordId)
+    try {
+      const r = await api.post('/zns/tuition-notice', { tuitionRecordId: recordId, useCase: 'A' })
+      const data = r.data as { success: boolean; error?: string; recipientSource?: string; recipientName?: string }
+      if (data.success) {
+        const fallbackNote = data.recipientSource === 'fallback'
+          ? `\n(Đã dùng SĐT của ${data.recipientName ?? 'phụ huynh phụ'} vì PH chính chưa có SĐT)`
+          : ''
+        await showAlert({ title: '✅ Đã gửi', message: `Thông báo đã gửi thành công.${fallbackNote}` })
+      } else {
+        await showAlert({ title: 'Gửi thất bại', message: data.error || 'Không xác định' })
+      }
+    } catch (e: any) {
+      await showAlert({
+        title: 'Lỗi',
+        message: e?.response?.data?.message || 'Không gọi được API gửi ZNS',
+      })
+    } finally {
+      setSendingZnsId(null)
+    }
+  }
 
   const createRecordForRow = async (row: ScheduleRow) => {
     const isRecalc = !!row.tuitionRecord
@@ -419,7 +450,19 @@ export default function Tuition() {
                           </td>
                           <td className="table-cell text-center">
                             {r.tuitionRecord ? (
-                              <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 text-xs font-bold">Đã tạo</span>
+                              <div className="inline-flex items-center gap-1">
+                                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 text-xs font-bold">Đã tạo</span>
+                                <button
+                                  onClick={() => sendZnsNotice(r.tuitionRecord!.id, r.studentName)}
+                                  disabled={sendingZnsId === r.tuitionRecord.id}
+                                  className="p-1 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded transition-all disabled:opacity-40"
+                                  title="Gửi thông báo Zalo cho phụ huynh"
+                                >
+                                  <span className="material-symbols-outlined text-[18px]">
+                                    {sendingZnsId === r.tuitionRecord.id ? 'hourglass_top' : 'campaign'}
+                                  </span>
+                                </button>
+                              </div>
                             ) : (
                               <button
                                 onClick={() => createRecordForRow(r)}

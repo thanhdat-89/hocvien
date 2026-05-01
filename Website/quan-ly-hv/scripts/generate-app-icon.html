@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<title>Math Center — App Icon Generator</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
+    background: linear-gradient(135deg, #f0f4ff, #e0e7ff);
+    margin: 0;
+    padding: 40px 20px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  h1 {
+    color: #1e3a8a;
+    margin-bottom: 8px;
+  }
+  .sub {
+    color: #64748b;
+    margin-bottom: 32px;
+    font-size: 14px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 24px;
+    max-width: 1000px;
+    width: 100%;
+  }
+  .card {
+    background: white;
+    border-radius: 16px;
+    padding: 20px;
+    text-align: center;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+  }
+  .card h3 {
+    margin: 0 0 12px;
+    color: #334155;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .preview {
+    width: 180px;
+    height: 180px;
+    margin: 0 auto 16px;
+    border-radius: 38px;
+    box-shadow: 0 6px 20px rgba(37, 99, 235, 0.25);
+  }
+  button {
+    width: 100%;
+    padding: 10px 16px;
+    background: #2563eb;
+    color: white;
+    border: none;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button:hover { background: #1d4ed8; }
+  canvas.hidden { display: none; }
+  .note {
+    margin-top: 32px;
+    color: #475569;
+    font-size: 13px;
+    max-width: 600px;
+    text-align: center;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+<h1>Chọn icon ứng dụng</h1>
+<p class="sub">Click "Tải xuống PNG" trên thiết kế bạn thích — file 512×512 sẽ tự lưu vào Downloads.</p>
+
+<div class="grid">
+  <div class="card">
+    <h3>1. Sigma cổ điển</h3>
+    <canvas id="prev1" width="180" height="180" class="preview"></canvas>
+    <canvas id="full1" width="512" height="512" class="hidden"></canvas>
+    <button onclick="download(1, 'math-center-sigma')">Tải xuống PNG</button>
+  </div>
+
+  <div class="card">
+    <h3>2. f(x) công thức</h3>
+    <canvas id="prev2" width="180" height="180" class="preview"></canvas>
+    <canvas id="full2" width="512" height="512" class="hidden"></canvas>
+    <button onclick="download(2, 'math-center-fx')">Tải xuống PNG</button>
+  </div>
+
+  <div class="card">
+    <h3>3. π gradient sáng</h3>
+    <canvas id="prev3" width="180" height="180" class="preview"></canvas>
+    <canvas id="full3" width="512" height="512" class="hidden"></canvas>
+    <button onclick="download(3, 'math-center-pi')">Tải xuống PNG</button>
+  </div>
+
+  <div class="card">
+    <h3>4. MC monogram</h3>
+    <canvas id="prev4" width="180" height="180" class="preview"></canvas>
+    <canvas id="full4" width="512" height="512" class="hidden"></canvas>
+    <button onclick="download(4, 'math-center-mc')">Tải xuống PNG</button>
+  </div>
+</div>
+
+<p class="note">
+Icon được render trực tiếp bằng canvas — không cần internet, không gửi đi đâu cả.<br>
+Sau khi tải, upload file PNG vào Zalo Developer Portal → Cài đặt → Icon ứng dụng.
+</p>
+
+<script>
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// ===== Design 1: Sigma trên gradient xanh =====
+function drawSigma(ctx, size) {
+  const g = ctx.createLinearGradient(0, 0, size, size);
+  g.addColorStop(0, '#3b82f6');
+  g.addColorStop(1, '#1e40af');
+  ctx.fillStyle = g;
+  roundRect(ctx, 0, 0, size, size, size * 0.22);
+  ctx.fill();
+
+  // Subtle highlight overlay
+  const hl = ctx.createLinearGradient(0, 0, 0, size * 0.5);
+  hl.addColorStop(0, 'rgba(255,255,255,0.18)');
+  hl.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = hl;
+  roundRect(ctx, 0, 0, size, size, size * 0.22);
+  ctx.fill();
+
+  ctx.fillStyle = 'white';
+  ctx.font = `bold ${size * 0.62}px Georgia, serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Σ', size / 2, size / 2 + size * 0.02);
+}
+
+// ===== Design 2: fx công thức =====
+function drawFx(ctx, size) {
+  const g = ctx.createLinearGradient(0, 0, size, size);
+  g.addColorStop(0, '#0ea5e9');
+  g.addColorStop(1, '#1e3a8a');
+  ctx.fillStyle = g;
+  roundRect(ctx, 0, 0, size, size, size * 0.22);
+  ctx.fill();
+
+  ctx.fillStyle = 'white';
+  ctx.font = `italic bold ${size * 0.5}px "Times New Roman", serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('ƒ(x)', size / 2, size / 2 + size * 0.02);
+}
+
+// ===== Design 3: Pi trên gradient sáng =====
+function drawPi(ctx, size) {
+  const g = ctx.createLinearGradient(0, 0, 0, size);
+  g.addColorStop(0, '#60a5fa');
+  g.addColorStop(1, '#2563eb');
+  ctx.fillStyle = g;
+  roundRect(ctx, 0, 0, size, size, size * 0.22);
+  ctx.fill();
+
+  // Decorative dots
+  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx.beginPath(); ctx.arc(size * 0.85, size * 0.18, size * 0.06, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(size * 0.16, size * 0.82, size * 0.04, 0, Math.PI * 2); ctx.fill();
+
+  ctx.fillStyle = 'white';
+  ctx.font = `bold ${size * 0.62}px Georgia, serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('π', size / 2, size / 2 + size * 0.04);
+}
+
+// ===== Design 4: MC monogram =====
+function drawMC(ctx, size) {
+  const g = ctx.createLinearGradient(0, 0, size, size);
+  g.addColorStop(0, '#1d4ed8');
+  g.addColorStop(1, '#0f172a');
+  ctx.fillStyle = g;
+  roundRect(ctx, 0, 0, size, size, size * 0.22);
+  ctx.fill();
+
+  ctx.fillStyle = 'white';
+  ctx.font = `900 ${size * 0.42}px -apple-system, "SF Pro Display", sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('MC', size / 2, size / 2 + size * 0.02);
+
+  // small subtitle
+  ctx.font = `700 ${size * 0.07}px -apple-system, sans-serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.fillText('MATH CENTER', size / 2, size * 0.78);
+}
+
+const drawers = { 1: drawSigma, 2: drawFx, 3: drawPi, 4: drawMC };
+
+// Render all previews + full-size canvases
+for (let i = 1; i <= 4; i++) {
+  const prev = document.getElementById(`prev${i}`);
+  const full = document.getElementById(`full${i}`);
+  drawers[i](prev.getContext('2d'), 180);
+  drawers[i](full.getContext('2d'), 512);
+}
+
+function download(idx, filename) {
+  const canvas = document.getElementById(`full${idx}`);
+  const link = document.createElement('a');
+  link.download = `${filename}-512.png`;
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+</script>
+</body>
+</html>

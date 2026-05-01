@@ -19,9 +19,8 @@ import {
 
 const router = Router()
 
-// Mọi endpoint dưới đây đều yêu cầu admin đăng nhập.
+// Đăng nhập là bắt buộc; quyền theo từng endpoint.
 router.use(authenticate)
-router.use(requireRole('ADMIN'))
 
 type UseCase = 'A' | 'B' | 'C' | 'TEST'
 
@@ -59,7 +58,7 @@ interface ZnsLogDoc {
 // ─── Templates ───────────────────────────────────────────────
 
 // GET /api/zns/templates
-router.get('/templates', async (_req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/templates', requireRole('ADMIN'), async (_req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const snap = await db.collection(C.ZNS_TEMPLATES).orderBy('useCase').get()
     const templates = toDocs<ZnsTemplateDoc>(snap)
@@ -70,7 +69,7 @@ router.get('/templates', async (_req: AuthRequest, res: Response, next: NextFunc
 })
 
 // GET /api/zns/templates/:id
-router.get('/templates/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/templates/:id', requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const id = s(req.params.id)
     const doc = await db.collection(C.ZNS_TEMPLATES).doc(id).get()
@@ -86,7 +85,7 @@ router.get('/templates/:id', async (req: AuthRequest, res: Response, next: NextF
 
 // POST /api/zns/templates
 // Body: { id, name, useCase, paramKeys[], cost?, active?, note? }
-router.post('/templates', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/templates', requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id, name, useCase, paramKeys, cost, active, note } = req.body as Partial<ZnsTemplateDoc>
 
@@ -121,7 +120,7 @@ router.post('/templates', async (req: AuthRequest, res: Response, next: NextFunc
 })
 
 // PATCH /api/zns/templates/:id
-router.patch('/templates/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.patch('/templates/:id', requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const id = s(req.params.id)
     const ref = db.collection(C.ZNS_TEMPLATES).doc(id)
@@ -146,7 +145,7 @@ router.patch('/templates/:id', async (req: AuthRequest, res: Response, next: Nex
 })
 
 // DELETE /api/zns/templates/:id
-router.delete('/templates/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.delete('/templates/:id', requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const id = s(req.params.id)
     const ref = db.collection(C.ZNS_TEMPLATES).doc(id)
@@ -168,7 +167,7 @@ router.delete('/templates/:id', async (req: AuthRequest, res: Response, next: Ne
 // POST /api/zns/test-send
 // Body: { phone, templateId, params, studentId? }
 // Gửi 1 tin trực tiếp cho 1 SĐT — dùng để test sau khi cấu hình template.
-router.post('/test-send', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/test-send', requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { phone, templateId, params, studentId } = req.body as {
       phone?: string
@@ -205,7 +204,7 @@ router.post('/test-send', async (req: AuthRequest, res: Response, next: NextFunc
 // ─── Logs ────────────────────────────────────────────────────
 
 // GET /api/zns/logs?useCase=A&status=failed&studentId=...&page=1&limit=20
-router.get('/logs', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/logs', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { useCase, status, studentId, invoiceId } = req.query as Record<string, string | undefined>
     const page  = Math.max(parseInt(s(req.query.page  as string) || '1', 10), 1)
@@ -230,7 +229,7 @@ router.get('/logs', async (req: AuthRequest, res: Response, next: NextFunction) 
 })
 
 // GET /api/zns/logs/:id
-router.get('/logs/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/logs/:id', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const id = s(req.params.id)
     const doc = await db.collection(C.ZNS_LOGS).doc(id).get()
@@ -244,10 +243,200 @@ router.get('/logs/:id', async (req: AuthRequest, res: Response, next: NextFuncti
   }
 })
 
+// ─── Case A: Gửi thông báo học phí mới ───────────────────────
+
+const STUDENT_PORTAL_URL = process.env.STUDENT_PORTAL_URL ?? 'https://hocthemtoan.vn/hoc-vien'
+
+function fmtMonth(m: number, y: number): string {
+  return `${m}/${y}`
+}
+
+function fmtDate(iso: string | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`
+}
+
+function shortInvoiceId(id: string): string {
+  return id.slice(-8).toUpperCase()
+}
+
+interface ParentLite {
+  fullName?: string
+  phone?: string | null
+  zalo?: string | null
+}
+
+interface ResolvedRecipient {
+  phone: string
+  source: 'primary' | 'fallback' | 'none'
+  parentName?: string
+}
+
+async function resolveRecipient(studentId: string): Promise<ResolvedRecipient> {
+  const studentDoc = await db.collection(C.STUDENTS).doc(studentId).get()
+  if (!studentDoc.exists) return { phone: '', source: 'none' }
+  const stu = studentDoc.data() as Record<string, unknown>
+
+  const primaryPhone = (stu.primaryParentPhone as string | null | undefined)
+                    || (stu.primaryParentZalo as string | null | undefined)
+                    || ''
+  if (primaryPhone) {
+    return {
+      phone: primaryPhone,
+      source: 'primary',
+      parentName: (stu.primaryParentName as string | undefined) ?? undefined,
+    }
+  }
+
+  // Fallback: lấy SĐT/Zalo của bất kỳ parent nào trong subcollection
+  const parentsSnap = await db.collection(C.STUDENTS).doc(studentId)
+    .collection('parents').limit(5).get()
+  for (const doc of parentsSnap.docs) {
+    const p = doc.data() as ParentLite
+    const phone = p.phone || p.zalo
+    if (phone) {
+      return { phone, source: 'fallback', parentName: p.fullName }
+    }
+  }
+
+  return { phone: '', source: 'none' }
+}
+
+async function findActiveTemplate(useCase: UseCase): Promise<{ id: string; name: string } | null> {
+  // In-memory filter để không cần composite index
+  const snap = await db.collection(C.ZNS_TEMPLATES).get()
+  for (const doc of snap.docs) {
+    const t = doc.data() as { useCase?: string; active?: boolean; name?: string }
+    if (t.useCase === useCase && t.active === true) {
+      return { id: doc.id, name: t.name ?? doc.id }
+    }
+  }
+  return null
+}
+
+// POST /api/zns/tuition-notice
+// Body: { tuitionRecordId, useCase? = 'A' }
+// ADMIN/STAFF gửi thông báo Zalo cho 1 phiếu học phí cụ thể.
+router.post('/tuition-notice', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { tuitionRecordId, useCase = 'A' } = req.body as { tuitionRecordId?: string; useCase?: UseCase }
+
+    if (!tuitionRecordId) {
+      res.status(400).json({ message: 'tuitionRecordId là bắt buộc' })
+      return
+    }
+    if (useCase !== 'A' && useCase !== 'C') {
+      res.status(400).json({ message: 'useCase phải là A hoặc C' })
+      return
+    }
+
+    // 1. Phiếu học phí
+    const recordDoc = await db.collection(C.TUITION_RECORDS).doc(tuitionRecordId).get()
+    if (!recordDoc.exists) {
+      res.status(404).json({ message: 'Không tìm thấy phiếu học phí' })
+      return
+    }
+    const record = { id: recordDoc.id, ...(recordDoc.data() as Record<string, unknown>) } as {
+      id: string
+      studentId: string
+      studentName?: string
+      billingMonth: number
+      billingYear: number
+      chargedSessions?: number
+      baseAmount?: number
+      finalAmount: number
+      dueDate?: string
+    }
+
+    // 2. SĐT phụ huynh
+    const recipient = await resolveRecipient(record.studentId)
+    if (!recipient.phone) {
+      res.status(400).json({ message: 'Học viên không có SĐT phụ huynh để gửi Zalo' })
+      return
+    }
+
+    // 3. Template active
+    const template = await findActiveTemplate(useCase)
+    if (!template) {
+      res.status(400).json({
+        message: `Chưa cấu hình template active cho use case ${useCase}. Vào /zns → Templates → Thêm template.`,
+      })
+      return
+    }
+
+    // 4. Render params
+    const charged   = Number(record.chargedSessions) || 0
+    const base      = Number(record.baseAmount)      || 0
+    const final     = Number(record.finalAmount)     || 0
+    const unitPrice = charged > 0 ? Math.round(base / charged) : 0
+    const linkPp    = `${STUDENT_PORTAL_URL}/${record.studentId}`
+
+    let params: ZnsParams
+    if (useCase === 'A') {
+      params = {
+        ten_hoc_vien:    record.studentName ?? '',
+        thang_nam:       fmtMonth(record.billingMonth, record.billingYear),
+        so_buoi:         charged,
+        don_gia:         unitPrice,
+        tong_tien:       final,
+        han_thanh_toan:  fmtDate(record.dueDate),
+        ma_phieu:        shortInvoiceId(record.id),
+        link_pp:         linkPp,
+      }
+    } else {
+      // useCase === 'C' — overdue reminder. Tính số tiền còn lại + số ngày quá hạn.
+      const paymentsSnap = await db.collection(C.PAYMENTS)
+        .where('tuitionRecordId', '==', record.id).get()
+      const totalPaid = paymentsSnap.docs.reduce((sum, d) => sum + (Number(d.data().amount) || 0), 0)
+      const remaining = Math.max(final - totalPaid, 0)
+
+      const dueIso = record.dueDate
+      let overdueDays = 0
+      if (dueIso) {
+        const diffMs = Date.now() - new Date(dueIso).getTime()
+        overdueDays = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)))
+      }
+
+      params = {
+        ten_hoc_vien:              record.studentName ?? '',
+        thang_nam:                 fmtMonth(record.billingMonth, record.billingYear),
+        so_tien_can_thanh_toan:    remaining,
+        so_ngay_qua_han:           overdueDays,
+        ma_phieu:                  shortInvoiceId(record.id),
+        link_pp:                   linkPp,
+      }
+    }
+
+    // 5. Gửi + log
+    const result = await sendZnsAndLog({
+      studentId:    record.studentId,
+      parentPhone:  recipient.phone,
+      templateId:   template.id,
+      useCase,
+      invoiceId:    record.id,
+      params,
+    })
+
+    res.json({
+      success:        result.success,
+      logId:          result.logId,
+      msgId:          result.msgId,
+      error:          result.error,
+      recipientSource: recipient.source,
+      recipientName:  recipient.parentName ?? null,
+      templateName:   template.name,
+    })
+  } catch (err) {
+    next(err)
+  }
+})
+
 // ─── Status ──────────────────────────────────────────────────
 
 // GET /api/zns/status — kiểm tra cấu hình
-router.get('/status', (_req: AuthRequest, res: Response) => {
+router.get('/status', requireRole('ADMIN', 'STAFF'), (_req: AuthRequest, res: Response) => {
   res.json({
     enabled: ZNS_ENABLED,
     appIdSet: Boolean(process.env.ZNS_APP_ID),
