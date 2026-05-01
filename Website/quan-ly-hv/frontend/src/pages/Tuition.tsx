@@ -368,7 +368,7 @@ export default function Tuition() {
                           {isFirst && <td className="table-cell font-semibold text-on-surface align-top" rowSpan={span}>{r.studentName}</td>}
                           <td className="table-cell text-sm text-center">
                             {r.gradeLevel != null
-                              ? <span className="px-2.5 py-0.5 rounded-full bg-primary/8 text-primary text-xs font-bold">Lớp {r.gradeLevel}</span>
+                              ? <span className="inline-block px-2.5 py-0.5 rounded-full bg-primary/8 text-primary text-xs font-bold whitespace-nowrap">Lớp {r.gradeLevel}</span>
                               : <span className="text-outline">—</span>}
                           </td>
                           <td className="table-cell text-sm text-on-surface-variant">{r.className}</td>
