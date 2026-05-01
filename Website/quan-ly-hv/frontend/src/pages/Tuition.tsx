@@ -339,7 +339,7 @@ export default function Tuition() {
                   <tr className="bg-surface-container-low/50">
                     <th className="table-header w-12">STT</th>
                     <th className="table-header">Họ tên</th>
-                    <th className="table-header">Khối lớp</th>
+                    <th className="table-header text-center">Khối lớp</th>
                     <th className="table-header">Lớp học</th>
                     <th className="table-header text-right">Số buổi</th>
                     <th className="table-header text-right">Học phí/buổi</th>
