@@ -614,15 +614,15 @@ export default function Students() {
                           </span>
                         </button>
                         {(() => {
-                          const zalo = student.primaryParent?.zalo
-                          const zaloUrl = buildZaloUrl(zalo)
+                          const phone = student.primaryParent?.zalo || student.primaryParent?.phone
+                          const zaloUrl = buildZaloUrl(phone)
                           return zaloUrl ? (
                             <a
                               href={zaloUrl}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="p-2 text-outline hover:text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all"
-                              title={`Nhắn tin Zalo cho ${zalo}`}
+                              title={`Nhắn tin Zalo cho ${phone}`}
                             >
                               <span className="material-symbols-outlined text-[20px]">chat</span>
                             </a>
