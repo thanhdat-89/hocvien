@@ -1324,6 +1324,11 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
   const filteredRows = rows.filter(r => r.month === filterMonth && r.year === filterYear)
   const totalFee = filteredRows.reduce((s, r) => s + r.finalAmount, 0)
   const totalDiscount = filteredRows.reduce((s, r) => s + r.discountAmount, 0)
+
+  // Tổng hợp trạng thái học phí trên TẤT CẢ tháng (không lọc theo tháng đang xem)
+  const billedRows = rows.filter(r => r.tuitionRecord !== null)
+  const totalRemainingAll = billedRows.reduce((s, r) => s + (r.tuitionRecord?.remainingAmount ?? 0), 0)
+  const hasOutstanding = totalRemainingAll > 0
   const activeEnrollments = enrollments.filter(e => e.status === 'ACTIVE')
   const availableYears = [...new Set(rows.map(r => r.year))].sort((a, b) => b - a)
 
@@ -1335,6 +1340,33 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
 
   return (
     <div className="space-y-4">
+      {billedRows.length > 0 && (
+        <div className={`rounded-xl p-5 shadow-sm border ${hasOutstanding
+          ? 'bg-rose-50 border-rose-200'
+          : 'bg-emerald-50 border-emerald-200'}`}>
+          <div className="flex items-center gap-4">
+            <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${hasOutstanding
+              ? 'bg-rose-100 text-rose-600'
+              : 'bg-emerald-100 text-emerald-600'}`}>
+              <span className="material-symbols-outlined text-[28px]">
+                {hasOutstanding ? 'error' : 'verified'}
+              </span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] uppercase font-bold tracking-wider text-outline mb-0.5">Trạng thái học phí</p>
+              <p className={`text-lg font-bold ${hasOutstanding ? 'text-rose-700' : 'text-emerald-700'}`}>
+                {hasOutstanding ? 'Còn nợ học phí' : 'Đã thanh toán hết'}
+              </p>
+              {hasOutstanding && (
+                <p className="text-sm text-rose-600 mt-0.5">
+                  Tổng tiền còn nợ: <span className="font-extrabold">{fmtMoney(totalRemainingAll)}</span>
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {rows.length > 0 && (
         <div className="grid grid-cols-3 gap-4">
           <div className="bg-surface-container-lowest rounded-xl p-4 shadow-sm text-center">
