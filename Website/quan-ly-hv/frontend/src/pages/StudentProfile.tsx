@@ -1235,6 +1235,7 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
   const [filterYear, setFilterYear] = useState(now.getFullYear())
   const [creatingKey, setCreatingKey] = useState<string | null>(null)
   const [sendingZnsId, setSendingZnsId] = useState<string | null>(null)
+  const [payingRow, setPayingRow] = useState<TuitionRow | null>(null)
 
   const sendZnsNotice = async (recordId: string) => {
     const ok = await confirm({
@@ -1475,6 +1476,15 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
                                 {sendingZnsId === r.tuitionRecord.id ? 'hourglass_top' : 'campaign'}
                               </span>
                             </button>
+                            {r.tuitionRecord.remainingAmount > 0 && (
+                              <button
+                                onClick={() => setPayingRow(r)}
+                                className="p-1 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded transition-all"
+                                title="Xác nhận đã thanh toán (thủ công)"
+                              >
+                                <span className="material-symbols-outlined text-[18px]">paid</span>
+                              </button>
+                            )}
                           </div>
                         ) : (
                           <button
@@ -1509,6 +1519,31 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
           hasPrivate={rows.some(r => r.classId === 'private')}
           onClose={() => setShowPromoModal(false)}
           onSaved={() => { setShowPromoModal(false); load() }}
+        />
+      )}
+      {payingRow?.tuitionRecord && (
+        <PaymentModal
+          record={{
+            id: payingRow.tuitionRecord.id,
+            studentId,
+            studentName: '',
+            classId: payingRow.classId,
+            className: payingRow.className,
+            billingMonth: payingRow.month,
+            billingYear: payingRow.year,
+            totalSessions: payingRow.totalSessions,
+            attendedSessions: payingRow.totalSessions,
+            ratePerSession: payingRow.ratePerSession,
+            baseAmount: payingRow.baseAmount,
+            discountAmount: payingRow.discountAmount,
+            finalAmount: payingRow.tuitionRecord.finalAmount,
+            paidAmount: payingRow.tuitionRecord.paidAmount,
+            status: payingRow.tuitionRecord.status === 'OVERDUE' ? 'PENDING' : payingRow.tuitionRecord.status,
+            createdAt: '',
+            updatedAt: '',
+          }}
+          onClose={() => setPayingRow(null)}
+          onSaved={() => { setPayingRow(null); loadRows() }}
         />
       )}
     </div>
