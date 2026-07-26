@@ -395,6 +395,72 @@ router.delete('/:id/hard', requireRole('ADMIN'), async (req: AuthRequest, res: R
   }
 })
 
+// POST /api/students/bulk-delete — Soft delete tất cả học viên đang ACTIVE (xác nhận MK, có thể hoàn tác)
+router.post('/bulk-delete', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { password } = req.body
+    if (password !== 'cqt263' && password !== 'Cqt@263') {
+      res.status(400).json({ message: 'Mật khẩu xác nhận không chính xác' })
+      return
+    }
+
+    const snap = await db.collection(C.STUDENTS).where('status', '==', 'ACTIVE').get()
+    const docs = snap.docs
+    if (!docs.length) {
+      res.json({ message: 'Không có học viên nào đang trong trạng thái Đang học', count: 0 })
+      return
+    }
+
+    const updateTime = now()
+    const chunkSize = 400
+    for (let i = 0; i < docs.length; i += chunkSize) {
+      const chunk = docs.slice(i, i + chunkSize)
+      const batch = db.batch()
+      chunk.forEach(doc => {
+        batch.update(doc.ref, { status: 'INACTIVE', updatedAt: updateTime })
+      })
+      await batch.commit()
+    }
+
+    res.json({ message: `Đã xóa ${docs.length} học viên khỏi danh sách đang học`, count: docs.length })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// POST /api/students/bulk-restore — Khôi phục tất cả học viên INACTIVE về ACTIVE (Hoàn tác)
+router.post('/bulk-restore', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { password } = req.body
+    if (password !== 'cqt263' && password !== 'Cqt@263') {
+      res.status(400).json({ message: 'Mật khẩu xác nhận không chính xác' })
+      return
+    }
+
+    const snap = await db.collection(C.STUDENTS).where('status', '==', 'INACTIVE').get()
+    const docs = snap.docs
+    if (!docs.length) {
+      res.json({ message: 'Không có học viên nào để khôi phục', count: 0 })
+      return
+    }
+
+    const updateTime = now()
+    const chunkSize = 400
+    for (let i = 0; i < docs.length; i += chunkSize) {
+      const chunk = docs.slice(i, i + chunkSize)
+      const batch = db.batch()
+      chunk.forEach(doc => {
+        batch.update(doc.ref, { status: 'ACTIVE', updatedAt: updateTime })
+      })
+      await batch.commit()
+    }
+
+    res.json({ message: `Đã khôi phục ${docs.length} học viên về trạng thái đang học`, count: docs.length })
+  } catch (err) {
+    next(err)
+  }
+})
+
 // POST /api/students/:id/enroll — Đăng ký lớp
 router.post('/:id/enroll', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {

@@ -85,6 +85,7 @@ interface PromptOptions {
   confirmLabel?: string
   cancelLabel?: string
   inputType?: 'text' | 'password'
+  danger?: boolean
 }
 
 interface DialogContextValue {
@@ -161,7 +162,7 @@ export function ConfirmDialogProvider({ children }: { children: React.ReactNode 
         message: o.message,
         confirmLabel: o.confirmLabel ?? 'OK',
         cancelLabel: o.cancelLabel ?? 'Huỷ',
-        danger: false,
+        danger: o.danger ?? false,
         placeholder: o.placeholder,
         inputType: o.inputType ?? 'text',
         resolver: resolve,
