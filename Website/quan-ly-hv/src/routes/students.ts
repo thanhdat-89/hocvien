@@ -90,7 +90,7 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
 })
 
 // POST /api/students/bulk — Import hàng loạt từ Excel
-router.post('/bulk', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/bulk', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { students } = req.body as {
       students: Array<{

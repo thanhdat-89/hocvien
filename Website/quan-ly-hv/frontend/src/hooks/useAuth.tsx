@@ -13,6 +13,7 @@ interface AuthContextType {
   canManageStudents: boolean // create+edit+delete students, manage enrollments, finance
   canManageClasses: boolean  // create+edit+delete classes
   canSeeFinance: boolean     // /tuition + revenue widgets
+  canImportStudents: boolean // import excel students
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
@@ -49,12 +50,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const canManageStudents = isAdmin || isStaff
   const canManageClasses = isAdmin || isStaff
   const canSeeFinance = isAdmin || isStaff
+  const canImportStudents = isAdmin || isStaff || isTeacher
 
   return (
     <AuthContext.Provider value={{
       user, loading, login, logout,
       isAdmin, isStaff, isTeacher,
-      canManageStudents, canManageClasses, canSeeFinance,
+      canManageStudents, canManageClasses, canSeeFinance, canImportStudents,
     }}>
       {children}
     </AuthContext.Provider>

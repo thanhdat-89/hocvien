@@ -369,7 +369,7 @@ export default function Students() {
   const [showImportModal, setShowImportModal] = useState(false)
   const [editStudent, setEditStudent] = useState<Student | null>(null)
   const [privateModalStudent, setPrivateModalStudent] = useState<Student | null>(null)
-  const { canManageStudents } = useAuth()
+  const { canManageStudents, canImportStudents } = useAuth()
 
   const searchRef = useRef<ReturnType<typeof setTimeout>>()
 
@@ -498,21 +498,21 @@ export default function Students() {
           </div>
           <div className="flex items-center gap-2 flex-wrap justify-end">
             {canManageStudents && (
-              <>
-                <button
-                  onClick={handleBulkDelete}
-                  className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-error-container/10 border border-error/20 text-sm font-semibold text-error hover:bg-error-container/20 transition-all"
-                  title="Xóa vĩnh viễn tất cả học viên khỏi hệ thống (yêu cầu mật khẩu)"
-                >
-                  <span className="material-symbols-outlined text-[18px]">delete_sweep</span>
-                  Xóa tất cả học viên
-                </button>
-                <button onClick={() => setShowImportModal(true)}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-surface-container-low border border-outline-variant/20 text-sm font-semibold text-on-surface-variant hover:bg-surface-container hover:text-primary transition-all">
-                  <span className="material-symbols-outlined text-[18px]">upload_file</span>
-                  Import Excel
-                </button>
-              </>
+              <button
+                onClick={handleBulkDelete}
+                className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-error-container/10 border border-error/20 text-sm font-semibold text-error hover:bg-error-container/20 transition-all"
+                title="Xóa vĩnh viễn tất cả học viên khỏi hệ thống (yêu cầu mật khẩu)"
+              >
+                <span className="material-symbols-outlined text-[18px]">delete_sweep</span>
+                Xóa tất cả học viên
+              </button>
+            )}
+            {canImportStudents && (
+              <button onClick={() => setShowImportModal(true)}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-surface-container-low border border-outline-variant/20 text-sm font-semibold text-on-surface-variant hover:bg-surface-container hover:text-primary transition-all">
+                <span className="material-symbols-outlined text-[18px]">upload_file</span>
+                Import Excel
+              </button>
             )}
             <button className="btn-primary" onClick={() => { setEditStudent(null); setShowModal(true) }}>
               <span className="material-symbols-outlined">person_add</span>
