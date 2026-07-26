@@ -395,41 +395,20 @@ router.delete('/:id/hard', requireRole('ADMIN'), async (req: AuthRequest, res: R
   }
 })
 
-// POST /api/students/bulk-delete — Soft delete tất cả học viên đang ACTIVE (xác nhận MK, có thể hoàn tác)
-router.post('/bulk-delete', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    const { password } = req.body
-    if (password !== 'cqt263' && password !== 'Cqt@263') {
-      res.status(400).json({ message: 'Mật khẩu xác nhận không chính xác' })
-      return
-    }
-
-    const snap = await db.collection(C.STUDENTS).where('status', '==', 'ACTIVE').get()
-    const docs = snap.docs
-    if (!docs.length) {
-      res.json({ message: 'Không có học viên nào đang trong trạng thái Đang học', count: 0 })
-      return
-    }
-
-    const updateTime = now()
-    const chunkSize = 400
-    for (let i = 0; i < docs.length; i += chunkSize) {
-      const chunk = docs.slice(i, i + chunkSize)
-      const batch = db.batch()
-      chunk.forEach(doc => {
-        batch.update(doc.ref, { status: 'INACTIVE', updatedAt: updateTime })
-      })
-      await batch.commit()
-    }
-
-    res.json({ message: `Đã xóa ${docs.length} học viên khỏi danh sách đang học`, count: docs.length })
-  } catch (err) {
-    next(err)
+// Helper xóa mảng query snapshot theo batch
+async function deleteQueryDocs(querySnap: FirebaseFirestore.QuerySnapshot) {
+  const docs = querySnap.docs
+  const chunkSize = 400
+  for (let i = 0; i < docs.length; i += chunkSize) {
+    const chunk = docs.slice(i, i + chunkSize)
+    const batch = db.batch()
+    chunk.forEach(doc => batch.delete(doc.ref))
+    await batch.commit()
   }
-})
+}
 
-// POST /api/students/bulk-restore — Khôi phục tất cả học viên INACTIVE về ACTIVE (Hoàn tác)
-router.post('/bulk-restore', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+// POST /api/students/bulk-delete — HARD DELETE xoá vĩnh viễn tất cả học viên (xác nhận MK)
+router.post('/bulk-delete', requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { password } = req.body
     if (password !== 'cqt263' && password !== 'Cqt@263') {
@@ -437,25 +416,47 @@ router.post('/bulk-restore', requireRole('ADMIN', 'STAFF'), async (req: AuthRequ
       return
     }
 
-    const snap = await db.collection(C.STUDENTS).where('status', '==', 'INACTIVE').get()
-    const docs = snap.docs
-    if (!docs.length) {
-      res.json({ message: 'Không có học viên nào để khôi phục', count: 0 })
+    const studentsSnap = await db.collection(C.STUDENTS).get()
+    const studentDocs = studentsSnap.docs
+    if (!studentDocs.length) {
+      res.json({ message: 'Không có học viên nào trong cơ sở dữ liệu', count: 0 })
       return
     }
 
-    const updateTime = now()
-    const chunkSize = 400
-    for (let i = 0; i < docs.length; i += chunkSize) {
-      const chunk = docs.slice(i, i + chunkSize)
-      const batch = db.batch()
-      chunk.forEach(doc => {
-        batch.update(doc.ref, { status: 'ACTIVE', updatedAt: updateTime })
-      })
-      await batch.commit()
+    // Lấy tất cả bản ghi liên quan
+    const [enrollSnap, privateSnap, attendSnap, tuitionSnap, paymentSnap, promoSnap] = await Promise.all([
+      db.collection(C.ENROLLMENTS).get(),
+      db.collection(C.PRIVATE_SCHEDULES).get(),
+      db.collection(C.STUDENT_ATTENDANCES).get(),
+      db.collection(C.TUITION_RECORDS).get(),
+      db.collection(C.PAYMENTS).get(),
+      db.collection(C.STUDENT_PROMOTIONS).get(),
+    ])
+
+    // Xóa subcollection parents của từng học viên
+    for (const studentDoc of studentDocs) {
+      const parentsSnap = await studentDoc.ref.collection('parents').get()
+      await deleteQueryDocs(parentsSnap)
     }
 
-    res.json({ message: `Đã khôi phục ${docs.length} học viên về trạng thái đang học`, count: docs.length })
+    // Xóa các bản ghi liên quan và tài liệu học viên
+    await Promise.all([
+      deleteQueryDocs(enrollSnap),
+      deleteQueryDocs(privateSnap),
+      deleteQueryDocs(attendSnap),
+      deleteQueryDocs(tuitionSnap),
+      deleteQueryDocs(paymentSnap),
+      deleteQueryDocs(promoSnap),
+      deleteQueryDocs(studentsSnap),
+    ])
+
+    // Đặt số học viên của tất cả các lớp về 0
+    const classesSnap = await db.collection(C.CLASSES).get()
+    for (const classDoc of classesSnap.docs) {
+      await classDoc.ref.update({ activeStudentCount: 0 })
+    }
+
+    res.json({ message: `Đã xóa vĩnh viễn toàn bộ ${studentDocs.length} học viên cùng tất cả dữ liệu liên quan`, count: studentDocs.length })
   } catch (err) {
     next(err)
   }

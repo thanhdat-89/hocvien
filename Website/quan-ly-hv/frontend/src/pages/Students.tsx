@@ -455,12 +455,12 @@ export default function Students() {
 
   const handleBulkDelete = async () => {
     const password = await prompt({
-      title: 'Xóa tất cả học viên',
-      message: 'Bạn có chắc chắn muốn XÓA TẤT CẢ học viên khỏi danh sách đang học?\n\nThao tác này sẽ chuyển học viên sang trạng thái Đã nghỉ (có thể Hoàn tác bất cứ lúc nào).\n\nVui lòng nhập mật khẩu quản lý để xác nhận:',
+      title: 'Xoá hoàn toàn tất cả học viên',
+      message: '⚠️ Bạn có chắc chắn muốn XOÁ HOÀN TOÀN dữ liệu của TẤT CẢ học viên?\n\nThao tác này sẽ xoá:\n• Hồ sơ tất cả học viên + thông tin phụ huynh\n• Toàn bộ ghi danh, lịch học riêng, điểm danh\n• Phiếu học phí, thanh toán, khuyến mại\n\nKhông thể hoàn tác. Vui lòng nhập mật khẩu quản lý để xác nhận:',
       placeholder: 'Nhập mật khẩu cqt263...',
       inputType: 'password',
       danger: true,
-      confirmLabel: 'Xóa tất cả',
+      confirmLabel: 'Xoá vĩnh viễn tất cả',
       cancelLabel: 'Hủy',
     })
     if (!password) return
@@ -469,33 +469,7 @@ export default function Students() {
       const res = await api.post('/students/bulk-delete', { password })
       await showAlert({
         title: 'Thành công',
-        message: res.data.message || 'Đã xóa tất cả học viên khỏi danh sách.',
-      })
-      invalidate()
-    } catch (err: any) {
-      await showAlert({
-        title: 'Thao tác thất bại',
-        message: err.response?.data?.message || 'Mật khẩu không chính xác hoặc có lỗi xảy ra.',
-      })
-    }
-  }
-
-  const handleBulkRestore = async () => {
-    const password = await prompt({
-      title: 'Khôi phục tất cả học viên (Hoàn tác)',
-      message: 'Bạn có muốn HOÀN TÁC và khôi phục tất cả học viên đã nghỉ về trạng thái Đang học?\n\nVui lòng nhập mật khẩu quản lý để xác nhận:',
-      placeholder: 'Nhập mật khẩu cqt263...',
-      inputType: 'password',
-      confirmLabel: 'Khôi phục tất cả',
-      cancelLabel: 'Hủy',
-    })
-    if (!password) return
-
-    try {
-      const res = await api.post('/students/bulk-restore', { password })
-      await showAlert({
-        title: 'Thành công',
-        message: res.data.message || 'Đã khôi phục tất cả học viên.',
+        message: res.data.message || 'Đã xóa vĩnh viễn toàn bộ học viên.',
       })
       invalidate()
     } catch (err: any) {
@@ -526,17 +500,9 @@ export default function Students() {
             {canManageStudents && (
               <>
                 <button
-                  onClick={handleBulkRestore}
-                  className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-secondary-container/20 border border-secondary/30 text-sm font-semibold text-secondary hover:bg-secondary-container/30 transition-all"
-                  title="Khôi phục tất cả học viên về trạng thái Đang học (Hoàn tác)"
-                >
-                  <span className="material-symbols-outlined text-[18px]">undo</span>
-                  Hoàn tác / Khôi phục tất cả
-                </button>
-                <button
                   onClick={handleBulkDelete}
                   className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-error-container/10 border border-error/20 text-sm font-semibold text-error hover:bg-error-container/20 transition-all"
-                  title="Xóa tất cả học viên khỏi danh sách đang học (xác nhận MK, có thể hoàn tác)"
+                  title="Xóa vĩnh viễn tất cả học viên khỏi hệ thống (yêu cầu mật khẩu)"
                 >
                   <span className="material-symbols-outlined text-[18px]">delete_sweep</span>
                   Xóa tất cả học viên
