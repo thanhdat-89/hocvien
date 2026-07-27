@@ -456,13 +456,51 @@ router.post('/toggle-paid', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req
 })
 
 // POST /api/tuition/calculate
-router.post('/calculate', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/calculate', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { studentId, classId, month, year } = req.body
+    const { studentId, classId, month, year, paid } = req.body
     if (!classId || !month || !year) { res.status(400).json({ message: 'Cần classId, month, year' }); return }
 
     if (studentId) {
       const { tuitionRecord } = await calculateTuitionForStudent(studentId, classId, Number(month), Number(year))
+
+      if (typeof paid === 'boolean') {
+        if (paid) {
+          const { remaining } = await getPaymentStatus(tuitionRecord.id)
+          if (remaining > 0) {
+            const receiverDoc = await db.collection(C.USERS).doc(req.user!.userId).get()
+            await db.collection(C.PAYMENTS).add({
+              tuitionRecordId: tuitionRecord.id,
+              studentId: tuitionRecord.studentId,
+              studentName: tuitionRecord.studentName,
+              classId: tuitionRecord.classId,
+              amount: remaining,
+              paymentDate: now().slice(0, 10),
+              method: 'CASH',
+              receivedById: req.user!.userId,
+              receivedByName: receiverDoc.data()?.fullName ?? '',
+              notes: 'Xác nhận đóng đủ học phí qua checkbox',
+              createdAt: now(),
+            })
+          }
+          await db.collection(C.TUITION_RECORDS).doc(tuitionRecord.id).update({
+            status: 'PAID',
+            updatedAt: now(),
+          })
+          tuitionRecord.status = 'PAID'
+        } else {
+          const paySnap = await db.collection(C.PAYMENTS).where('tuitionRecordId', '==', tuitionRecord.id).get()
+          const batch = db.batch()
+          paySnap.docs.forEach(doc => batch.delete(doc.ref))
+          batch.update(db.collection(C.TUITION_RECORDS).doc(tuitionRecord.id), {
+            status: 'PENDING',
+            updatedAt: now(),
+          })
+          await batch.commit()
+          tuitionRecord.status = 'PENDING'
+        }
+      }
+
       res.json(tuitionRecord)
     } else {
       const result = await calculateTuitionForClass(classId, Number(month), Number(year))
