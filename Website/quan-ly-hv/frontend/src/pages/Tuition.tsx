@@ -149,18 +149,19 @@ export default function Tuition() {
 
       // Cập nhật ngầm ID phiếu vừa tạo từ server nếu có
       if (res.data?.id) {
-        const recId = res.data.id
+        const rec = res.data
+        const isPaidStatus = rec.status === 'PAID'
         setRows(prevRows =>
           prevRows.map(r => {
             if (r.studentId === row.studentId && r.classId === row.classId) {
               return {
                 ...r,
                 tuitionRecord: {
-                  ...r.tuitionRecord!,
-                  id: recId,
-                  status: newPaid ? 'PAID' : 'PENDING',
-                  paidAmount: newPaid ? r.finalAmount : 0,
-                  remainingAmount: newPaid ? 0 : r.finalAmount,
+                  id: rec.id,
+                  finalAmount: rec.finalAmount ?? r.finalAmount,
+                  status: rec.status,
+                  paidAmount: isPaidStatus ? (rec.finalAmount ?? r.finalAmount) : 0,
+                  remainingAmount: isPaidStatus ? 0 : (rec.finalAmount ?? r.finalAmount),
                 },
               }
             }
