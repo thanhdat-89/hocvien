@@ -10,7 +10,9 @@ import { useAuth } from '../hooks/useAuth'
 
 function fmt(date?: string | null) {
   if (!date) return '—'
+  if (date.includes('/')) return date
   const [y, m, d] = date.slice(0, 10).split('-')
+  if (!d || !m || !y) return date
   return `${d}/${m}/${y}`
 }
 
