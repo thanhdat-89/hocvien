@@ -1513,10 +1513,10 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
                             {r.tuitionRecord.remainingAmount > 0 && (
                               <button
                                 onClick={() => setPayingRow(r)}
-                                className="p-1 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded transition-all"
-                                title="Xác nhận đã thanh toán (thủ công)"
+                                className="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-700 text-[11px] font-bold hover:bg-emerald-500/20 transition-all"
+                                title="Xác nhận đã thanh toán"
                               >
-                                <span className="material-symbols-outlined text-[18px]">paid</span>
+                                Xác nhận thanh toán
                               </button>
                             )}
                           </div>
