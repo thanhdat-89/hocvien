@@ -134,35 +134,14 @@ export default function Tuition() {
     )
 
     try {
-      const res = await api.post('/tuition/calculate', {
+      await api.post('/tuition/calculate', {
         studentId: row.studentId,
         classId: row.classId,
         month,
         year,
         paid: newPaid,
       })
-
-      // Cập nhật ngầm ID phiếu vừa tạo từ server nếu có
-      if (res.data && res.data.id) {
-        const rec = res.data
-        setRows(prevRows =>
-          prevRows.map(r => {
-            if (r.studentId === row.studentId && r.classId === row.classId) {
-              return {
-                ...r,
-                tuitionRecord: {
-                  id: rec.id,
-                  finalAmount: rec.finalAmount ?? r.finalAmount,
-                  status: rec.status,
-                  paidAmount: newPaid ? (rec.finalAmount ?? r.finalAmount) : 0,
-                  remainingAmount: newPaid ? 0 : (rec.finalAmount ?? r.finalAmount),
-                },
-              }
-            }
-            return r
-          })
-        )
-      }
+      loadData()
     } catch (e: any) {
       showAlert({ title: 'Lỗi', message: e?.response?.data?.message || 'Cập nhật trạng thái thất bại' })
       loadData()
