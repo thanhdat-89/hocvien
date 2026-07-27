@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import TopBar from '../components/TopBar'
 import api from '../services/api'
 import * as XLSX from 'xlsx'
@@ -565,6 +566,13 @@ export default function Tuition() {
                           {isFirst && (
                             <td className="table-cell text-center align-top" rowSpan={span}>
                               <div className="inline-flex items-center gap-1">
+                                <Link
+                                  to={`/students/${r.studentId}`}
+                                  className="p-2 text-outline hover:text-primary hover:bg-primary/10 rounded-lg transition-all"
+                                  title={`Xem hồ sơ học viên ${r.studentName}`}
+                                >
+                                  <span className="material-symbols-outlined text-[20px]">visibility</span>
+                                </Link>
                                 <button
                                   onClick={() => copyShareLink(r.studentId)}
                                   className={`p-2 rounded-lg transition-all ${copiedId === r.studentId
