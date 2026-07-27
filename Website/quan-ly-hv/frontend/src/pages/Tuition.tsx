@@ -553,20 +553,31 @@ export default function Tuition() {
                               const isToggling = togglingKey === `${r.studentId}-${r.classId}`
 
                               return (
-                                <label className="inline-flex items-center gap-1.5 cursor-pointer select-none group">
-                                  <input
-                                    type="checkbox"
-                                    checked={isPaid}
-                                    disabled={isToggling}
-                                    onChange={() => handleTogglePaid(r, isPaid)}
-                                    className="w-4 h-4 rounded border-outline-variant text-primary focus:ring-2 focus:ring-primary/20 accent-primary cursor-pointer disabled:opacity-50"
-                                  />
+                                <button
+                                  type="button"
+                                  disabled={isToggling}
+                                  onClick={(e) => {
+                                    e.preventDefault()
+                                    e.stopPropagation()
+                                    handleTogglePaid(r, isPaid)
+                                  }}
+                                  className="inline-flex items-center gap-1.5 cursor-pointer select-none group focus:outline-none disabled:opacity-50"
+                                >
+                                  <div className={`w-4 h-4 rounded flex items-center justify-center transition-all ${
+                                    isPaid
+                                      ? 'bg-emerald-600 border border-emerald-600 text-white'
+                                      : 'border border-outline-variant bg-surface group-hover:border-primary'
+                                  }`}>
+                                    {isPaid && (
+                                      <span className="material-symbols-outlined text-[13px] font-black leading-none">check</span>
+                                    )}
+                                  </div>
                                   <span className={`text-xs font-bold transition-colors ${
                                     isPaid ? 'text-emerald-600' : 'text-outline group-hover:text-on-surface'
                                   }`}>
                                     {isPaid ? 'Đã đóng' : 'Chưa đóng'}
                                   </span>
-                                </label>
+                                </button>
                               )
                             })()}
                           </td>
