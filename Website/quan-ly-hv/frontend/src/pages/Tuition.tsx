@@ -63,7 +63,12 @@ export default function Tuition() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { loadData() }, [month, year])
+  useEffect(() => {
+    loadData()
+    const handleFocus = () => { loadData() }
+    window.addEventListener('focus', handleFocus)
+    return () => window.removeEventListener('focus', handleFocus)
+  }, [month, year])
 
   // Bỏ classFilter nếu lớp không thuộc khối đang chọn
   useEffect(() => {
@@ -634,7 +639,9 @@ export default function Tuition() {
                       <td className="table-cell text-center text-xs text-outline">
                         {filtered.filter(r => r.tuitionRecord).length}/{filtered.length}
                       </td>
-                      <td className="table-cell" />
+                      <td className="table-cell text-center text-xs font-bold text-emerald-600">
+                        {filtered.filter(r => r.tuitionRecord && (r.tuitionRecord.status === 'PAID' || r.tuitionRecord.remainingAmount === 0)).length}/{filtered.length} đã đóng
+                      </td>
                       <td className="table-cell" />
                     </tr>
                   </tfoot>
