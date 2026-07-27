@@ -388,6 +388,73 @@ router.post('/calculate-bulk', requireRole('ADMIN', 'STAFF'), async (req: AuthRe
   } catch (err) { next(err) }
 })
 
+// POST /api/tuition/toggle-paid — Toggle checkbox đóng học phí
+router.post('/toggle-paid', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { studentId, classId, month, year, paid } = req.body as {
+      studentId: string; classId: string; month: number; year: number; paid: boolean
+    }
+    if (!studentId || !classId || !month || !year) {
+      res.status(400).json({ message: 'Cần studentId, classId, month, year' })
+      return
+    }
+
+    let record: TuitionRecord & { id: string }
+    const existingSnap = await db.collection(C.TUITION_RECORDS)
+      .where('studentId', '==', studentId)
+      .where('classId', '==', classId)
+      .where('billingMonth', '==', Number(month))
+      .where('billingYear', '==', Number(year))
+      .limit(1)
+      .get()
+
+    if (!existingSnap.empty) {
+      record = toObj<TuitionRecord>(existingSnap.docs[0])
+    } else {
+      const calcResult = await calculateTuitionForStudent(studentId, classId, Number(month), Number(year))
+      record = calcResult.tuitionRecord
+    }
+
+    if (paid) {
+      const { remaining } = await getPaymentStatus(record.id)
+      if (remaining > 0) {
+        const receiverDoc = await db.collection(C.USERS).doc(req.user!.userId).get()
+        await db.collection(C.PAYMENTS).add({
+          tuitionRecordId: record.id,
+          studentId: record.studentId,
+          studentName: record.studentName,
+          classId: record.classId,
+          amount: remaining,
+          paymentDate: now().slice(0, 10),
+          method: 'CASH',
+          receivedById: req.user!.userId,
+          receivedByName: receiverDoc.data()?.fullName ?? '',
+          notes: 'Xác nhận đóng đủ học phí qua checkbox',
+          createdAt: now(),
+        })
+      }
+      await db.collection(C.TUITION_RECORDS).doc(record.id).update({
+        status: 'PAID',
+        updatedAt: now(),
+      })
+    } else {
+      const paySnap = await db.collection(C.PAYMENTS).where('tuitionRecordId', '==', record.id).get()
+      const batch = db.batch()
+      paySnap.docs.forEach(doc => batch.delete(doc.ref))
+      batch.update(db.collection(C.TUITION_RECORDS).doc(record.id), {
+        status: 'PENDING',
+        updatedAt: now(),
+      })
+      await batch.commit()
+    }
+
+    const finalStatus = await getPaymentStatus(record.id)
+    res.json({ recordId: record.id, paid, finalStatus })
+  } catch (err) {
+    next(err)
+  }
+})
+
 // POST /api/tuition/calculate
 router.post('/calculate', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {

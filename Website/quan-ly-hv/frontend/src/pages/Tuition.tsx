@@ -101,11 +101,53 @@ export default function Tuition() {
   const years = Array.from({ length: 4 }, (_, i) => thisYear - 1 + i)
 
   const [creatingRow, setCreatingRow] = useState<string | null>(null)
+  const [togglingKey, setTogglingKey] = useState<string | null>(null)
   const [bulkCreating, setBulkCreating] = useState(false)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [sendingZnsId, setSendingZnsId] = useState<string | null>(null)
   const showAlert = useAlert()
   const showConfirm = useConfirm()
+
+  const handleTogglePaid = async (row: ScheduleRow, currentPaid: boolean) => {
+    const newPaid = !currentPaid
+    const key = `${row.studentId}-${row.classId}`
+    setTogglingKey(key)
+
+    // Optimistic UI update
+    setRows(prevRows =>
+      prevRows.map(r => {
+        if (r.studentId === row.studentId && r.classId === row.classId) {
+          return {
+            ...r,
+            tuitionRecord: {
+              id: r.tuitionRecord?.id || 'temp',
+              finalAmount: r.finalAmount,
+              status: newPaid ? 'PAID' : 'PENDING',
+              paidAmount: newPaid ? r.finalAmount : 0,
+              remainingAmount: newPaid ? 0 : r.finalAmount,
+            },
+          }
+        }
+        return r
+      })
+    )
+
+    try {
+      await api.post('/tuition/toggle-paid', {
+        studentId: row.studentId,
+        classId: row.classId,
+        month,
+        year,
+        paid: newPaid,
+      })
+      loadData()
+    } catch (e: any) {
+      showAlert({ title: 'Lỗi', message: e?.response?.data?.message || 'Cập nhật trạng thái thất bại' })
+      loadData()
+    } finally {
+      setTogglingKey(null)
+    }
+  }
 
   const copyShareLink = async (studentId: string) => {
     const url = buildParentUrl(studentId)
@@ -474,17 +516,30 @@ export default function Tuition() {
                             )}
                           </td>
                           <td className="table-cell text-center text-xs">
-                            {!r.tuitionRecord ? (
-                              <span className="text-outline">—</span>
-                            ) : r.tuitionRecord.status === 'PAID' || r.tuitionRecord.remainingAmount === 0 ? (
-                              <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 font-bold">Đã đủ</span>
-                            ) : r.tuitionRecord.paidAmount > 0 ? (
-                              <span className="px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-700 font-bold" title={`${r.tuitionRecord.paidAmount.toLocaleString('vi-VN')}đ / ${r.tuitionRecord.finalAmount.toLocaleString('vi-VN')}đ`}>
-                                Một phần
-                              </span>
-                            ) : (
-                              <span className="px-2.5 py-0.5 rounded-full bg-rose-500/10 text-rose-700 font-bold">Chưa đóng</span>
-                            )}
+                            {(() => {
+                              const isPaid = !!(
+                                r.tuitionRecord &&
+                                (r.tuitionRecord.status === 'PAID' || r.tuitionRecord.remainingAmount === 0)
+                              )
+                              const isToggling = togglingKey === `${r.studentId}-${r.classId}`
+
+                              return (
+                                <label className="inline-flex items-center gap-1.5 cursor-pointer select-none group">
+                                  <input
+                                    type="checkbox"
+                                    checked={isPaid}
+                                    disabled={isToggling}
+                                    onChange={() => handleTogglePaid(r, isPaid)}
+                                    className="w-4 h-4 rounded border-outline-variant text-primary focus:ring-2 focus:ring-primary/20 accent-primary cursor-pointer disabled:opacity-50"
+                                  />
+                                  <span className={`text-xs font-bold transition-colors ${
+                                    isPaid ? 'text-emerald-600' : 'text-outline group-hover:text-on-surface'
+                                  }`}>
+                                    {isPaid ? 'Đã đóng' : 'Chưa đóng'}
+                                  </span>
+                                </label>
+                              )
+                            })()}
                           </td>
                           {isFirst && (
                             <td className="table-cell text-center align-top" rowSpan={span}>
