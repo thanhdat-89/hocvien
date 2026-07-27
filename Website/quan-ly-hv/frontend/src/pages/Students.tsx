@@ -418,6 +418,7 @@ export default function Students() {
 
   const copyShareLink = async (student: Student) => {
     const url = buildParentUrl(student.id)
+    window.open(url, '_blank', 'noopener,noreferrer')
     try {
       await navigator.clipboard.writeText(url)
       setCopiedId(student.id)

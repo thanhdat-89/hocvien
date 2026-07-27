@@ -178,6 +178,7 @@ export default function Tuition() {
 
   const copyShareLink = async (studentId: string) => {
     const url = buildParentUrl(studentId)
+    window.open(url, '_blank', 'noopener,noreferrer')
     try {
       await navigator.clipboard.writeText(url)
       setCopiedId(studentId)

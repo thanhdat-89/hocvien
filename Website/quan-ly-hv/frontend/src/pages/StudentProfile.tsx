@@ -2240,6 +2240,7 @@ function ShareLinkBox({ studentId }: { studentId: string }) {
   const url = buildParentUrl(studentId)
 
   const copy = async () => {
+    window.open(url, '_blank', 'noopener,noreferrer')
     try {
       await navigator.clipboard.writeText(url)
       setCopied(true)
