@@ -388,6 +388,16 @@ router.post('/calculate-bulk', requireRole('ADMIN', 'STAFF'), async (req: AuthRe
   } catch (err) { next(err) }
 })
 
+async function getReceiverName(userId?: string): Promise<string> {
+  if (!userId || typeof userId !== 'string' || !userId.trim()) return 'Quản trị viên'
+  try {
+    const doc = await db.collection(C.USERS).doc(userId).get()
+    return doc.exists ? (doc.data()?.fullName || 'Quản trị viên') : 'Quản trị viên'
+  } catch {
+    return 'Quản trị viên'
+  }
+}
+
 // POST /api/tuition/toggle-paid — Toggle checkbox đóng học phí
 router.post('/toggle-paid', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -418,7 +428,7 @@ router.post('/toggle-paid', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req
     if (paid) {
       const { remaining } = await getPaymentStatus(record.id)
       if (remaining > 0) {
-        const receiverDoc = await db.collection(C.USERS).doc(req.user!.userId).get()
+        const receivedByName = await getReceiverName(req.user?.userId)
         await db.collection(C.PAYMENTS).add({
           tuitionRecordId: record.id,
           studentId: record.studentId,
@@ -427,25 +437,19 @@ router.post('/toggle-paid', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req
           amount: remaining,
           paymentDate: now().slice(0, 10),
           method: 'CASH',
-          receivedById: req.user!.userId,
-          receivedByName: receiverDoc.data()?.fullName ?? '',
+          receivedById: req.user?.userId || 'system',
+          receivedByName,
           notes: 'Xác nhận đóng đủ học phí qua checkbox',
           createdAt: now(),
         })
       }
-      await db.collection(C.TUITION_RECORDS).doc(record.id).update({
-        status: 'PAID',
-        updatedAt: now(),
-      })
+      await refreshTuitionStatus(record.id)
     } else {
       const paySnap = await db.collection(C.PAYMENTS).where('tuitionRecordId', '==', record.id).get()
       const batch = db.batch()
       paySnap.docs.forEach(doc => batch.delete(doc.ref))
-      batch.update(db.collection(C.TUITION_RECORDS).doc(record.id), {
-        status: 'PENDING',
-        updatedAt: now(),
-      })
       await batch.commit()
+      await refreshTuitionStatus(record.id)
     }
 
     const finalStatus = await getPaymentStatus(record.id)
@@ -468,12 +472,7 @@ router.post('/calculate', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: 
         if (paid) {
           const { remaining } = await getPaymentStatus(tuitionRecord.id)
           if (remaining > 0) {
-            let receivedByName = 'Quản trị viên'
-            if (req.user?.userId) {
-              const receiverDoc = await db.collection(C.USERS).doc(req.user.userId).get()
-              if (receiverDoc.exists) receivedByName = receiverDoc.data()?.fullName || 'Quản trị viên'
-            }
-
+            const receivedByName = await getReceiverName(req.user?.userId)
             await db.collection(C.PAYMENTS).add({
               tuitionRecordId: tuitionRecord.id,
               studentId: tuitionRecord.studentId,
@@ -520,8 +519,7 @@ router.post('/:id/payment', requireRole('ADMIN', 'STAFF'), async (req: AuthReque
     if (!recordDoc.exists) { res.status(404).json({ message: 'Không tìm thấy phiếu học phí' }); return }
     const record = recordDoc.data() as TuitionRecord
 
-    // Lấy tên nhân viên nhận tiền
-    const receiverDoc = await db.collection(C.USERS).doc(req.user!.userId).get()
+    const receivedByName = await getReceiverName(req.user?.userId)
 
     const paymentData: Omit<Payment, 'id'> = {
       tuitionRecordId,
@@ -531,8 +529,8 @@ router.post('/:id/payment', requireRole('ADMIN', 'STAFF'), async (req: AuthReque
       amount: Number(amount),
       paymentDate: paymentDate || now().slice(0, 10),
       method: (method || 'CASH') as Payment['method'],
-      receivedById: req.user!.userId,
-      receivedByName: receiverDoc.data()?.fullName as string ?? '',
+      receivedById: req.user?.userId || 'system',
+      receivedByName,
       notes,
       createdAt: now(),
     }
