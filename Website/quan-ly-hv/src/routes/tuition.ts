@@ -468,7 +468,12 @@ router.post('/calculate', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: 
         if (paid) {
           const { remaining } = await getPaymentStatus(tuitionRecord.id)
           if (remaining > 0) {
-            const receiverDoc = await db.collection(C.USERS).doc(req.user!.userId).get()
+            let receivedByName = 'Quản trị viên'
+            if (req.user?.userId) {
+              const receiverDoc = await db.collection(C.USERS).doc(req.user.userId).get()
+              if (receiverDoc.exists) receivedByName = receiverDoc.data()?.fullName || 'Quản trị viên'
+            }
+
             await db.collection(C.PAYMENTS).add({
               tuitionRecordId: tuitionRecord.id,
               studentId: tuitionRecord.studentId,
@@ -477,26 +482,20 @@ router.post('/calculate', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: 
               amount: remaining,
               paymentDate: now().slice(0, 10),
               method: 'CASH',
-              receivedById: req.user!.userId,
-              receivedByName: receiverDoc.data()?.fullName ?? '',
+              receivedById: req.user?.userId || 'system',
+              receivedByName,
               notes: 'Xác nhận đóng đủ học phí qua checkbox',
               createdAt: now(),
             })
           }
-          await db.collection(C.TUITION_RECORDS).doc(tuitionRecord.id).update({
-            status: 'PAID',
-            updatedAt: now(),
-          })
+          await refreshTuitionStatus(tuitionRecord.id)
           tuitionRecord.status = 'PAID'
         } else {
           const paySnap = await db.collection(C.PAYMENTS).where('tuitionRecordId', '==', tuitionRecord.id).get()
           const batch = db.batch()
           paySnap.docs.forEach(doc => batch.delete(doc.ref))
-          batch.update(db.collection(C.TUITION_RECORDS).doc(tuitionRecord.id), {
-            status: 'PENDING',
-            updatedAt: now(),
-          })
           await batch.commit()
+          await refreshTuitionStatus(tuitionRecord.id)
           tuitionRecord.status = 'PENDING'
         }
       }
