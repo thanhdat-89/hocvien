@@ -65,9 +65,6 @@ export default function Tuition() {
 
   useEffect(() => {
     loadData()
-    const handleFocus = () => { loadData() }
-    window.addEventListener('focus', handleFocus)
-    return () => window.removeEventListener('focus', handleFocus)
   }, [month, year])
 
   // Bỏ classFilter nếu lớp không thuộc khối đang chọn
@@ -119,7 +116,7 @@ export default function Tuition() {
     const key = `${row.studentId}-${row.classId}`
     setTogglingKey(key)
 
-    // 1. Optimistic UI update in real-time
+    // 1. Cập nhật giao diện lập tức (0ms Real-time)
     setRows(prevRows =>
       prevRows.map(r => {
         if (r.studentId === row.studentId && r.classId === row.classId) {
@@ -139,7 +136,7 @@ export default function Tuition() {
     )
 
     try {
-      const res = await api.post('/tuition/calculate', {
+      const res = await api.post('/tuition/toggle-paid', {
         studentId: row.studentId,
         classId: row.classId,
         month,
@@ -147,21 +144,20 @@ export default function Tuition() {
         paid: newPaid,
       })
 
-      // Cập nhật ngầm ID phiếu vừa tạo từ server nếu có
-      if (res.data?.id) {
-        const rec = res.data
-        const isPaidStatus = rec.status === 'PAID'
+      if (res.data && res.data.recordId) {
+        const { recordId, finalStatus } = res.data
+        const isPaidStatus = finalStatus?.status === 'PAID' || newPaid
         setRows(prevRows =>
           prevRows.map(r => {
             if (r.studentId === row.studentId && r.classId === row.classId) {
               return {
                 ...r,
                 tuitionRecord: {
-                  id: rec.id,
-                  finalAmount: rec.finalAmount ?? r.finalAmount,
-                  status: rec.status,
-                  paidAmount: isPaidStatus ? (rec.finalAmount ?? r.finalAmount) : 0,
-                  remainingAmount: isPaidStatus ? 0 : (rec.finalAmount ?? r.finalAmount),
+                  id: recordId,
+                  finalAmount: r.finalAmount,
+                  status: isPaidStatus ? 'PAID' : 'PENDING',
+                  paidAmount: isPaidStatus ? r.finalAmount : 0,
+                  remainingAmount: isPaidStatus ? 0 : r.finalAmount,
                 },
               }
             }
@@ -170,6 +166,7 @@ export default function Tuition() {
         )
       }
     } catch (e: any) {
+      console.error('Toggle paid error:', e)
       showAlert({ title: 'Lỗi', message: e?.response?.data?.message || 'Cập nhật trạng thái thất bại' })
       loadData()
     } finally {
