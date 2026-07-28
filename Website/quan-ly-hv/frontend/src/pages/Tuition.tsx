@@ -104,74 +104,62 @@ export default function Tuition() {
   const years = Array.from({ length: 4 }, (_, i) => thisYear - 1 + i)
 
   const [creatingRow, setCreatingRow] = useState<string | null>(null)
-  const [togglingKey, setTogglingKey] = useState<string | null>(null)
   const [bulkCreating, setBulkCreating] = useState(false)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [sendingZnsId, setSendingZnsId] = useState<string | null>(null)
+
+  // Toggles local state
+  const [pendingToggles, setPendingToggles] = useState<Record<string, boolean>>({})
+  const [isSavingToggles, setIsSavingToggles] = useState(false)
+
   const showAlert = useAlert()
   const showConfirm = useConfirm()
 
-  const handleTogglePaid = async (row: ScheduleRow, currentPaid: boolean) => {
-    const newPaid = !currentPaid
+  const handleTogglePaid = (row: ScheduleRow, currentPaid: boolean) => {
     const key = `${row.studentId}-${row.classId}`
-    setTogglingKey(key)
-
-    // 1. Cập nhật giao diện lập tức (0ms Real-time)
-    setRows(prevRows =>
-      prevRows.map(r => {
-        if (r.studentId === row.studentId && r.classId === row.classId) {
-          return {
-            ...r,
-            tuitionRecord: {
-              id: r.tuitionRecord?.id || 'temp',
-              finalAmount: r.finalAmount,
-              status: newPaid ? 'PAID' : 'PENDING',
-              paidAmount: newPaid ? r.finalAmount : 0,
-              remainingAmount: newPaid ? 0 : r.finalAmount,
-            },
-          }
-        }
-        return r
-      })
-    )
-
-    try {
-      const res = await api.post('/tuition/calculate', {
-        studentId: row.studentId,
-        classId: row.classId,
-        month,
-        year,
-        paid: newPaid,
-      })
-
-      if (res.data?.id) {
-        const rec = res.data
-        const isPaidStatus = rec.status === 'PAID' || newPaid
-        setRows(prevRows =>
-          prevRows.map(r => {
-            if (r.studentId === row.studentId && r.classId === row.classId) {
-              return {
-                ...r,
-                tuitionRecord: {
-                  id: rec.id,
-                  finalAmount: rec.finalAmount ?? r.finalAmount,
-                  status: isPaidStatus ? 'PAID' : 'PENDING',
-                  paidAmount: isPaidStatus ? (rec.finalAmount ?? r.finalAmount) : 0,
-                  remainingAmount: isPaidStatus ? 0 : (rec.finalAmount ?? r.finalAmount),
-                },
-              }
-            }
-            return r
-          })
-        )
+    setPendingToggles(prev => {
+      const next = { ...prev }
+      if (next[key] !== undefined) {
+        delete next[key]
+      } else {
+        next[key] = !currentPaid
       }
+      return next
+    })
+  }
+
+  const handleSaveToggles = async () => {
+    const keys = Object.keys(pendingToggles)
+    if (keys.length === 0) return
+
+    setIsSavingToggles(true)
+    let hasError = false
+    try {
+      await Promise.all(keys.map(async key => {
+        const [studentId, classId] = key.split('-')
+        await api.post('/tuition/calculate', {
+          studentId,
+          classId,
+          month,
+          year,
+          paid: pendingToggles[key],
+        })
+      }))
     } catch (e: any) {
-      console.error('Toggle paid error:', e)
-      showAlert({ title: 'Lỗi', message: e?.response?.data?.message || 'Cập nhật trạng thái thất bại' })
-      loadData()
+      console.error('Lỗi khi lưu hàng loạt:', e)
+      showAlert({ title: 'Lỗi', message: 'Có lỗi xảy ra khi lưu một số học viên. Vui lòng thử lại.' })
+      hasError = true
     } finally {
-      setTogglingKey(null)
+      if (!hasError) {
+        setPendingToggles({})
+      }
+      setIsSavingToggles(false)
+      loadData()
     }
+  }
+
+  const handleCancelToggles = () => {
+    setPendingToggles({})
   }
 
   const copyShareLink = async (studentId: string) => {
@@ -543,26 +531,27 @@ export default function Tuition() {
                           </td>
                           <td className="table-cell text-center text-xs">
                             {(() => {
-                              const isPaid = !!(
+                              const isOriginalPaid = !!(
                                 r.tuitionRecord &&
                                 (r.tuitionRecord.status === 'PAID' || r.tuitionRecord.remainingAmount === 0)
                               )
-                              const isToggling = togglingKey === `${r.studentId}-${r.classId}`
+                              const key = `${r.studentId}-${r.classId}`
+                              const isPaid = pendingToggles[key] !== undefined ? pendingToggles[key] : isOriginalPaid
+                              const isChanged = pendingToggles[key] !== undefined
 
                               return (
                                 <button
                                   type="button"
-                                  disabled={isToggling}
                                   onClick={(e) => {
                                     e.preventDefault()
                                     e.stopPropagation()
-                                    handleTogglePaid(r, isPaid)
+                                    handleTogglePaid(r, isOriginalPaid)
                                   }}
-                                  className="inline-flex items-center gap-1.5 cursor-pointer select-none group focus:outline-none disabled:opacity-50"
+                                  className={`inline-flex items-center gap-1.5 cursor-pointer select-none group focus:outline-none transition-all ${isChanged ? 'opacity-80 scale-105' : ''}`}
                                 >
                                   <div className={`w-4 h-4 rounded flex items-center justify-center transition-all ${
                                     isPaid
-                                      ? 'bg-emerald-600 border border-emerald-600 text-white'
+                                      ? (isChanged ? 'bg-primary border border-primary text-on-primary' : 'bg-emerald-600 border border-emerald-600 text-white')
                                       : 'border border-outline-variant bg-surface group-hover:border-primary'
                                   }`}>
                                     {isPaid && (
@@ -570,7 +559,7 @@ export default function Tuition() {
                                     )}
                                   </div>
                                   <span className={`text-xs font-bold transition-colors ${
-                                    isPaid ? 'text-emerald-600' : 'text-outline group-hover:text-on-surface'
+                                    isPaid ? (isChanged ? 'text-primary' : 'text-emerald-600') : 'text-outline group-hover:text-on-surface'
                                   }`}>
                                     {isPaid ? 'Đã đóng' : 'Chưa đóng'}
                                   </span>
@@ -662,6 +651,42 @@ export default function Tuition() {
         </div>
 
       </div>
+      {Object.keys(pendingToggles).length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-surface-container-highest shadow-xl border border-outline-variant/30 px-6 py-4 rounded-2xl z-50 flex items-center gap-6 animate-in slide-in-from-bottom-5">
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-primary text-[20px]">info</span>
+            <span className="text-sm font-semibold text-on-surface">
+              Đang có {Object.keys(pendingToggles).length} thay đổi chưa lưu
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleCancelToggles}
+              disabled={isSavingToggles}
+              className="px-4 py-2 text-sm font-semibold text-secondary hover:bg-secondary/10 rounded-xl transition-colors disabled:opacity-50"
+            >
+              Hủy
+            </button>
+            <button
+              onClick={handleSaveToggles}
+              disabled={isSavingToggles}
+              className="px-4 py-2 text-sm font-semibold bg-primary text-on-primary hover:bg-primary/90 rounded-xl shadow-md transition-all flex items-center gap-2 disabled:opacity-50"
+            >
+              {isSavingToggles ? (
+                <>
+                  <span className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>
+                  Đang lưu...
+                </>
+              ) : (
+                <>
+                  <span className="material-symbols-outlined text-[16px]">save</span>
+                  Áp dụng thay đổi
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
