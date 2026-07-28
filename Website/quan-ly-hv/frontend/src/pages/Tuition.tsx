@@ -179,7 +179,8 @@ export default function Tuition() {
       }))
     } catch (e: any) {
       console.error('Lỗi khi lưu hàng loạt:', e)
-      showAlert({ title: 'Lỗi', message: 'Có lỗi xảy ra khi lưu một số học viên. Vui lòng thử lại.' })
+      const serverMsg = e?.response?.data?.message || e?.message || 'Lỗi không xác định'
+      showAlert({ title: 'Lỗi', message: `Chi tiết: ${serverMsg}` })
       hasError = true
     } finally {
       if (!hasError) {
