@@ -116,7 +116,7 @@ export default function Tuition() {
   const showConfirm = useConfirm()
 
   const handleTogglePaid = (row: ScheduleRow, currentPaid: boolean) => {
-    const key = `${row.studentId}-${row.classId}`
+    const key = `${row.studentId}___${row.classId}`
     setPendingToggles(prev => {
       const next = { ...prev }
       if (next[key] !== undefined) {
@@ -136,7 +136,7 @@ export default function Tuition() {
     let hasError = false
     try {
       await Promise.all(keys.map(async key => {
-        const [studentId, classId] = key.split('-')
+        const [studentId, classId] = key.split('___')
         await api.post('/tuition/toggle-paid', {
           studentId,
           classId,
@@ -147,7 +147,7 @@ export default function Tuition() {
       }))
       // Optimistic update để tránh lỗi stale index từ Firestore
       setRows(prevRows => prevRows.map(r => {
-        const k = `${r.studentId}-${r.classId}`
+        const k = `${r.studentId}___${r.classId}`
         if (pendingToggles[k] !== undefined) {
           const newPaid = pendingToggles[k]
           return {
@@ -556,7 +556,7 @@ export default function Tuition() {
                                 r.tuitionRecord &&
                                 (r.tuitionRecord.status === 'PAID' || r.tuitionRecord.remainingAmount === 0)
                               )
-                              const key = `${r.studentId}-${r.classId}`
+                              const key = `${r.studentId}___${r.classId}`
                               const isPaid = pendingToggles[key] !== undefined ? pendingToggles[key] : isOriginalPaid
                               const isChanged = pendingToggles[key] !== undefined
 
