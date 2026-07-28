@@ -404,6 +404,7 @@ router.post('/toggle-paid', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req
     const { studentId, classId, month, year, paid, tuitionRecordId } = req.body as {
       studentId: string; classId: string; month: number; year: number; paid: boolean; tuitionRecordId?: string
     }
+    console.log('[toggle-paid] REQUEST:', JSON.stringify({ studentId, classId, month, year, paid, tuitionRecordId }))
     if (!studentId || !classId || !month || !year) {
       res.status(400).json({ message: 'Cần studentId, classId, month, year' })
       return
@@ -473,7 +474,8 @@ router.post('/toggle-paid', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req
 
     const finalStatus = await getPaymentStatus(record.id)
     res.json({ recordId: record.id, paid, finalStatus })
-  } catch (err) {
+  } catch (err: any) {
+    console.error('[toggle-paid] ERROR:', err?.message || err)
     next(err)
   }
 })
