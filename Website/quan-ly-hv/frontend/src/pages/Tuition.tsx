@@ -136,7 +136,7 @@ export default function Tuition() {
     )
 
     try {
-      const res = await api.post('/tuition/toggle-paid', {
+      const res = await api.post('/tuition/calculate', {
         studentId: row.studentId,
         classId: row.classId,
         month,
@@ -144,20 +144,20 @@ export default function Tuition() {
         paid: newPaid,
       })
 
-      if (res.data && res.data.recordId) {
-        const { recordId, finalStatus } = res.data
-        const isPaidStatus = finalStatus?.status === 'PAID' || newPaid
+      if (res.data?.id) {
+        const rec = res.data
+        const isPaidStatus = rec.status === 'PAID' || newPaid
         setRows(prevRows =>
           prevRows.map(r => {
             if (r.studentId === row.studentId && r.classId === row.classId) {
               return {
                 ...r,
                 tuitionRecord: {
-                  id: recordId,
-                  finalAmount: r.finalAmount,
+                  id: rec.id,
+                  finalAmount: rec.finalAmount ?? r.finalAmount,
                   status: isPaidStatus ? 'PAID' : 'PENDING',
-                  paidAmount: isPaidStatus ? r.finalAmount : 0,
-                  remainingAmount: isPaidStatus ? 0 : r.finalAmount,
+                  paidAmount: isPaidStatus ? (rec.finalAmount ?? r.finalAmount) : 0,
+                  remainingAmount: isPaidStatus ? 0 : (rec.finalAmount ?? r.finalAmount),
                 },
               }
             }
