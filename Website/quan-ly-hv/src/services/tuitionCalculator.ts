@@ -295,6 +295,9 @@ export async function refreshTuitionStatus(tuitionRecordId: string): Promise<voi
   else if (totalPaid > 0) status = 'PARTIAL'
 
   await db.collection(C.TUITION_RECORDS).doc(tuitionRecordId).update({
-    status, updatedAt: new Date().toISOString(),
+    status,
+    paidAmount: totalPaid,
+    remainingAmount: Math.max(0, finalAmount - totalPaid),
+    updatedAt: new Date().toISOString(),
   })
 }

@@ -1491,7 +1491,16 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
                       <td className="py-3 text-center">
                         {r.tuitionRecord ? (
                           <div className="flex items-center justify-center gap-2">
-                            <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 text-[11px] font-bold">Đã tạo</span>
+                            {r.tuitionRecord.remainingAmount === 0 || r.tuitionRecord.status === 'PAID' ? (
+                              <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 text-[11px] font-bold inline-flex items-center gap-1">
+                                <span className="material-symbols-outlined text-[13px]">check_circle</span>
+                                Đã đóng đủ
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-700 text-[11px] font-bold">
+                                Còn nợ ({fmtMoney(r.tuitionRecord.remainingAmount)})
+                              </span>
+                            )}
                             <button
                               onClick={() => createRecord(r)}
                               disabled={busy}
