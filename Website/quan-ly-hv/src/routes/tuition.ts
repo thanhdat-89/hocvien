@@ -475,9 +475,9 @@ router.post('/calculate', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: 
             const receivedByName = await getReceiverName(req.user?.userId)
             await db.collection(C.PAYMENTS).add({
               tuitionRecordId: tuitionRecord.id,
-              studentId: tuitionRecord.studentId,
-              studentName: tuitionRecord.studentName,
-              classId: tuitionRecord.classId,
+              studentId: tuitionRecord.studentId || studentId,
+              studentName: tuitionRecord.studentName || 'Học viên',
+              classId: tuitionRecord.classId || classId,
               amount: remaining,
               paymentDate: now().slice(0, 10),
               method: 'CASH',
