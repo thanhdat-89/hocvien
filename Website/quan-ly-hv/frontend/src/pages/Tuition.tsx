@@ -115,6 +115,9 @@ export default function Tuition() {
   const showAlert = useAlert()
   const showConfirm = useConfirm()
 
+  // pendingToggleData stores {paid, tuitionRecordId} per key
+  const [pendingToggleData, setPendingToggleData] = useState<Record<string, { paid: boolean; tuitionRecordId?: string }>>({})
+
   const handleTogglePaid = (row: ScheduleRow, currentPaid: boolean) => {
     const key = `${row.studentId}___${row.classId}`
     setPendingToggles(prev => {
@@ -123,6 +126,15 @@ export default function Tuition() {
         delete next[key]
       } else {
         next[key] = !currentPaid
+      }
+      return next
+    })
+    setPendingToggleData(prev => {
+      const next = { ...prev }
+      if (next[key]) {
+        delete next[key]
+      } else {
+        next[key] = { paid: !currentPaid, tuitionRecordId: row.tuitionRecord?.id }
       }
       return next
     })
@@ -137,12 +149,14 @@ export default function Tuition() {
     try {
       await Promise.all(keys.map(async key => {
         const [studentId, classId] = key.split('___')
+        const data = pendingToggleData[key]
         await api.post('/tuition/toggle-paid', {
           studentId,
           classId,
           month,
           year,
           paid: pendingToggles[key],
+          tuitionRecordId: data?.tuitionRecordId || undefined,
         })
       }))
       // Optimistic update để tránh lỗi stale index từ Firestore
@@ -170,6 +184,7 @@ export default function Tuition() {
     } finally {
       if (!hasError) {
         setPendingToggles({})
+        setPendingToggleData({})
       }
       setIsSavingToggles(false)
       // Delay loadData để chờ Firestore index cập nhật xong
@@ -181,6 +196,7 @@ export default function Tuition() {
 
   const handleCancelToggles = () => {
     setPendingToggles({})
+    setPendingToggleData({})
   }
 
   const copyShareLink = async (studentId: string) => {

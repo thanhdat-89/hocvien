@@ -401,8 +401,8 @@ async function getReceiverName(userId?: string): Promise<string> {
 // POST /api/tuition/toggle-paid — Toggle checkbox đóng học phí
 router.post('/toggle-paid', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { studentId, classId, month, year, paid } = req.body as {
-      studentId: string; classId: string; month: number; year: number; paid: boolean
+    const { studentId, classId, month, year, paid, tuitionRecordId } = req.body as {
+      studentId: string; classId: string; month: number; year: number; paid: boolean; tuitionRecordId?: string
     }
     if (!studentId || !classId || !month || !year) {
       res.status(400).json({ message: 'Cần studentId, classId, month, year' })
@@ -410,19 +410,38 @@ router.post('/toggle-paid', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req
     }
 
     let record: TuitionRecord & { id: string }
-    const existingSnap = await db.collection(C.TUITION_RECORDS)
-      .where('studentId', '==', studentId)
-      .where('classId', '==', classId)
-      .where('billingMonth', '==', Number(month))
-      .where('billingYear', '==', Number(year))
-      .limit(1)
-      .get()
 
-    if (!existingSnap.empty) {
-      record = toObj<TuitionRecord>(existingSnap.docs[0])
+    // 1. Ưu tiên dùng tuitionRecordId nếu frontend gửi lên
+    if (tuitionRecordId) {
+      const doc = await db.collection(C.TUITION_RECORDS).doc(tuitionRecordId).get()
+      if (doc.exists) {
+        record = { id: doc.id, ...doc.data() } as TuitionRecord & { id: string }
+      } else {
+        res.status(404).json({ message: 'Không tìm thấy phiếu học phí' })
+        return
+      }
     } else {
-      const calcResult = await calculateTuitionForStudent(studentId, classId, Number(month), Number(year))
-      record = calcResult.tuitionRecord
+      // 2. Fallback: query by studentId/classId/month/year
+      const existingSnap = await db.collection(C.TUITION_RECORDS)
+        .where('studentId', '==', studentId)
+        .where('classId', '==', classId)
+        .where('billingMonth', '==', Number(month))
+        .where('billingYear', '==', Number(year))
+        .limit(1)
+        .get()
+
+      if (!existingSnap.empty) {
+        record = toObj<TuitionRecord>(existingSnap.docs[0])
+      } else {
+        // 3. Cuối cùng mới thử tạo mới qua calculateTuitionForStudent
+        try {
+          const calcResult = await calculateTuitionForStudent(studentId, classId, Number(month), Number(year))
+          record = calcResult.tuitionRecord
+        } catch (calcErr: any) {
+          res.status(400).json({ message: calcErr.message || 'Không thể tạo phiếu học phí cho học viên này' })
+          return
+        }
+      }
     }
 
     if (paid) {
