@@ -431,9 +431,9 @@ router.post('/toggle-paid', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req
         const receivedByName = await getReceiverName(req.user?.userId)
         await db.collection(C.PAYMENTS).add({
           tuitionRecordId: record.id,
-          studentId: record.studentId,
-          studentName: record.studentName,
-          classId: record.classId,
+          studentId: record.studentId || studentId,
+          studentName: record.studentName || 'Học viên',
+          classId: record.classId || classId,
           amount: remaining,
           paymentDate: now().slice(0, 10),
           method: 'CASH',

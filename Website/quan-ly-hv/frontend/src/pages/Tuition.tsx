@@ -137,13 +137,31 @@ export default function Tuition() {
     try {
       await Promise.all(keys.map(async key => {
         const [studentId, classId] = key.split('-')
-        await api.post('/tuition/calculate', {
+        await api.post('/tuition/toggle-paid', {
           studentId,
           classId,
           month,
           year,
           paid: pendingToggles[key],
         })
+      }))
+      // Optimistic update để tránh lỗi stale index từ Firestore
+      setRows(prevRows => prevRows.map(r => {
+        const k = `${r.studentId}-${r.classId}`
+        if (pendingToggles[k] !== undefined) {
+          const newPaid = pendingToggles[k]
+          return {
+            ...r,
+            tuitionRecord: {
+              id: r.tuitionRecord?.id || 'temp',
+              finalAmount: r.finalAmount,
+              status: newPaid ? 'PAID' : 'PENDING',
+              paidAmount: newPaid ? r.finalAmount : 0,
+              remainingAmount: newPaid ? 0 : r.finalAmount,
+            }
+          }
+        }
+        return r
       }))
     } catch (e: any) {
       console.error('Lỗi khi lưu hàng loạt:', e)
@@ -154,7 +172,10 @@ export default function Tuition() {
         setPendingToggles({})
       }
       setIsSavingToggles(false)
-      loadData()
+      // Delay loadData để chờ Firestore index cập nhật xong
+      setTimeout(() => {
+        loadData()
+      }, 1500)
     }
   }
 
