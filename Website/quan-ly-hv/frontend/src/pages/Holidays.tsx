@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { api } from '../lib/api'
-import { useConfirm, useAlert } from '../components/ConfirmDialog'
-import { useToast } from '../hooks/useToast'
+import api from '../services/api'
 import TopBar from '../components/TopBar'
 
 interface Holiday {
@@ -20,10 +18,12 @@ export default function Holidays() {
   
   const [formData, setFormData] = useState({ name: '', date: '', description: '' })
   const [restoreSessions, setRestoreSessions] = useState(false)
-  
-  const confirm = useConfirm()
-  const alert = useAlert()
-  const { toast } = useToast()
+  const [toastMsg, setToastMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+
+  const toast = (type: 'success' | 'error', text: string) => {
+    setToastMsg({ type, text })
+    setTimeout(() => setToastMsg(null), 3500)
+  }
 
   const fetchHolidays = async () => {
     try {
@@ -261,6 +261,12 @@ export default function Holidays() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+      {/* Toast notification */}
+      {toastMsg && (
+        <div className={`fixed bottom-6 right-6 z-[200] px-5 py-3 rounded-xl shadow-lg text-sm font-semibold text-white transition-all ${toastMsg.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>
+          {toastMsg.text}
         </div>
       )}
     </div>
