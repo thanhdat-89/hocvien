@@ -15,6 +15,7 @@ const navItems: { path: string; icon: string; label: string; roles?: Role[] }[] 
   // { path: '/teachers', icon: 'badge', label: 'Giáo viên', roles: ['ADMIN'] },
   { path: '/tuition', icon: 'payments', label: 'Học phí', roles: ['ADMIN', 'STAFF'] },
   { path: '/zns', icon: 'campaign', label: 'Thông báo ZNS', roles: ['ADMIN'] },
+  { path: '/holidays', icon: 'celebration', label: 'Lịch nghỉ lễ', roles: ['ADMIN', 'STAFF'] },
   { path: '/activity', icon: 'history', label: 'Lịch sử hoạt động', roles: ['ADMIN', 'STAFF'] },
 ]
 
