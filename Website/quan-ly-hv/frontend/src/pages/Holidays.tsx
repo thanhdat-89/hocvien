@@ -87,6 +87,7 @@ export default function Holidays() {
     try {
       const res = await api.post('/holidays', {
         name: name.trim(),
+        date: startDate,
         startDate,
         endDate: effectiveEnd,
         description: description.trim()
