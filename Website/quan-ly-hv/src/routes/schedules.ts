@@ -97,16 +97,6 @@ router.delete('/:id', requireRole('ADMIN'), async (req: AuthRequest, res: Respon
   } catch (err) { next(err) }
 })
 
-// POST /api/schedules/:id/generate
-router.post('/:id/generate', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    const { fromDate, toDate } = req.body
-    if (!fromDate || !toDate) { res.status(400).json({ message: 'Cần fromDate và toDate' }); return }
-    const count = await generateSessionsFromSchedule(s(req.params.id), new Date(fromDate), new Date(toDate))
-    res.json({ message: `Đã tạo ${count} buổi học`, count })
-  } catch (err) { next(err) }
-})
-
 // POST /api/schedules/generate-month
 router.post('/generate-month', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -114,6 +104,16 @@ router.post('/generate-month', requireRole('ADMIN', 'STAFF'), async (req: AuthRe
     if (!classId || !year || !month) { res.status(400).json({ message: 'Cần classId, year, month' }); return }
     const count = await generateSessionsForClassMonth(classId, Number(year), Number(month))
     res.json({ message: `Đã tạo ${count} buổi cho tháng ${month}/${year}`, count })
+  } catch (err) { next(err) }
+})
+
+// POST /api/schedules/:id/generate
+router.post('/:id/generate', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { fromDate, toDate } = req.body
+    if (!fromDate || !toDate) { res.status(400).json({ message: 'Cần fromDate và toDate' }); return }
+    const count = await generateSessionsFromSchedule(s(req.params.id), new Date(fromDate), new Date(toDate))
+    res.json({ message: `Đã tạo ${count} buổi học`, count })
   } catch (err) { next(err) }
 })
 

@@ -336,6 +336,36 @@ router.delete('/student-promotions/:id', requireRole('ADMIN', 'STAFF'), async (r
   } catch (err) { next(err) }
 })
 
+// GET /api/tuition/list/overdue
+router.get('/list/overdue', async (_req, res: Response, next: NextFunction) => {
+  try {
+    const today = now().slice(0, 10)
+    const snap = await db.collection(C.TUITION_RECORDS)
+      .where('dueDate', '<', today)
+      .get()
+
+    const records = toDocs<TuitionRecord>(snap)
+      .filter(r => r.status === 'PENDING' || r.status === 'PARTIAL')
+
+    const withRemaining = await Promise.all(
+      records.map(async r => {
+        const { remaining } = await getPaymentStatus(r.id)
+        return { ...r, remaining }
+      })
+    )
+    withRemaining.sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? ''))
+    res.json(withRemaining)
+  } catch (err) { next(err) }
+})
+
+// GET /api/tuition/promotions/list
+router.get('/promotions/list', async (_req, res: Response, next: NextFunction) => {
+  try {
+    const snap = await db.collection(C.PROMOTIONS).where('isActive', '==', true).get()
+    res.json(toDocs<Promotion>(snap).sort((a, b) => a.name.localeCompare(b.name)))
+  } catch (err) { next(err) }
+})
+
 // GET /api/tuition/:id
 router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -578,37 +608,7 @@ router.delete('/payment/:paymentId', requireRole('ADMIN'), async (req: AuthReque
   } catch (err) { next(err) }
 })
 
-// GET /api/tuition/list/overdue
-router.get('/list/overdue', async (_req, res: Response, next: NextFunction) => {
-  try {
-    const today = now().slice(0, 10)
-    const snap = await db.collection(C.TUITION_RECORDS)
-      .where('dueDate', '<', today)
-      .get()
-
-    const records = toDocs<TuitionRecord>(snap)
-      .filter(r => r.status === 'PENDING' || r.status === 'PARTIAL')
-
-    const withRemaining = await Promise.all(
-      records.map(async r => {
-        const { remaining } = await getPaymentStatus(r.id)
-        return { ...r, remaining }
-      })
-    )
-    withRemaining.sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? ''))
-    res.json(withRemaining)
-  } catch (err) { next(err) }
-})
-
 // ─── PROMOTIONS ────────────────────────────────────────────────
-
-// GET /api/tuition/promotions/list
-router.get('/promotions/list', async (_req, res: Response, next: NextFunction) => {
-  try {
-    const snap = await db.collection(C.PROMOTIONS).where('isActive', '==', true).get()
-    res.json(toDocs<Promotion>(snap).sort((a, b) => a.name.localeCompare(b.name)))
-  } catch (err) { next(err) }
-})
 
 // POST /api/tuition/promotions
 router.post('/promotions', requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
