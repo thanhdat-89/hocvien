@@ -9,12 +9,8 @@ const navItems: { path: string; icon: string; label: string; roles?: Role[] }[] 
   { path: '/students', icon: 'group', label: 'Học viên' },
   { path: '/classes', icon: 'calendar_month', label: 'Lịch & Lớp học' },
   { path: '/private-schedule', icon: 'person_apron', label: 'Lịch học riêng' },
-  { path: '/exams', icon: 'quiz', label: 'Điểm kiểm tra' },
-  { path: '/reviews', icon: 'rate_review', label: 'Nhận xét học viên' },
-  { path: '/materials', icon: 'folder_open', label: 'Tài liệu học tập' },
-  { path: '/tuition', icon: 'payments', label: 'Học phí', roles: ['ADMIN', 'STAFF'] },
-  { path: '/zns', icon: 'campaign', label: 'Thông báo ZNS', roles: ['ADMIN'] },
   { path: '/holidays', icon: 'celebration', label: 'Lịch nghỉ lễ', roles: ['ADMIN', 'STAFF'] },
+  { path: '/tuition', icon: 'payments', label: 'Học phí', roles: ['ADMIN', 'STAFF'] },
   { path: '/activity', icon: 'history', label: 'Lịch sử hoạt động', roles: ['ADMIN', 'STAFF'] },
 ]
 
