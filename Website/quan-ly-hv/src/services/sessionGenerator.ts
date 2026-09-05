@@ -27,12 +27,24 @@ export async function generateSessionsFromSchedule(
   if (!classDoc.exists) throw new Error('Không tìm thấy lớp học')
   const cls = classDoc.data()!
 
-  // Lấy ngày lễ trong khoảng
-  const holidaysSnap = await db.collection(C.HOLIDAYS)
-    .where('date', '>=', fromDate.toISOString().slice(0, 10))
-    .where('date', '<=', toDate.toISOString().slice(0, 10))
-    .get()
-  const holidaySet = new Set(holidaysSnap.docs.map(d => d.data().date as string))
+  // Lấy tất cả ngày lễ
+  const holidaysSnap = await db.collection(C.HOLIDAYS).get()
+  const holidaySet = new Set<string>()
+  holidaysSnap.docs.forEach(d => {
+    const data = d.data()
+    if (Array.isArray(data.dates)) {
+      data.dates.forEach((dt: string) => holidaySet.add(dt))
+    } else if (data.startDate && data.endDate) {
+      let cur = new Date(data.startDate + 'T00:00:00Z')
+      const end = new Date(data.endDate + 'T00:00:00Z')
+      while (cur <= end) {
+        holidaySet.add(cur.toISOString().slice(0, 10))
+        cur.setUTCDate(cur.getUTCDate() + 1)
+      }
+    } else if (data.date) {
+      holidaySet.add(data.date)
+    }
+  })
 
   const targetDow = DAY_OF_WEEK_MAP[schedule.dayOfWeek]
   const sessionDates: string[] = []

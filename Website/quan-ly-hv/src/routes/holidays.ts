@@ -22,20 +22,40 @@ router.get('/', async (_req: AuthRequest, res: Response, next: NextFunction) => 
   }
 })
 
-// Thêm ngày nghỉ lễ mới
+// Thêm ngày nghỉ lễ mới (hỗ trợ theo ngày hoặc theo giai đoạn)
 router.post('/', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { name, date, description } = req.body
+    const { name, date, startDate, endDate, description } = req.body
     
-    if (!name || !date) {
-      res.status(400).json({ message: 'Tên và ngày nghỉ lễ không được để trống' })
+    const start = startDate || date
+    const end = endDate || start
+
+    if (!name || !start) {
+      res.status(400).json({ message: 'Tên và ngày bắt đầu nghỉ lễ không được để trống' })
       return
+    }
+
+    if (start > end) {
+      res.status(400).json({ message: 'Ngày bắt đầu không được lớn hơn ngày kết thúc' })
+      return
+    }
+
+    // Tạo danh sách tất cả các ngày trong khoảng [start, end]
+    const dates: string[] = []
+    let curr = new Date(start + 'T00:00:00Z')
+    const endD = new Date(end + 'T00:00:00Z')
+    while (curr <= endD) {
+      dates.push(curr.toISOString().slice(0, 10))
+      curr.setUTCDate(curr.getUTCDate() + 1)
     }
 
     // 1. Tạo Holiday record
     const data: Omit<Holiday, 'id'> = {
       name,
-      date, // YYYY-MM-DD
+      date: start, // YYYY-MM-DD (backward compatibility)
+      startDate: start,
+      endDate: end,
+      dates,
       description: description || '',
       createdAt: now(),
     }
@@ -43,43 +63,55 @@ router.post('/', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Re
 
     const cancelReason = `Nghỉ lễ: ${name}`
 
-    // 2. Tìm tất cả các sessions trùng ngày này và đang SCHEDULED
+    // 2. Tìm tất cả các sessions trong khoảng [start, end] đang SCHEDULED
     const sessionsSnap = await db.collection(C.SESSIONS)
-      .where('sessionDate', '==', date)
-      .where('status', '==', 'SCHEDULED')
+      .where('sessionDate', '>=', start)
+      .where('sessionDate', '<=', end)
       .get()
 
-    // 3. Tìm tất cả privateSchedules trùng ngày này và đang SCHEDULED
+    // 3. Tìm tất cả privateSchedules trong khoảng [start, end] đang SCHEDULED
     const privateSchedulesSnap = await db.collection(C.PRIVATE_SCHEDULES)
-      .where('sessionDate', '==', date)
-      .where('status', '==', 'SCHEDULED')
+      .where('sessionDate', '>=', start)
+      .where('sessionDate', '<=', end)
       .get()
 
-    // 4. Thực hiện batch update thành CANCELLED
-    const batch = db.batch()
-    let cancelledCount = 0
+    // 4. Thực hiện batch update thành CANCELLED (hỗ trợ chia nhỏ batch nếu > 400 docs)
+    const updates: { ref: FirebaseFirestore.DocumentReference; data: any }[] = []
 
     sessionsSnap.docs.forEach(doc => {
-      batch.update(doc.ref, {
-        status: 'CANCELLED',
-        cancelReason,
-        updatedAt: now()
-      })
-      cancelledCount++
+      if (doc.data().status === 'SCHEDULED') {
+        updates.push({
+          ref: doc.ref,
+          data: {
+            status: 'CANCELLED',
+            cancelReason,
+            updatedAt: now()
+          }
+        })
+      }
     })
 
     privateSchedulesSnap.docs.forEach(doc => {
-      batch.update(doc.ref, {
-        status: 'CANCELLED',
-        cancelReason,
-        updatedAt: now()
-      })
-      cancelledCount++
+      if (doc.data().status === 'SCHEDULED') {
+        updates.push({
+          ref: doc.ref,
+          data: {
+            status: 'CANCELLED',
+            cancelReason,
+            updatedAt: now()
+          }
+        })
+      }
     })
 
-    if (cancelledCount > 0) {
+    for (let i = 0; i < updates.length; i += 400) {
+      const chunk = updates.slice(i, i + 400)
+      const batch = db.batch()
+      chunk.forEach(u => batch.update(u.ref, u.data))
       await batch.commit()
     }
+
+    const cancelledCount = updates.length
 
     res.status(201).json({
       message: `Đã tạo ngày nghỉ lễ và hủy ${cancelledCount} buổi học.`,
@@ -105,48 +137,63 @@ router.delete('/:id', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, re
 
     const holiday = doc.data() as Holiday
     const cancelReason = `Nghỉ lễ: ${holiday.name}`
+    const start = holiday.startDate || holiday.date
+    const end = holiday.endDate || holiday.date || start
 
     await db.collection(C.HOLIDAYS).doc(holidayId).delete()
 
     let restoredCount = 0
     if (restoreSessions === 'true') {
-      const batch = db.batch()
+      const updates: { ref: FirebaseFirestore.DocumentReference; data: any }[] = []
 
       // Khôi phục sessions
       const sessionsSnap = await db.collection(C.SESSIONS)
-        .where('sessionDate', '==', holiday.date)
-        .where('status', '==', 'CANCELLED')
-        .where('cancelReason', '==', cancelReason)
+        .where('sessionDate', '>=', start)
+        .where('sessionDate', '<=', end)
         .get()
 
       sessionsSnap.docs.forEach(d => {
-        batch.update(d.ref, {
-          status: 'SCHEDULED',
-          cancelReason: null, // Xóa lý do hủy
-          updatedAt: now()
-        })
-        restoredCount++
+        const data = d.data()
+        if (data.status === 'CANCELLED' && data.cancelReason === cancelReason) {
+          updates.push({
+            ref: d.ref,
+            data: {
+              status: 'SCHEDULED',
+              cancelReason: null, // Xóa lý do hủy
+              updatedAt: now()
+            }
+          })
+        }
       })
 
       // Khôi phục privateSchedules
       const privateSnap = await db.collection(C.PRIVATE_SCHEDULES)
-        .where('sessionDate', '==', holiday.date)
-        .where('status', '==', 'CANCELLED')
-        .where('cancelReason', '==', cancelReason)
+        .where('sessionDate', '>=', start)
+        .where('sessionDate', '<=', end)
         .get()
 
       privateSnap.docs.forEach(d => {
-        batch.update(d.ref, {
-          status: 'SCHEDULED',
-          cancelReason: null,
-          updatedAt: now()
-        })
-        restoredCount++
+        const data = d.data()
+        if (data.status === 'CANCELLED' && data.cancelReason === cancelReason) {
+          updates.push({
+            ref: d.ref,
+            data: {
+              status: 'SCHEDULED',
+              cancelReason: null,
+              updatedAt: now()
+            }
+          })
+        }
       })
 
-      if (restoredCount > 0) {
+      for (let i = 0; i < updates.length; i += 400) {
+        const chunk = updates.slice(i, i + 400)
+        const batch = db.batch()
+        chunk.forEach(u => batch.update(u.ref, u.data))
         await batch.commit()
       }
+
+      restoredCount = updates.length
     }
 
     res.json({ 

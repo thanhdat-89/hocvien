@@ -290,6 +290,9 @@ export interface BankTransaction {
 export interface Holiday {
   id: string
   date: string
+  startDate?: string
+  endDate?: string
+  dates?: string[]
   name: string
   description?: string
   createdAt: string
