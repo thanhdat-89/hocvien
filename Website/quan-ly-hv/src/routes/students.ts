@@ -1,5 +1,5 @@
 import { Router, Response, NextFunction } from 'express'
-import { db, C, s, toObj, toDocs, paginate } from '../lib/firebase'
+import { admin, db, C, s, toObj, toDocs, paginate } from '../lib/firebase'
 import { syncPrimaryParentToStudent } from '../lib/studentSync'
 import { recountClassActiveStudents } from '../lib/classSync'
 import { computeTuitionSummary } from '../lib/tuition'
@@ -12,76 +12,155 @@ const router = Router()
 router.use(authenticate)
 
 const now = () => new Date().toISOString()
+const STUDENT_COUNT_TTL_MS = 60 * 1000
+const IN_QUERY_LIMIT = 30
+
+let studentCountsCache: { at: number; totalAll: number; totalActive: number } | null = null
+
+async function getCount(query: FirebaseFirestore.Query): Promise<number> {
+  const snap = await query.count().get()
+  return snap.data().count
+}
+
+async function getStudentCounts() {
+  if (studentCountsCache && Date.now() - studentCountsCache.at < STUDENT_COUNT_TTL_MS) {
+    return studentCountsCache
+  }
+  const [totalAll, totalActive] = await Promise.all([
+    getCount(db.collection(C.STUDENTS)),
+    getCount(db.collection(C.STUDENTS).where('status', '==', 'ACTIVE')),
+  ])
+  studentCountsCache = { at: Date.now(), totalAll, totalActive }
+  return studentCountsCache
+}
+
+function chunkIds(ids: string[]): string[][] {
+  const chunks: string[][] = []
+  for (let i = 0; i < ids.length; i += IN_QUERY_LIMIT) chunks.push(ids.slice(i, i + IN_QUERY_LIMIT))
+  return chunks
+}
+
+async function loadStudentsByIds(ids: string[]): Promise<(Student & { id: string })[]> {
+  if (ids.length === 0) return []
+  const snaps = await Promise.all(
+    chunkIds(ids).map(chunk =>
+      db.collection(C.STUDENTS)
+        .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
+        .get()
+    )
+  )
+  return snaps.flatMap(snap => toDocs<Student>(snap))
+}
+
+async function enrichStudents(pageStudents: (Student & { id: string })[]) {
+  const studentIds = pageStudents.map(stu => stu.id)
+  const today = new Date().toISOString().slice(0, 10)
+  const chunks = chunkIds(studentIds)
+
+  const [enrollSnaps, promoSnaps] = await Promise.all([
+    Promise.all(chunks.map(chunk =>
+      db.collection(C.ENROLLMENTS)
+        .where('studentId', 'in', chunk)
+        .where('status', '==', 'ACTIVE')
+        .get()
+    )),
+    Promise.all(chunks.map(chunk =>
+      db.collection(C.STUDENT_PROMOTIONS)
+        .where('studentId', 'in', chunk)
+        .get()
+    )),
+  ])
+
+  const enrollByStudent = new Map<string, ClassEnrollment[]>()
+  for (const e of enrollSnaps.flatMap(snap => toDocs<ClassEnrollment>(snap))) {
+    const arr = enrollByStudent.get(e.studentId) ?? []
+    arr.push(e)
+    enrollByStudent.set(e.studentId, arr)
+  }
+
+  const promoByStudent = new Map<string, any[]>()
+  for (const doc of promoSnaps.flatMap(snap => snap.docs)) {
+    const p = doc.data()
+    if (p.appliedFrom && p.appliedFrom > today) continue
+    if (p.appliedTo && p.appliedTo < today) continue
+    const sid = p.studentId as string
+    const arr = promoByStudent.get(sid) ?? []
+    arr.push({ id: doc.id, ...p })
+    promoByStudent.set(sid, arr)
+  }
+
+  return pageStudents.map(stu => {
+    const primaryParent = stu.primaryParentName
+      ? {
+          fullName: stu.primaryParentName,
+          phone: stu.primaryParentPhone ?? null,
+          zalo: stu.primaryParentZalo ?? null,
+        }
+      : null
+    const enrollments = enrollByStudent.get(stu.id) ?? []
+    const promotions = promoByStudent.get(stu.id) ?? []
+    return { ...stu, primaryParent, enrollments, promotions }
+  })
+}
 
 // GET /api/students
 router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { page = '1', limit = '20', search, status, classId, gradeLevel } = req.query as Record<string, string>
 
-    const allStudents = toDocs<Student>(await db.collection(C.STUDENTS).orderBy('fullName').get())
-    const totalAll = allStudents.length
-    const totalActive = allStudents.filter(s => s.status === 'ACTIVE').length
+    const pageNum = Math.max(1, Number(page) || 1)
+    const limitNum = Math.min(500, Math.max(1, Number(limit) || 20))
+    const offset = (pageNum - 1) * limitNum
+    const trimmedSearch = search?.trim().toLowerCase()
 
-    let students = allStudents
-    // Filter
-    if (status) students = students.filter(s => s.status === status)
-    if (gradeLevel) students = students.filter(s => s.gradeLevel === Number(gradeLevel))
-    if (search) students = students.filter(s => s.fullName.toLowerCase().includes(search.toLowerCase()))
+    const { totalAll, totalActive } = await getStudentCounts()
 
-    // Filter by classId: lấy studentIds từ enrollments
+    let students: (Student & { id: string })[] = []
+    let total = 0
+
     if (classId) {
       const enrollSnap = await db.collection(C.ENROLLMENTS)
         .where('classId', '==', classId)
         .where('status', '==', 'ACTIVE')
         .get()
-      const ids = new Set(enrollSnap.docs.map(d => d.data().studentId as string))
-      students = students.filter(s => ids.has(s.id))
+      const ids = [...new Set(enrollSnap.docs.map(d => d.data().studentId as string).filter(Boolean))]
+      let classStudents = await loadStudentsByIds(ids)
+      if (status) classStudents = classStudents.filter(s => s.status === status)
+      if (gradeLevel) classStudents = classStudents.filter(s => s.gradeLevel === Number(gradeLevel))
+      if (trimmedSearch) classStudents = classStudents.filter(s => s.fullName.toLowerCase().includes(trimmedSearch))
+      classStudents.sort((a, b) => a.fullName.localeCompare(b.fullName, 'vi'))
+      total = classStudents.length
+      students = classStudents.slice(offset, offset + limitNum)
+    } else if (trimmedSearch) {
+      let query = db.collection(C.STUDENTS) as FirebaseFirestore.Query
+      if (status) query = query.where('status', '==', status)
+      if (gradeLevel) query = query.where('gradeLevel', '==', Number(gradeLevel))
+      const snap = await query.orderBy('fullName').get()
+      const matched = toDocs<Student>(snap)
+        .filter(s => s.fullName.toLowerCase().includes(trimmedSearch))
+      total = matched.length
+      students = matched.slice(offset, offset + limitNum)
+    } else {
+      let query = db.collection(C.STUDENTS) as FirebaseFirestore.Query
+      let countQuery = db.collection(C.STUDENTS) as FirebaseFirestore.Query
+      if (status) {
+        query = query.where('status', '==', status)
+        countQuery = countQuery.where('status', '==', status)
+      }
+      if (gradeLevel) {
+        query = query.where('gradeLevel', '==', Number(gradeLevel))
+        countQuery = countQuery.where('gradeLevel', '==', Number(gradeLevel))
+      }
+
+      const [totalForFilter, pageSnap] = await Promise.all([
+        getCount(countQuery),
+        query.orderBy('fullName').offset(offset).limit(limitNum).get(),
+      ])
+      total = totalForFilter
+      students = toDocs<Student>(pageSnap)
     }
 
-    // Paginate TRƯỚC, chỉ enrich data cho trang hiện tại
-    const total = students.length
-    const pageNum = Number(page)
-    const limitNum = Number(limit)
-    const pageStudents = students.slice((pageNum - 1) * limitNum, pageNum * limitNum)
-
-    // Batch lấy tất cả enrollments active + promotions 1 lần thay vì N+1
-    const today = new Date().toISOString().slice(0, 10)
-    const [allEnrollSnap, allPromoSnap] = await Promise.all([
-      db.collection(C.ENROLLMENTS).where('status', '==', 'ACTIVE').get(),
-      db.collection(C.STUDENT_PROMOTIONS).get(),
-    ])
-    const allEnrollments = toDocs<ClassEnrollment>(allEnrollSnap)
-    const enrollByStudent = new Map<string, ClassEnrollment[]>()
-    for (const e of allEnrollments) {
-      const arr = enrollByStudent.get(e.studentId) ?? []
-      arr.push(e)
-      enrollByStudent.set(e.studentId, arr)
-    }
-    const promoByStudent = new Map<string, any[]>()
-    for (const doc of allPromoSnap.docs) {
-      const p = doc.data()
-      // Chỉ lấy promotions còn hiệu lực
-      if (p.appliedFrom && p.appliedFrom > today) continue
-      if (p.appliedTo && p.appliedTo < today) continue
-      const sid = p.studentId as string
-      const arr = promoByStudent.get(sid) ?? []
-      arr.push({ id: doc.id, ...p })
-      promoByStudent.set(sid, arr)
-    }
-
-    // Đọc primaryParent từ denorm fields trên doc cha (không còn subcollection query)
-    const result = pageStudents.map(stu => {
-      const primaryParent = stu.primaryParentName
-        ? {
-            fullName: stu.primaryParentName,
-            phone: stu.primaryParentPhone ?? null,
-            zalo: stu.primaryParentZalo ?? null,
-          }
-        : null
-      const enrollments = enrollByStudent.get(stu.id) ?? []
-      const promotions = promoByStudent.get(stu.id) ?? []
-      return { ...stu, primaryParent, enrollments, promotions }
-    })
+    const result = await enrichStudents(students)
 
     res.json({ data: result, total, page: pageNum, limit: limitNum, totalPages: Math.ceil(total / limitNum), totalAll, totalActive })
   } catch (err) {
