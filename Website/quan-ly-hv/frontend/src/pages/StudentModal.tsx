@@ -26,7 +26,9 @@ export default function StudentModal({ student, onClose, onSaved }: Props) {
 
   useEffect(() => {
     api.get('/classes?status=ACTIVE&limit=100').then(({ data }) => {
-      setClasses(data.data ?? [])
+      setClasses([...(data.data ?? [])].sort((a: Class, b: Class) =>
+        a.name.localeCompare(b.name, 'vi', { numeric: true, sensitivity: 'base' })
+      ))
     }).catch(() => {})
   }, [])
 

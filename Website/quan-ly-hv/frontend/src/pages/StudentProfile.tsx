@@ -242,7 +242,9 @@ function EnrollModal({ studentId, onClose, onSaved }: { studentId: string; onClo
 
   useEffect(() => {
     api.get('/classes', { params: { status: 'ACTIVE', limit: 100 } })
-      .then(r => setClasses(r.data?.data ?? r.data ?? []))
+      .then(r => setClasses([...(r.data?.data ?? r.data ?? [])].sort((a: Class, b: Class) =>
+        a.name.localeCompare(b.name, 'vi', { numeric: true, sensitivity: 'base' })
+      )))
       .catch(() => {})
   }, [])
 
