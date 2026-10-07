@@ -4,7 +4,7 @@ import TopBar from '../components/TopBar'
 import api from '../services/api'
 import * as XLSX from 'xlsx'
 import { buildInvoiceWorkbook } from '../lib/invoiceExport'
-import { useAlert, useConfirm, usePrompt } from '../components/ConfirmDialog'
+import { useAlert, useConfirm } from '../components/ConfirmDialog'
 
 interface TuitionRecordSummary {
   id: string
@@ -105,7 +105,6 @@ export default function Tuition() {
   const years = Array.from({ length: 4 }, (_, i) => thisYear - 1 + i)
 
   const [creatingRow, setCreatingRow] = useState<string | null>(null)
-  const [bulkCreating, setBulkCreating] = useState(false)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [sendingZnsId, setSendingZnsId] = useState<string | null>(null)
 
@@ -215,7 +214,6 @@ export default function Tuition() {
       })
     }
   }
-  const showPrompt = usePrompt()
 
   const sendZnsNotice = async (recordId: string, studentName: string) => {
     const ok = await showConfirm({
@@ -276,40 +274,6 @@ export default function Tuition() {
     }
   }
 
-  const createRecordsBulk = async () => {
-    const classIds = [...new Set(filtered.map(r => r.classId))]
-    if (classIds.length === 0) return
-    const phrase = await showPrompt({
-      title: 'Tạo phiếu cả tháng',
-      message:
-        `Tạo phiếu học phí cho ${classIds.length} lớp tháng ${month}/${year}.\n` +
-        `Hành động này tạo/cập nhật phiếu cho TOÀN BỘ học viên trong các lớp đang hiển thị.\n\n` +
-        `Gõ "xacnhan" để xác nhận:`,
-      placeholder: 'xacnhan',
-      confirmLabel: 'Tạo phiếu',
-    })
-    if (phrase === null) return
-    setBulkCreating(true)
-    try {
-      const res = await api.post('/tuition/calculate-bulk', {
-        month, year, classIds, password: phrase,
-      })
-      const { created, updated, failed } = res.data
-      await showAlert({
-        title: 'Hoàn tất',
-        message: `Tạo ${created} phiếu mới, cập nhật ${updated} phiếu${failed ? `, ${failed} lớp lỗi` : ''}.`,
-      })
-      loadData()
-    } catch (e: any) {
-      await showAlert({
-        title: 'Lỗi',
-        message: e?.response?.data?.message || 'Tạo phiếu hàng loạt thất bại',
-      })
-    } finally {
-      setBulkCreating(false)
-    }
-  }
-
   const exportExcel = () => {
     const wb = buildInvoiceWorkbook(filtered)
     const suffix = [
@@ -331,15 +295,6 @@ export default function Tuition() {
             <h2 className="text-4xl font-black text-on-surface font-headline tracking-tight">Quản lý Học phí</h2>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <button
-              onClick={createRecordsBulk}
-              disabled={filtered.length === 0 || bulkCreating}
-              className="flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 rounded-xl bg-primary/10 text-primary text-sm font-semibold hover:bg-primary/20 transition-all disabled:opacity-40"
-              title="Tạo/cập nhật phiếu học phí cho mọi lớp đang hiển thị"
-            >
-              <span className="material-symbols-outlined text-[18px]">{bulkCreating ? 'sync' : 'receipt_long'}</span>
-              {bulkCreating ? 'Đang tạo...' : 'Tạo phiếu cả tháng'}
-            </button>
             <button
               onClick={exportExcel}
               disabled={filtered.length === 0}
