@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import TopBar from '../components/TopBar'
 import api from '../services/api'
 import * as XLSX from 'xlsx'
+import { buildInvoiceWorkbook } from '../lib/invoiceExport'
 import { useAlert, useConfirm, usePrompt } from '../components/ConfirmDialog'
 
 interface TuitionRecordSummary {
@@ -310,51 +311,12 @@ export default function Tuition() {
   }
 
   const exportExcel = () => {
-    // Build flat rows grouped by student
-    const exportRows: Record<string, string | number>[] = []
-    const spanMap: Record<string, number> = {}
-    filtered.forEach(r => { spanMap[r.studentId] = (spanMap[r.studentId] || 0) + 1 })
-    const seen = new Set<string>()
-    let stt = 0
-    filtered.forEach(r => {
-      const isFirst = !seen.has(r.studentId)
-      if (isFirst) { seen.add(r.studentId); stt++ }
-      exportRows.push({
-        'STT': isFirst ? stt : '',
-        'Họ tên': isFirst ? r.studentName : '',
-        'Khối lớp': r.gradeLevel != null ? `Lớp ${r.gradeLevel}` : '',
-        'Lớp học': r.className,
-        'Số buổi': r.totalSessions,
-        'Học phí/buổi (đ)': r.ratePerSession,
-        'Khuyến mại (đ)': r.discountAmount > 0 ? -r.discountAmount : 0,
-        'Thành tiền (đ)': r.finalAmount,
-      })
-    })
-    // Total row
-    exportRows.push({
-      'STT': '',
-      'Họ tên': 'TỔNG CỘNG',
-      'Khối lớp': '',
-      'Lớp học': '',
-      'Số buổi': totalSessions,
-      'Học phí/buổi (đ)': '',
-      'Khuyến mại (đ)': -filtered.reduce((s, r) => s + r.discountAmount, 0),
-      'Thành tiền (đ)': totalAmount,
-    })
-
-    const ws = XLSX.utils.json_to_sheet(exportRows)
-    // Column widths
-    ws['!cols'] = [
-      { wch: 5 }, { wch: 28 }, { wch: 10 }, { wch: 18 },
-      { wch: 9 }, { wch: 16 }, { wch: 16 }, { wch: 16 },
-    ]
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, `Học phí T${month}-${year}`)
+    const wb = buildInvoiceWorkbook(filtered)
     const suffix = [
       gradeFilter != null ? `khoi${gradeFilter}` : '',
       classFilter ? classFilter.replace(/\s+/g, '_') : '',
     ].filter(Boolean).join('-')
-    XLSX.writeFile(wb, `hoc-phi-thang-${month}-${year}${suffix ? `-${suffix}` : ''}.xlsx`)
+    XLSX.writeFile(wb, `hoa-don-thang-${month}-${year}${suffix ? `-${suffix}` : ''}.xlsx`)
   }
 
   return (
@@ -363,16 +325,16 @@ export default function Tuition() {
       <div className="px-8 py-8 space-y-8">
 
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+        <div className="flex flex-wrap items-end justify-between gap-6">
           <div>
             <span className="text-[11px] font-bold text-primary tracking-[0.2em] uppercase mb-2 block">Tài chính</span>
             <h2 className="text-4xl font-black text-on-surface font-headline tracking-tight">Quản lý Học phí</h2>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={createRecordsBulk}
               disabled={filtered.length === 0 || bulkCreating}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary/10 text-primary text-sm font-semibold hover:bg-primary/20 transition-all disabled:opacity-40"
+              className="flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 rounded-xl bg-primary/10 text-primary text-sm font-semibold hover:bg-primary/20 transition-all disabled:opacity-40"
               title="Tạo/cập nhật phiếu học phí cho mọi lớp đang hiển thị"
             >
               <span className="material-symbols-outlined text-[18px]">{bulkCreating ? 'sync' : 'receipt_long'}</span>
@@ -381,7 +343,7 @@ export default function Tuition() {
             <button
               onClick={exportExcel}
               disabled={filtered.length === 0}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-secondary/10 text-secondary text-sm font-semibold hover:bg-secondary/20 transition-all disabled:opacity-40"
+              className="flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 rounded-xl bg-secondary/10 text-secondary text-sm font-semibold hover:bg-secondary/20 transition-all disabled:opacity-40"
             >
               <span className="material-symbols-outlined text-[18px]">download</span>
               Xuất Excel
