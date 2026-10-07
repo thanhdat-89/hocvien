@@ -333,7 +333,7 @@ export default function Tuition() {
         </div>
 
         {/* Filter cards */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-4">
           {/* Grade filter card */}
           <div className="bg-surface-container-lowest p-5 rounded-2xl shadow-sm border border-outline-variant/10">
             <div className="flex items-center gap-2 mb-3">
