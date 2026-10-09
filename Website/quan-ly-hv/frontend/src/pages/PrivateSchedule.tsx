@@ -1,4 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react'
+import { Link } from 'react-router-dom'
+import { Student } from '../types'
+import { useAuth } from '../hooks/useAuth'
+import { PrivateScheduleModal } from './StudentProfile'
 import TopBar from '../components/TopBar'
 import { useConfirm } from '../components/ConfirmDialog'
 import api from '../services/api'
@@ -225,6 +229,47 @@ export default function PrivateSchedule() {
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<PrivateSession | null>(null)
 
+  const { canManageStudents } = useAuth()
+  const [privateStudent, setPrivateStudent] = useState<Student | null>(null)
+  const [missingStudents, setMissingStudents] = useState<Student[]>([])
+  const [missingLoading, setMissingLoading] = useState(true)
+  const [missingError, setMissingError] = useState('')
+  const [monthKey, setMonthKey] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit' }))
+  const [monthYear, monthNumber] = monthKey.split('-').map(Number)
+
+  const loadMissingStudents = useCallback(async () => {
+    setMissingLoading(true)
+    setMissingError('')
+    try {
+      const lastDay = new Date(monthYear, monthNumber, 0).getDate()
+      const [first, monthly] = await Promise.all([
+        api.get('/students?page=1&limit=20'),
+        api.get(`/students/private-sessions/all?fromDate=${monthKey}-01&toDate=${monthKey}-${lastDay}`),
+      ])
+      const pages = await Promise.all(Array.from({ length: first.data.totalPages - 1 }, (_, i) => api.get(`/students?page=${i + 2}&limit=20`)))
+      const students: Student[] = [...first.data.data, ...pages.flatMap(r => r.data.data)]
+      if (!Array.isArray(monthly.data) || students.length !== first.data.total) throw new Error('Incomplete data')
+      const scheduled = new Set((monthly.data as PrivateSession[]).map(session => session.studentId))
+      setMissingStudents(students.filter(student => !student.enrollments?.length && !scheduled.has(student.id)))
+    } catch {
+      setMissingError('Không thể tải danh sách học viên chưa có lịch. Vui lòng thử lại.')
+    } finally {
+      setMissingLoading(false)
+    }
+  }, [monthKey, monthYear, monthNumber])
+
+  useEffect(() => { void loadMissingStudents() }, [loadMissingStudents])
+  useEffect(() => {
+    const refresh = () => {
+      const key = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit' })
+      setMonthKey(key)
+      if (key === monthKey) void loadMissingStudents()
+    }
+    window.addEventListener('focus', refresh)
+    const timer = window.setInterval(refresh, 60000)
+    return () => { window.removeEventListener('focus', refresh); window.clearInterval(timer) }
+  }, [monthKey, loadMissingStudents])
+
   const loadSessions = useCallback((ws: Date) => {
     setLoading(true)
     const from = toISO(ws)
@@ -393,7 +438,54 @@ export default function PrivateSchedule() {
           </table>
         </div>
 
+
+        <section className="bg-surface-container-lowest rounded-3xl overflow-hidden shadow-sm border border-outline-variant/10">
+          <div className="p-6 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-headline font-bold text-on-surface">Học viên chưa có lịch học riêng — tháng {monthNumber}/{monthYear}</h3>
+              <p className="text-sm text-outline mt-1">Học viên có lớp “Học riêng” và chưa có buổi nào trong toàn bộ tháng hiện tại.</p>
+            </div>
+            {!missingLoading && !missingError && <span className="text-sm font-semibold text-primary">{missingStudents.length} học viên</span>}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse min-w-[650px]">
+              <thead><tr className="bg-surface-container-low/50">
+                <th className="table-header w-12 text-center">STT</th>
+                <th className="table-header">Học viên</th>
+                <th className="table-header">Khối lớp</th>
+                <th className="table-header">Lớp học</th>
+                <th className="table-header text-right">Thao tác</th>
+              </tr></thead>
+              <tbody className="divide-y divide-outline-variant/10">
+                {missingLoading ? <tr><td colSpan={5} className="table-cell text-center text-outline" role="status">Đang tải danh sách...</td></tr>
+                  : missingError ? <tr><td colSpan={5} className="table-cell text-center text-error" role="alert">{missingError} <button className="text-primary underline ml-2" onClick={() => void loadMissingStudents()}>Thử lại</button></td></tr>
+                  : missingStudents.length === 0 ? <tr><td colSpan={5} className="table-cell text-center text-outline">Không có học viên học riêng nào chưa được xếp lịch trong tháng này.</td></tr>
+                  : missingStudents.map((student, index) => <tr key={student.id} className="hover:bg-surface-container-low/30 transition-colors group">
+                    <td className="table-cell text-center text-sm text-outline font-medium">{index + 1}</td>
+                    <td className="table-cell"><div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-tertiary/10 text-tertiary flex items-center justify-center text-sm font-bold shrink-0">{student.fullName.trim().split(/\s+/).slice(-2).map(word => word[0]).join('')}</div>
+                      <Link to={`/students/${student.id}`} className="font-semibold text-on-surface hover:text-primary">{student.fullName}</Link>
+                    </div></td>
+                    <td className="table-cell"><span className="inline-flex items-center px-2.5 py-1 rounded-md bg-surface-container-high text-xs font-bold text-primary">{student.gradeLevel ? `Lớp ${student.gradeLevel}` : '—'}</span></td>
+                    <td className="table-cell"><span className="inline-flex items-center px-2 py-0.5 rounded-md bg-tertiary/10 text-tertiary text-xs font-medium">Học riêng</span></td>
+                    <td className="table-cell"><div className="flex justify-end gap-1">
+                      <Link to={`/students/${student.id}`} title="Xem hồ sơ" aria-label={`Xem hồ sơ ${student.fullName}`} className="p-2 text-outline hover:text-primary hover:bg-primary/10 rounded-lg"><span className="material-symbols-outlined text-[20px]">visibility</span></Link>
+                      {canManageStudents && <button onClick={() => setPrivateStudent(student)} title="Thêm lịch học riêng" aria-label={`Thêm lịch học riêng cho ${student.fullName}`} className="p-2 text-outline hover:text-tertiary hover:bg-tertiary-container/10 rounded-lg"><span className="material-symbols-outlined text-[20px]">calendar_month</span></button>}
+                    </div></td>
+                  </tr>)}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
       </div>
+
+      {privateStudent && <PrivateScheduleModal
+        studentId={privateStudent.id}
+        studentName={privateStudent.fullName}
+        onClose={() => setPrivateStudent(null)}
+        onSaved={() => { setPrivateStudent(null); loadSessions(weekStart); void loadMissingStudents() }}
+      />}
 
       {selected && (
         <SessionDetailModal
@@ -402,6 +494,7 @@ export default function PrivateSchedule() {
           onDeleted={() => {
             setSelected(null)
             loadSessions(weekStart)
+            void loadMissingStudents()
           }}
           onUpdated={(patch) => {
             setSessions(prev => prev.map(s => s.id === selected.id ? { ...s, ...patch } : s))
