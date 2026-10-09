@@ -232,6 +232,8 @@ export default function PrivateSchedule() {
   const { canManageStudents } = useAuth()
   const [privateStudent, setPrivateStudent] = useState<Student | null>(null)
   const [missingStudents, setMissingStudents] = useState<Student[]>([])
+  const [missingGrade, setMissingGrade] = useState<number | null>(null)
+  const filteredMissingStudents = missingStudents.filter(student => missingGrade === null || student.gradeLevel === missingGrade)
   const [missingLoading, setMissingLoading] = useState(true)
   const [missingError, setMissingError] = useState('')
   const [monthKey, setMonthKey] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit' }))
@@ -445,7 +447,27 @@ export default function PrivateSchedule() {
               <h3 className="text-lg font-headline font-bold text-on-surface">Học viên chưa có lịch học riêng — tháng {monthNumber}/{monthYear}</h3>
               <p className="text-sm text-outline mt-1">Học viên có lớp “Học riêng” và chưa có buổi nào trong toàn bộ tháng hiện tại.</p>
             </div>
-            {!missingLoading && !missingError && <span className="text-sm font-semibold text-primary">{missingStudents.length} học viên</span>}
+            {!missingLoading && !missingError && <span className="text-sm font-semibold text-primary">{filteredMissingStudents.length} học viên</span>}
+          </div>
+          <div className="px-6 pb-5">
+            <p id="missing-grade-label" className="text-[10px] font-bold text-outline uppercase mb-2">Khối lớp</p>
+            <div role="group" aria-labelledby="missing-grade-label" className="flex flex-wrap gap-2">
+              {[null, 6, 7, 8, 9, 10, 11, 12].map(grade => (
+                <button
+                  key={grade ?? 'all'}
+                  type="button"
+                  aria-pressed={missingGrade === grade}
+                  onClick={() => setMissingGrade(grade)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                    missingGrade === grade
+                      ? 'bg-primary text-on-primary border-primary shadow-sm'
+                      : 'bg-surface text-on-surface-variant border-outline-variant/30 hover:border-primary/40 hover:text-primary'
+                  }`}
+                >
+                  {grade === null ? 'Tất cả' : `Lớp ${grade}`}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse min-w-[650px]">
@@ -459,8 +481,8 @@ export default function PrivateSchedule() {
               <tbody className="divide-y divide-outline-variant/10">
                 {missingLoading ? <tr><td colSpan={5} className="table-cell text-center text-outline" role="status">Đang tải danh sách...</td></tr>
                   : missingError ? <tr><td colSpan={5} className="table-cell text-center text-error" role="alert">{missingError} <button className="text-primary underline ml-2" onClick={() => void loadMissingStudents()}>Thử lại</button></td></tr>
-                  : missingStudents.length === 0 ? <tr><td colSpan={5} className="table-cell text-center text-outline">Không có học viên học riêng nào chưa được xếp lịch trong tháng này.</td></tr>
-                  : missingStudents.map((student, index) => <tr key={student.id} className="hover:bg-surface-container-low/30 transition-colors group">
+                  : filteredMissingStudents.length === 0 ? <tr><td colSpan={5} className="table-cell text-center text-outline">Không có học viên học riêng nào chưa được xếp lịch trong tháng này{missingGrade === null ? '.' : ` thuộc Lớp ${missingGrade}.`}</td></tr>
+                  : filteredMissingStudents.map((student, index) => <tr key={student.id} className="hover:bg-surface-container-low/30 transition-colors group">
                     <td className="table-cell text-center text-sm text-outline font-medium">{index + 1}</td>
                     <td className="table-cell"><div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-full bg-tertiary/10 text-tertiary flex items-center justify-center text-sm font-bold shrink-0">{student.fullName.trim().split(/\s+/).slice(-2).map(word => word[0]).join('')}</div>
