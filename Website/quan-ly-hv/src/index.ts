@@ -25,6 +25,7 @@ import monthlyScoresRoutes from './routes/monthlyScores'
 import sepayWebhookRoutes from './routes/webhooks'
 import znsRoutes from './routes/zns'
 import holidayRoutes from './routes/holidays'
+import reportRoutes from './routes/reports'
 
 import { errorHandler, notFound } from './middleware/errorHandler'
 import { activityLogMiddleware } from './middleware/activityLog'
@@ -78,6 +79,7 @@ app.use('/api/monthly-scores', monthlyScoresRoutes)
 app.use('/api/webhooks',       sepayWebhookRoutes)
 app.use('/api/zns',            znsRoutes)
 app.use('/api/holidays',       holidayRoutes)
+app.use('/api/reports',        reportRoutes)
 
 // ─── Error handlers ───────────────────────────────────────────
 app.use(notFound)
