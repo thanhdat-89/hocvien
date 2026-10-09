@@ -2,8 +2,8 @@
 
 ## Chỉ tiêu
 
-- Tuần: Thứ Hai đến Chủ nhật; chạy vào tối Chủ nhật, giờ Việt Nam.
-- Tháng: ngày 1 đến ngày cuối tháng; chạy tối ngày cuối tháng.
+- Tuần: Thứ Hai đến Chủ nhật; chạy lúc khoảng 08:00 Chủ nhật, giờ Việt Nam.
+- Tháng: ngày 1 đến ngày cuối tháng; chạy lúc khoảng 08:00 ngày cuối tháng, giờ Việt Nam.
 - Tổng học viên: toàn bộ hồ sơ đang có; thêm chỉ tiêu riêng số đang học.
 - Theo lớp: số học viên duy nhất có enrollment ACTIVE trong mỗi lớp; một học viên ở nhiều lớp được tính ở từng lớp.
 - Học viên mới: enrollmentDate ISO thuộc kỳ; hồ sơ ngày cũ/thiếu được đếm trong ghi chú, không tự đoán ngày.
@@ -22,7 +22,7 @@
 6. Xem file thử nghiệm trong folder qlhv.cqt.vn, kiểm tra dữ liệu. Sau đó chạy setupReports một lần để tạo trigger.
 7. Mục Triggers/Executions cho biết lịch và các lỗi; cấu hình nhận email khi trigger lỗi.
 
-Trigger chạy hằng ngày khoảng 23:30, sai số thông thường ±15 phút; chỉ xuất vào Chủ nhật/ngày cuối tháng. Lịch này không bảo đảm đúng 23:59. Báo cáo có thời điểm chốt rõ ràng; cập nhật sau giờ chạy chưa được tính. Nếu cần đủ dữ liệu đến 23:59:59, cần chuyển sang chốt sau 00:00 ngày tiếp theo và lưu snapshot cuối kỳ.
+Trigger chạy hằng ngày khoảng 08:00, sai số thông thường ±15 phút; chỉ xuất vào Chủ nhật/ngày cuối tháng. Lịch này không bảo đảm đúng từng phút. Báo cáo có thời điểm chốt rõ ràng; cập nhật sau giờ chạy chưa được tính. Nếu cần đủ dữ liệu đến 23:59:59, cần chuyển sang chốt sau 00:00 ngày tiếp theo và lưu snapshot cuối kỳ.
 
 Mỗi kỳ có một file riêng, gồm Tổng quan, Theo lớp, Học viên mới, Ghi chú. Ngày cuối tháng trùng Chủ nhật sẽ tạo cả hai báo cáo. Khóa script ngăn chạy song song; Script Properties ghi kỳ đã thành công. Lần retry tìm lại file đúng tên trong folder; file thất bại được điền lại. Không đánh dấu hoàn thành trước khi ghi xong. File thử nghiệm có tiền tố THỬ NGHIỆM và không chiếm kỳ chính thức.
 
@@ -33,3 +33,7 @@ Chưa kích hoạt lịch tự động: cần REPORTS_SECRET trên Vercel và ch
 API hiện đọc database Firestore đang chạy; Supabase mới có staging trống, không được dùng làm nguồn báo cáo. Sau khi backend chuyển PostgreSQL, thay truy vấn trong src/routes/reports.ts và giữ nguyên JSON để Apps Script tiếp tục hoạt động. Lịch hằng ngày này không đọc Supabase và không ngăn Supabase bị pause.
 
 Chi phí: không cần nâng gói để viết mã/thiết lập trigger, nhưng vẫn chịu hạn mức Apps Script, Drive, Firestore và hosting. Không có thao tác xuất toàn bộ dữ liệu mỗi phút.
+
+## Đổi lịch đã cài
+
+Sau khi cập nhật Code.gs trên Apps Script, chạy lại setupReports để xóa trigger cũ và tạo trigger 08:00 mới. Chỉ sửa file local không thay đổi trigger đã cài.

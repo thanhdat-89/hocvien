@@ -5,7 +5,7 @@ function setupReports() {
   const folder = DriveApp.getFolderById('1QdxyRceswELZAHUUCWgqbi3ORwTOsEB5');
   folder.getName();
   ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'runScheduledReports').forEach(t => ScriptApp.deleteTrigger(t));
-  ScriptApp.newTrigger('runScheduledReports').timeBased().everyDays(1).atHour(23).nearMinute(30).inTimezone('Asia/Ho_Chi_Minh').create();
+  ScriptApp.newTrigger('runScheduledReports').timeBased().everyDays(1).atHour(8).nearMinute(0).inTimezone('Asia/Ho_Chi_Minh').create();
 }
 function runScheduledReports() {
   const lock = LockService.getScriptLock();
