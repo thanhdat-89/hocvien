@@ -17,6 +17,12 @@ CREATE INDEX IF NOT EXISTS documents_collection_idx ON qlhv_migration.documents(
 CREATE INDEX IF NOT EXISTS documents_student_idx ON qlhv_migration.documents((data->>'studentId'));
 CREATE INDEX IF NOT EXISTS documents_class_idx ON qlhv_migration.documents((data->>'classId'));
 CREATE INDEX IF NOT EXISTS documents_date_idx ON qlhv_migration.documents((data->>'sessionDate'));
+CREATE TABLE IF NOT EXISTS qlhv_migration.sync_operations (
+  operation_id text PRIMARY KEY,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE qlhv_migration.sync_operations ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON qlhv_migration.sync_operations FROM PUBLIC, anon, authenticated;
 CREATE OR REPLACE VIEW qlhv_migration.students AS
  SELECT document_id AS id, data->>'fullName' AS full_name,
  data->>'gradeLevel' AS grade_level, data->>'status' AS status, data

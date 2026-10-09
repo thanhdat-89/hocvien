@@ -1,4 +1,5 @@
 import admin from 'firebase-admin'
+import { createMirroredFirestore } from './firestoreMirror'
 
 // ─── Khởi tạo Firebase Admin SDK ──────────────────────────────
 // Cần service account key. Tải về từ:
@@ -46,8 +47,9 @@ if (!admin.apps.length) {
   }
 }
 
-export const db = admin.firestore()
-db.settings({ ignoreUndefinedProperties: true })
+export const rawDb = admin.firestore()
+rawDb.settings({ ignoreUndefinedProperties: true })
+export const db = createMirroredFirestore(rawDb)
 export { admin }
 
 // ─── Collection names ─────────────────────────────────────────

@@ -15,7 +15,7 @@
 1. Trên backend Vercel đặt REPORTS_SECRET là chuỗi ngẫu nhiên dài (chỉ trên server) và triển khai mã nguồn chứa GET /api/reports/snapshot. Không đưa secret vào frontend hoặc GitHub.
 2. Vào https://script.google.com, tạo project mới bằng tài khoản sở hữu thư mục Drive qlhv.cqt.vn. Dán Code.gs.
 3. Project Settings → Script Properties:
-   - REPORTS_API_URL = https://hocvien-backend.vercel.app/api/reports/snapshot
+   - REPORTS_API_URL = https://api.qlhv.cqt.vn/api/reports/snapshot
    - REPORTS_SECRET = cùng giá trị backend.
 4. Đặt timezone project Asia/Ho_Chi_Minh.
 5. Chạy previewWeekReport và previewMonthReport, cấp quyền Google Drive/Sheets/UrlFetch. Khi Firestore đang hết reads, API sẽ lỗi và không tạo báo cáo rỗng; thử lại sau khi quota hồi phục.
@@ -28,9 +28,27 @@ Mỗi kỳ có một file riêng, gồm Tổng quan, Theo lớp, Học viên m�
 
 ## Trạng thái và database
 
-Chưa kích hoạt lịch tự động: cần REPORTS_SECRET trên Vercel và chủ tài khoản cấp quyền Apps Script. Kết nối Google Drive trong cuộc trò chuyện không cung cấp token cho tác vụ nền của website.
+Đã kích hoạt lịch tự động ngày 09/10/2026 (giờ Việt Nam):
 
-API hiện đọc database Firestore đang chạy; Supabase mới có staging trống, không được dùng làm nguồn báo cáo. Sau khi backend chuyển PostgreSQL, thay truy vấn trong src/routes/reports.ts và giữ nguyên JSON để Apps Script tiếp tục hoạt động. Lịch hằng ngày này không đọc Supabase và không ngăn Supabase bị pause.
+- Backend production tại https://api.qlhv.cqt.vn; endpoint báo cáo tháng đã trả HTTP 200 khi xác thực bằng REPORTS_SECRET.
+- Firestore indexes đã triển khai vào project hocthemtoan-7ecb8.
+- Project Apps Script: https://script.google.com/home/projects/188xb6CGhKyBOur4yLK6D1lF6kUWvWFc7LdectqNigCOUZfshKgmF43k2/edit.
+- Timezone project: Asia/Ho_Chi_Minh. Script Properties đã có REPORTS_API_URL và REPORTS_SECRET; không lưu giá trị secret trong tài liệu này.
+- previewWeekReport và previewMonthReport đã thực thi thành công, kiểm tra đủ bốn tab Tổng quan, Theo lớp, Học viên mới, Ghi chú. Tab mặc định trống được xóa dù Google đặt tên Sheet1 hay Trang tính1; tab Tổng quan được chọn khi mở file.
+- setupReports thực thi thành công lúc khoảng 16:30 ngày 09/10/2026. Trang Kích hoạt xác nhận đúng một trigger runScheduledReports chạy hằng ngày, khung 08:00–09:00 GMT+07:00; mã tạo trigger đặt atHour(8).nearMinute(0).
+- Thông báo lỗi trigger hiện đặt hằng ngày. Chưa có lần chạy tự động nào sau khi cài; báo cáo tuần kế tiếp dự kiến sáng Chủ nhật 11/10/2026, báo cáo tháng kế tiếp dự kiến sáng 31/10/2026.
+
+File thử nghiệm đã kiểm tra:
+
+- Tuần 05/10–09/10/2026: https://docs.google.com/spreadsheets/d/10jw-ulrIFShSOntS2JX_YF35LnSQuYPhzvonmQBTH_I/edit.
+- Tháng 01/10–09/10/2026: https://docs.google.com/spreadsheets/d/1a-Go9pFGUv23FTCVFNr3CL_ITrAj2JxYdvdJ_mMK0KQ/edit.
+- Snapshot thử nghiệm: 168 học viên, 168 đang học, 13 học viên mới trong kỳ, 30 học viên không có đăng ký lớp ACTIVE; học phí phải thu tháng 144.455.000 VND từ 81 bản ghi. Đây là số liệu tại thời điểm thử nghiệm, không phải số chốt cuối kỳ.
+
+Tác vụ nền sử dụng quyền của tài khoản Google đã cấp cho Apps Script. Kết nối Google Drive trong cuộc trò chuyện không cung cấp token cho tác vụ nền của website.
+
+API báo cáo ưu tiên đọc bản sao Supabase và chỉ quay về Firestore nếu Supabase lỗi (trừ khi `REPORTS_FIREBASE_FALLBACK=false`). Backend vẫn đọc Firebase cho các API nghiệp vụ thông thường. Khi `SUPABASE_DUAL_WRITE=true`, các thao tác ghi qua backend được phản chiếu sang Supabase; Firebase vẫn là nguồn chuẩn. Nếu lần phản chiếu lỗi, backend giữ thao tác trong hàng đợi Firestore và thử đồng bộ lại trước khi tạo báo cáo. Báo cáo có thể trễ đến lần đồng bộ lại tiếp theo nếu cả hai dịch vụ lỗi cùng lúc.
+
+Thiết lập backend: giữ `SUPABASE_DB_PASSWORD` trong biến môi trường server; đặt `SUPABASE_DUAL_WRITE=true` sau khi xác minh kết nối; `REPORTS_READ_SOURCE` mặc định là `supabase`, còn API học viên mặc định đọc Firebase. Không đưa thông tin kết nối vào frontend hoặc Git. Project Supabase Free vẫn có thể tạm dừng khi ít hoạt động; lịch báo cáo tuần/tháng không đảm bảo đủ hoạt động mỗi tuần để tránh pause.
 
 Chi phí: không cần nâng gói để viết mã/thiết lập trigger, nhưng vẫn chịu hạn mức Apps Script, Drive, Firestore và hosting. Không có thao tác xuất toàn bộ dữ liệu mỗi phút.
 
