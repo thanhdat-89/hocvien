@@ -3,7 +3,7 @@ import { db, C, toDocs } from '../lib/firebase'
 import { getSupabasePool } from '../lib/supabase'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
-import type { Session, TuitionRecord, Payment, Student } from '../types/models'
+import type { Session, TuitionRecord, Payment, Student, ClassEnrollment, PrivateSession } from '../types/models'
 
 const router = Router()
 router.use(authenticate)
@@ -120,6 +120,29 @@ async function computeDashboard() {
     unpaidStudentsThisMonth = Number(rows[0]?.unpaid_students ?? 0)
   } catch (error: any) {
     console.warn('[Dashboard] Supabase monthly metrics unavailable', error?.code ?? error?.name ?? 'unknown')
+    // The dashboard must still work when the mirror connection is unavailable.
+    // Reuse the active students already read above; only load monthly source data.
+    try {
+      const [enrollmentsSnap, privateSchedulesSnap, tuitionSnap] = await Promise.all([
+        db.collection(C.ENROLLMENTS).where('status', '==', 'ACTIVE').get(),
+        db.collection(C.PRIVATE_SCHEDULES)
+          .where('sessionDate', '>=', `${thisMonth}-01`)
+          .where('sessionDate', '<', nextMonth).get(),
+        db.collection(C.TUITION_RECORDS)
+          .where('billingMonth', '==', Number(thisMonth.slice(5)))
+          .where('billingYear', '==', Number(thisMonth.slice(0, 4))).get(),
+      ])
+      const enrolledStudents = new Set(toDocs<ClassEnrollment>(enrollmentsSnap).map(e => e.studentId))
+      const scheduledStudents = new Set(toDocs<PrivateSession>(privateSchedulesSnap).map(p => p.studentId))
+      const privateStudents = toDocs<Student>(activeStudentsSnap).filter(s => !enrolledStudents.has(s.id))
+      totalPrivateStudents = privateStudents.length
+      unscheduledPrivateStudentsThisMonth = privateStudents.filter(s => !scheduledStudents.has(s.id)).length
+      unpaidStudentsThisMonth = new Set(toDocs<TuitionRecord>(tuitionSnap)
+        .filter(t => ['PENDING', 'PARTIAL', 'OVERDUE'].includes(t.status) && t.studentId)
+        .map(t => t.studentId)).size
+    } catch (fallbackError: any) {
+      console.warn('[Dashboard] Firebase monthly metrics unavailable', fallbackError?.code ?? fallbackError?.name ?? 'unknown')
+    }
   }
 
   return {
@@ -136,6 +159,7 @@ async function computeDashboard() {
     },
     sessionsToday,
     recentPayments,
+    metricsMonth: thisMonth,
     cachedAt: Date.now(),
   }
 }
@@ -147,11 +171,10 @@ router.get('/', async (_req: AuthRequest, res: Response, next: NextFunction) => 
     const aggSnap = await aggRef.get()
 
     if (aggSnap.exists) {
-      const cached = aggSnap.data() as { cachedAt?: number; stats?: Record<string, unknown> }
-      const hasMonthlyMetrics = cached.stats
-        && Object.prototype.hasOwnProperty.call(cached.stats, 'unscheduledPrivateStudentsThisMonth')
-        && Object.prototype.hasOwnProperty.call(cached.stats, 'totalPrivateStudents')
-        && Object.prototype.hasOwnProperty.call(cached.stats, 'unpaidStudentsThisMonth')
+      const cached = aggSnap.data() as { cachedAt?: number; metricsMonth?: string; stats?: Record<string, unknown> }
+      const hasMonthlyMetrics = cached.metricsMonth === dateInVietnam().slice(0, 7)
+        && ['unscheduledPrivateStudentsThisMonth', 'totalPrivateStudents', 'unpaidStudentsThisMonth']
+          .every(key => typeof cached.stats?.[key] === 'number' && Number.isFinite(cached.stats[key]))
       if (cached.cachedAt && Date.now() - cached.cachedAt < DASHBOARD_TTL_MS && hasMonthlyMetrics) {
         res.json(cached)
         return
