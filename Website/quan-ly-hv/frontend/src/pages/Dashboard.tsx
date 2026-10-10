@@ -193,7 +193,7 @@ export default function Dashboard() {
             <div className="mt-5 flex items-end justify-between gap-4">
               <div>
                 <h2 className="text-lg font-headline font-bold text-on-surface">Học viên học riêng chưa xếp lịch — tháng {monthLabel}</h2>
-                <p className="text-sm text-on-surface-variant mt-1">Chưa có buổi học riêng trong tháng này · Tổng học viên học riêng: {stats?.totalPrivateStudents ?? '—'}</p>
+                <p className="text-sm text-on-surface-variant mt-1">Chưa có buổi học riêng trong tháng này</p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <span className="text-4xl font-headline font-black text-error">{stats?.unscheduledPrivateStudentsThisMonth ?? '—'}</span>
