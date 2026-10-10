@@ -182,7 +182,7 @@ async function computeDashboard() {
     sessionsToday,
     recentPayments,
     metricsMonth: thisMonth,
-    metricsVersion: 2,
+    metricsVersion: 3,
     cachedAt: Date.now(),
   }
 }
@@ -195,7 +195,7 @@ router.get('/', async (_req: AuthRequest, res: Response, next: NextFunction) => 
 
     if (aggSnap.exists) {
       const cached = aggSnap.data() as { cachedAt?: number; metricsMonth?: string; metricsVersion?: number; stats?: Record<string, unknown> }
-      const hasMonthlyMetrics = cached.metricsVersion === 2 && cached.metricsMonth === dateInVietnam().slice(0, 7)
+      const hasMonthlyMetrics = cached.metricsVersion === 3 && cached.metricsMonth === dateInVietnam().slice(0, 7)
         && ['unscheduledPrivateStudentsThisMonth', 'totalPrivateStudents', 'unpaidStudentsThisMonth']
           .every(key => typeof cached.stats?.[key] === 'number' && Number.isFinite(cached.stats[key]))
       if (cached.cachedAt && Date.now() - cached.cachedAt < DASHBOARD_TTL_MS && hasMonthlyMetrics) {
