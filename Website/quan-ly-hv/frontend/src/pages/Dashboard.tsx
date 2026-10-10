@@ -18,7 +18,8 @@ interface DashboardData {
     overdueCount: number
     sessionsTodayCount: number
     unscheduledPrivateStudentsThisMonth: number | null
-    studentsWithPaymentThisMonth: number | null
+    totalPrivateStudents: number | null
+    unpaidStudentsThisMonth: number | null
   }
   sessionsToday: Array<{
     id: string
@@ -181,22 +182,22 @@ export default function Dashboard() {
           <button
             type="button"
             onClick={() => navigate('/private-schedule')}
-            className="group w-full text-left bg-surface-container-lowest rounded-2xl p-6 border border-outline-variant/15 hover:border-tertiary/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tertiary transition-colors"
+            className="group w-full text-left bg-surface-container-lowest rounded-2xl p-6 border border-error/25 hover:border-error/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error transition-colors"
           >
             <div className="flex items-start justify-between gap-4">
-              <div className="p-3 rounded-xl bg-tertiary/10 text-tertiary">
+              <div className="p-3 rounded-xl bg-error/10 text-error">
                 <span className="material-symbols-outlined">event_busy</span>
               </div>
               <span className="text-xs font-semibold text-on-surface-variant bg-surface-container-low px-3 py-1.5 rounded-full">tháng {monthLabel}</span>
             </div>
             <div className="mt-5 flex items-end justify-between gap-4">
               <div>
-                <h2 className="text-lg font-headline font-bold text-on-surface">Học viên chưa có lịch học riêng — tháng {monthLabel}</h2>
-                <p className="text-sm text-on-surface-variant mt-1">Chưa được xếp buổi học riêng trong tháng này</p>
+                <h2 className="text-lg font-headline font-bold text-on-surface">Học viên học riêng chưa xếp lịch — tháng {monthLabel}</h2>
+                <p className="text-sm text-on-surface-variant mt-1">Chưa có buổi học riêng trong tháng này · Tổng học viên học riêng: {stats?.totalPrivateStudents ?? '—'}</p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <span className="text-4xl font-headline font-black text-on-surface">{stats?.unscheduledPrivateStudentsThisMonth ?? '—'}</span>
-                <span className="material-symbols-outlined text-outline group-hover:text-tertiary transition-colors">chevron_right</span>
+                <span className="text-4xl font-headline font-black text-error">{stats?.unscheduledPrivateStudentsThisMonth ?? '—'}</span>
+                <span className="material-symbols-outlined text-outline group-hover:text-error transition-colors">chevron_right</span>
               </div>
             </div>
           </button>
@@ -215,11 +216,11 @@ export default function Dashboard() {
               </div>
               <div className="mt-5 flex items-end justify-between gap-4">
                 <div>
-                  <h2 className="text-lg font-headline font-bold text-on-surface">Học viên thanh toán học phí — tháng {monthLabel}</h2>
-                  <p className="text-sm text-on-surface-variant mt-1">Số học viên có ghi nhận thanh toán trong tháng</p>
+                  <h2 className="text-lg font-headline font-bold text-on-surface">Học viên chưa thanh toán học phí — tháng {monthLabel}</h2>
+                  <p className="text-sm text-on-surface-variant mt-1">Số học viên còn nợ học phí hoặc mới thanh toán một phần</p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-4xl font-headline font-black text-on-surface">{stats?.studentsWithPaymentThisMonth ?? '—'}</span>
+                  <span className="text-4xl font-headline font-black text-on-surface">{stats?.unpaidStudentsThisMonth ?? '—'}</span>
                   <span className="material-symbols-outlined text-outline group-hover:text-secondary transition-colors">chevron_right</span>
                 </div>
               </div>

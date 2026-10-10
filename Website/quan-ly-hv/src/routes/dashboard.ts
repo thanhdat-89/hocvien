@@ -64,13 +64,30 @@ async function computeDashboard() {
   const recentPayments = toDocs<Payment>(recentPaymentsSnap)
 
   let unscheduledPrivateStudentsThisMonth: number | null = null
-  let studentsWithPaymentThisMonth: number | null = null
+  let totalPrivateStudents: number | null = null
+  let unpaidStudentsThisMonth: number | null = null
   try {
-    const { rows } = await getSupabasePool().query<{ unscheduled_private_students: number; students_with_payment: number }>(
+    const { rows } = await getSupabasePool().query<{
+      total_private_students: number
+      unscheduled_private_students: number
+      unpaid_students: number
+    }>(
       `SELECT
          (SELECT COUNT(*)::int
           FROM qlhv_migration.documents s
           WHERE s.collection_path = $3
+            AND s.data->>'status' = 'ACTIVE'
+            AND NOT EXISTS (
+              SELECT 1 FROM qlhv_migration.documents e
+              WHERE e.collection_path = $4
+                AND e.data->>'studentId' = s.document_id
+                AND e.data->>'status' = 'ACTIVE'
+            )
+         ) AS total_private_students,
+         (SELECT COUNT(*)::int
+          FROM qlhv_migration.documents s
+          WHERE s.collection_path = $3
+            AND s.data->>'status' = 'ACTIVE'
             AND NOT EXISTS (
               SELECT 1 FROM qlhv_migration.documents e
               WHERE e.collection_path = $4
@@ -85,17 +102,22 @@ async function computeDashboard() {
                 AND p.data->>'sessionDate' < $2
             )
          ) AS unscheduled_private_students,
-         (SELECT COUNT(DISTINCT data->>'studentId')::int
-          FROM qlhv_migration.documents
-          WHERE collection_path = $6
-            AND data->>'studentId' IS NOT NULL
-            AND data->>'paymentDate' >= $1
-            AND data->>'paymentDate' < $2
-         ) AS students_with_payment`,
-      [`${thisMonth}-01`, nextMonth, C.STUDENTS, C.ENROLLMENTS, C.PRIVATE_SCHEDULES, C.PAYMENTS],
+         (SELECT COUNT(DISTINCT t.data->>'studentId')::int
+          FROM qlhv_migration.documents t
+          WHERE t.collection_path = $6
+            AND t.data->>'billingMonth' = $7
+            AND t.data->>'billingYear' = $8
+            AND t.data->>'studentId' IS NOT NULL
+            AND t.data->>'status' IN ('PENDING', 'PARTIAL')
+         ) AS unpaid_students`,
+      [
+        `${thisMonth}-01`, nextMonth, C.STUDENTS, C.ENROLLMENTS, C.PRIVATE_SCHEDULES,
+        C.TUITION_RECORDS, String(Number(thisMonth.slice(5))), thisMonth.slice(0, 4),
+      ],
     )
+    totalPrivateStudents = Number(rows[0]?.total_private_students ?? 0)
     unscheduledPrivateStudentsThisMonth = Number(rows[0]?.unscheduled_private_students ?? 0)
-    studentsWithPaymentThisMonth = Number(rows[0]?.students_with_payment ?? 0)
+    unpaidStudentsThisMonth = Number(rows[0]?.unpaid_students ?? 0)
   } catch (error: any) {
     console.warn('[Dashboard] Supabase monthly metrics unavailable', error?.code ?? error?.name ?? 'unknown')
   }
@@ -109,7 +131,8 @@ async function computeDashboard() {
       overdueCount,
       sessionsTodayCount: sessionsToday.length + privateSessionsTodaySnap.size,
       unscheduledPrivateStudentsThisMonth,
-      studentsWithPaymentThisMonth,
+      totalPrivateStudents,
+      unpaidStudentsThisMonth,
     },
     sessionsToday,
     recentPayments,
@@ -127,7 +150,8 @@ router.get('/', async (_req: AuthRequest, res: Response, next: NextFunction) => 
       const cached = aggSnap.data() as { cachedAt?: number; stats?: Record<string, unknown> }
       const hasMonthlyMetrics = cached.stats
         && Object.prototype.hasOwnProperty.call(cached.stats, 'unscheduledPrivateStudentsThisMonth')
-        && Object.prototype.hasOwnProperty.call(cached.stats, 'studentsWithPaymentThisMonth')
+        && Object.prototype.hasOwnProperty.call(cached.stats, 'totalPrivateStudents')
+        && Object.prototype.hasOwnProperty.call(cached.stats, 'unpaidStudentsThisMonth')
       if (cached.cachedAt && Date.now() - cached.cachedAt < DASHBOARD_TTL_MS && hasMonthlyMetrics) {
         res.json(cached)
         return
