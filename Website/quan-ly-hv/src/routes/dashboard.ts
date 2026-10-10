@@ -124,8 +124,11 @@ router.get('/', async (_req: AuthRequest, res: Response, next: NextFunction) => 
     const aggSnap = await aggRef.get()
 
     if (aggSnap.exists) {
-      const cached = aggSnap.data() as { cachedAt?: number }
-      if (cached.cachedAt && Date.now() - cached.cachedAt < DASHBOARD_TTL_MS) {
+      const cached = aggSnap.data() as { cachedAt?: number; stats?: Record<string, unknown> }
+      const hasMonthlyMetrics = cached.stats
+        && Object.prototype.hasOwnProperty.call(cached.stats, 'unscheduledPrivateStudentsThisMonth')
+        && Object.prototype.hasOwnProperty.call(cached.stats, 'studentsWithPaymentThisMonth')
+      if (cached.cachedAt && Date.now() - cached.cachedAt < DASHBOARD_TTL_MS && hasMonthlyMetrics) {
         res.json(cached)
         return
       }
