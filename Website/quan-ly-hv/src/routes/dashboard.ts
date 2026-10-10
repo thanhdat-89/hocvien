@@ -108,7 +108,7 @@ async function computeDashboard() {
             AND t.data->>'billingMonth' = $7
             AND t.data->>'billingYear' = $8
             AND t.data->>'studentId' IS NOT NULL
-            AND t.data->>'status' IN ('PENDING', 'PARTIAL')
+            AND t.data->>'status' IN ('PENDING', 'PARTIAL', 'OVERDUE')
          ) AS unpaid_students`,
       [
         `${thisMonth}-01`, nextMonth, C.STUDENTS, C.ENROLLMENTS, C.PRIVATE_SCHEDULES,
