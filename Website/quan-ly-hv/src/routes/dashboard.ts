@@ -81,9 +81,15 @@ async function computeDashboard() {
     const privateStudents = toDocs<Student>(activeStudentsSnap).filter(s => !enrolledStudents.has(s.id))
     totalPrivateStudents = privateStudents.length
     unscheduledPrivateStudentsThisMonth = privateStudents.filter(s => !scheduledStudents.has(s.id)).length
-    unpaidStudentsThisMonth = new Set(toDocs<TuitionRecord>(tuitionSnap)
+    const tuitionRecords = toDocs<TuitionRecord>(tuitionSnap)
+    const studentsWithInvoice = new Set(tuitionRecords.map(t => t.studentId))
+    const unpaidStudents = new Set(tuitionRecords
       .filter(t => ['PENDING', 'PARTIAL', 'OVERDUE'].includes(t.status) && t.studentId)
-      .map(t => t.studentId)).size
+      .map(t => t.studentId))
+    for (const student of toDocs<Student>(activeStudentsSnap)) {
+      if (!studentsWithInvoice.has(student.id)) unpaidStudents.add(student.id)
+    }
+    unpaidStudentsThisMonth = unpaidStudents.size
   } catch (error: any) {
     console.warn('[Dashboard] Firebase monthly metrics unavailable', error?.code ?? error?.name ?? 'unknown')
   }
@@ -126,13 +132,27 @@ async function computeDashboard() {
                   AND p.data->>'sessionDate' < $2
               )
            ) AS unscheduled_private_students,
-           (SELECT COUNT(DISTINCT t.data->>'studentId')::int
-            FROM qlhv_migration.documents t
-            WHERE t.collection_path = $6
-              AND t.data->>'billingMonth' = $7
-              AND t.data->>'billingYear' = $8
-              AND t.data->>'studentId' IS NOT NULL
-              AND t.data->>'status' IN ('PENDING', 'PARTIAL', 'OVERDUE')
+           (SELECT COUNT(*)::int FROM (
+              SELECT t.data->>'studentId' AS student_id
+              FROM qlhv_migration.documents t
+              WHERE t.collection_path = $6
+                AND t.data->>'billingMonth' = $7
+                AND t.data->>'billingYear' = $8
+                AND t.data->>'studentId' IS NOT NULL
+                AND t.data->>'status' IN ('PENDING', 'PARTIAL', 'OVERDUE')
+              UNION
+              SELECT s.document_id AS student_id
+              FROM qlhv_migration.documents s
+              WHERE s.collection_path = $3
+                AND s.data->>'status' = 'ACTIVE'
+                AND NOT EXISTS (
+                  SELECT 1 FROM qlhv_migration.documents t
+                  WHERE t.collection_path = $6
+                    AND t.data->>'studentId' = s.document_id
+                    AND t.data->>'billingMonth' = $7
+                    AND t.data->>'billingYear' = $8
+                )
+            ) unpaid
            ) AS unpaid_students`,
         [
           `${thisMonth}-01`, nextMonth, C.STUDENTS, C.ENROLLMENTS, C.PRIVATE_SCHEDULES,
@@ -162,6 +182,7 @@ async function computeDashboard() {
     sessionsToday,
     recentPayments,
     metricsMonth: thisMonth,
+    metricsVersion: 2,
     cachedAt: Date.now(),
   }
 }
@@ -173,8 +194,8 @@ router.get('/', async (_req: AuthRequest, res: Response, next: NextFunction) => 
     const aggSnap = await aggRef.get()
 
     if (aggSnap.exists) {
-      const cached = aggSnap.data() as { cachedAt?: number; metricsMonth?: string; stats?: Record<string, unknown> }
-      const hasMonthlyMetrics = cached.metricsMonth === dateInVietnam().slice(0, 7)
+      const cached = aggSnap.data() as { cachedAt?: number; metricsMonth?: string; metricsVersion?: number; stats?: Record<string, unknown> }
+      const hasMonthlyMetrics = cached.metricsVersion === 2 && cached.metricsMonth === dateInVietnam().slice(0, 7)
         && ['unscheduledPrivateStudentsThisMonth', 'totalPrivateStudents', 'unpaidStudentsThisMonth']
           .every(key => typeof cached.stats?.[key] === 'number' && Number.isFinite(cached.stats[key]))
       if (cached.cachedAt && Date.now() - cached.cachedAt < DASHBOARD_TTL_MS && hasMonthlyMetrics) {
