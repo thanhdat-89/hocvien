@@ -66,3 +66,9 @@ Sau khi cập nhật Code.gs trên Apps Script, chạy lại setupReports để 
 - Backend `GET /api/reports/tuition-export?month=10&year=2026` dùng REPORTS_SECRET hiện có. Mặc định ưu tiên Supabase, thử đồng bộ queue trước khi đọc; fallback Firebase nếu lỗi, hoặc chặn fallback bằng REPORTS_FIREBASE_FALLBACK=false. Trả source và generatedAt để kiểm tra nguồn.
 - Cập nhật Code.gs trên project Apps Script hiện có rồi chạy setupTuitionReports; hàm giữ trigger tuần/tháng. Chạy previewTuitionReport để kiểm tra file thử nghiệm, không chiếm kỳ chính thức.
 - Một file mỗi tháng; chỉ đánh dấu thành công sau khi ghi xong. Nếu chạy lại cùng kỳ, tìm file đúng tên thay vì tạo bản sao. Thay đổi dữ liệu sau thời điểm xuất chưa được phản ánh.
+
+Đã kích hoạt và kiểm tra ngày 10/10/2026:
+
+- Code.gs đã lưu trên project Apps Script hiện có; setupTuitionReports và previewTuitionReport thực thi thành công. Giữ đúng một trigger runScheduledReports, khung 08:00–09:00 GMT+07:00. Lần xuất chính thức tiếp theo: 25/10/2026.
+- API production xác nhận nguồn `supabase`: tháng 10/2026 có 145 học viên, 150 dòng, 1.263 buổi và tổng phải thu 275.545.000 VND tại thời điểm kiểm tra.
+- File thử nghiệm đã xác minh đúng thư mục, 9 cột theo mẫu Excel, định dạng số và tổng tiền: https://docs.google.com/spreadsheets/d/1aV4ra-OoFV42lC_m-hZFy-GkVX2DxYGtqStD0qyJKpU/edit.
