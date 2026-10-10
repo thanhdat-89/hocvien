@@ -1,5 +1,6 @@
 import { Router, Response, NextFunction } from 'express'
 import { db, C, toDocs } from '../lib/firebase'
+import { getSupabasePool } from '../lib/supabase'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
 import type { Session, TuitionRecord, Payment, Student } from '../types/models'
@@ -11,17 +12,29 @@ const DASHBOARD_TTL_MS = 5 * 60 * 1000 // 5 phút
 const REVENUE_TTL_MS = 12 * 60 * 60 * 1000 // 12 giờ
 const STUDENTS_BY_GRADE_TTL_MS = 10 * 60 * 1000 // 10 phút
 
+function dateInVietnam(date = new Date()) {
+  return date.toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit' })
+}
+
+function nextMonthStart(monthKey: string) {
+  const [year, month] = monthKey.split('-').map(Number)
+  const next = new Date(Date.UTC(year, month, 1))
+  return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-01`
+}
+
 let revenueCache: { at: number; data: any[] } | null = null
 let studentsByGradeCache: { at: number; data: any[] } | null = null
 
 async function computeDashboard() {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = dateInVietnam()
   const thisMonth = today.slice(0, 7)
+  const nextMonth = nextMonthStart(thisMonth)
 
   const [
     activeStudentsSnap,
     activeClassesSnap,
     sessionsTodaySnap,
+    privateSessionsTodaySnap,
     newStudentsSnap,
     revenueSnap,
     overdueSnap,
@@ -30,6 +43,7 @@ async function computeDashboard() {
     db.collection(C.STUDENTS).where('status', '==', 'ACTIVE').get(),
     db.collection(C.CLASSES).where('status', '==', 'ACTIVE').get(),
     db.collection(C.SESSIONS).where('sessionDate', '==', today).get(),
+    db.collection(C.PRIVATE_SCHEDULES).where('sessionDate', '==', today).get(),
     db.collection(C.STUDENTS)
       .where('enrollmentDate', '>=', `${thisMonth}-01`)
       .where('enrollmentDate', '<=', `${thisMonth}-31`)
@@ -49,6 +63,43 @@ async function computeDashboard() {
     .sort((a, b) => a.startTime.localeCompare(b.startTime))
   const recentPayments = toDocs<Payment>(recentPaymentsSnap)
 
+  let unscheduledPrivateStudentsThisMonth: number | null = null
+  let studentsWithPaymentThisMonth: number | null = null
+  try {
+    const { rows } = await getSupabasePool().query<{ unscheduled_private_students: number; students_with_payment: number }>(
+      `SELECT
+         (SELECT COUNT(*)::int
+          FROM qlhv_migration.documents s
+          WHERE s.collection_path = $3
+            AND NOT EXISTS (
+              SELECT 1 FROM qlhv_migration.documents e
+              WHERE e.collection_path = $4
+                AND e.data->>'studentId' = s.document_id
+                AND e.data->>'status' = 'ACTIVE'
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM qlhv_migration.documents p
+              WHERE p.collection_path = $5
+                AND p.data->>'studentId' = s.document_id
+                AND p.data->>'sessionDate' >= $1
+                AND p.data->>'sessionDate' < $2
+            )
+         ) AS unscheduled_private_students,
+         (SELECT COUNT(DISTINCT data->>'studentId')::int
+          FROM qlhv_migration.documents
+          WHERE collection_path = $6
+            AND data->>'studentId' IS NOT NULL
+            AND data->>'paymentDate' >= $1
+            AND data->>'paymentDate' < $2
+         ) AS students_with_payment`,
+      [`${thisMonth}-01`, nextMonth, C.STUDENTS, C.ENROLLMENTS, C.PRIVATE_SCHEDULES, C.PAYMENTS],
+    )
+    unscheduledPrivateStudentsThisMonth = Number(rows[0]?.unscheduled_private_students ?? 0)
+    studentsWithPaymentThisMonth = Number(rows[0]?.students_with_payment ?? 0)
+  } catch (error: any) {
+    console.warn('[Dashboard] Supabase monthly metrics unavailable', error?.code ?? error?.name ?? 'unknown')
+  }
+
   return {
     stats: {
       totalActiveStudents: activeStudentsSnap.size,
@@ -56,7 +107,9 @@ async function computeDashboard() {
       newStudentsThisMonth: newStudentsSnap.size,
       revenueThisMonth,
       overdueCount,
-      sessionsTodayCount: sessionsToday.length,
+      sessionsTodayCount: sessionsToday.length + privateSessionsTodaySnap.size,
+      unscheduledPrivateStudentsThisMonth,
+      studentsWithPaymentThisMonth,
     },
     sessionsToday,
     recentPayments,
