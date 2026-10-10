@@ -1,3 +1,4 @@
+import { buildTuitionExport } from '../services/tuitionExport'
 import { Router, Request, Response, NextFunction } from 'express'
 import { timingSafeEqual } from 'crypto'
 import { db, rawDb, C, toDocs } from '../lib/firebase'
@@ -6,6 +7,25 @@ import { flushSupabaseSyncQueue } from '../lib/firestoreMirror'
 
 const router = Router()
 interface Row { id: string; [key: string]: any }
+router.get('/tuition-export', async (req: Request, res: Response, next: NextFunction) => {
+  const secret = process.env.REPORTS_SECRET
+  const supplied = req.headers.authorization ?? ''
+  const expected = secret ? `Bearer ${secret}` : ''
+  if (!secret || Buffer.byteLength(supplied) !== Buffer.byteLength(expected) || !timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))) {
+    res.status(401).json({ message: 'Unauthorized' }); return
+  }
+  const today = new Date().toLocaleDateString('en-CA', {timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit'})
+  const month = Number(req.query.month ?? today.slice(5, 7))
+  const year = Number(req.query.year ?? today.slice(0, 4))
+  if (!Number.isInteger(month) || month < 1 || month > 12 || !Number.isInteger(year) || year < 2000 || year > 2100) {
+    res.status(400).json({message: 'Invalid month/year'}); return
+  }
+  try {
+    res.setHeader('Cache-Control', 'no-store')
+    res.json(await buildTuitionExport(month, year))
+  } catch (error) { next(error) }
+})
+
 router.get('/snapshot', async (req: Request, res: Response, next: NextFunction) => {
   const secret = process.env.REPORTS_SECRET
   const supplied = req.headers.authorization ?? ''

@@ -55,3 +55,14 @@ Chi phí: không cần nâng gói để viết mã/thiết lập trigger, nhưng
 ## Đổi lịch đã cài
 
 Sau khi cập nhật Code.gs trên Apps Script, chạy lại setupReports để xóa trigger cũ và tạo trigger 08:00 mới. Chỉ sửa file local không thay đổi trigger đã cài.
+
+
+## Xuất quản lý học phí ngày 25
+
+- Chạy khoảng 08:00 ngày 25 hằng tháng theo Asia/Ho_Chi_Minh, dùng trigger `runScheduledReports` hiện có (Apps Script có thể lệch khoảng 15 phút).
+- Lưu Google Sheets `hoa-don-thang-{month}-{year}` vào thư mục Drive `qlhv.cqt.vn`, ID `1QdxyRceswELZAHUUCWgqbi3ORwTOsEB5`.
+- Giống nút Xuất Excel với bộ lọc Tất cả: tab Hóa đơn bán hàng, 7 dòng hướng dẫn, dòng 8 có 9 tiêu đề; dữ liệu từ dòng 9. Giữ số thứ tự dạng text và tiền dạng số.
+- Tính toàn bộ buổi đã xếp trong tháng, kể cả buổi sau ngày 25 và học viên chưa có phiếu; bỏ buổi CANCELLED, áp dụng ngày ghi danh/nghỉ và khuyến mãi giống website. Không tự tạo phiếu hoặc ghi nhận thanh toán.
+- Backend `GET /api/reports/tuition-export?month=10&year=2026` dùng REPORTS_SECRET hiện có. Mặc định ưu tiên Supabase, thử đồng bộ queue trước khi đọc; fallback Firebase nếu lỗi, hoặc chặn fallback bằng REPORTS_FIREBASE_FALLBACK=false. Trả source và generatedAt để kiểm tra nguồn.
+- Cập nhật Code.gs trên project Apps Script hiện có rồi chạy setupTuitionReports; hàm giữ trigger tuần/tháng. Chạy previewTuitionReport để kiểm tra file thử nghiệm, không chiếm kỳ chính thức.
+- Một file mỗi tháng; chỉ đánh dấu thành công sau khi ghi xong. Nếu chạy lại cùng kỳ, tìm file đúng tên thay vì tạo bản sao. Thay đổi dữ liệu sau thời điểm xuất chưa được phản ánh.
