@@ -1,6 +1,7 @@
 import { Router, Response, NextFunction } from 'express'
 import { db, C, toDocs } from '../lib/firebase'
 import { getSupabasePool } from '../lib/supabase'
+import { getTuitionScheduleSummary } from '../services/tuitionScheduleSummary'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
 import type { Session, TuitionRecord, Payment, Student, ClassEnrollment, PrivateSession } from '../types/models'
@@ -67,29 +68,18 @@ async function computeDashboard() {
   let totalPrivateStudents: number | null = null
   let unpaidStudentsThisMonth: number | null = null
   try {
-    const [enrollmentsSnap, privateSchedulesSnap, tuitionSnap] = await Promise.all([
+    const [enrollmentsSnap, privateSchedulesSnap] = await Promise.all([
       db.collection(C.ENROLLMENTS).where('status', '==', 'ACTIVE').get(),
       db.collection(C.PRIVATE_SCHEDULES)
         .where('sessionDate', '>=', `${thisMonth}-01`)
         .where('sessionDate', '<', nextMonth).get(),
-      db.collection(C.TUITION_RECORDS)
-        .where('billingMonth', '==', Number(thisMonth.slice(5)))
-        .where('billingYear', '==', Number(thisMonth.slice(0, 4))).get(),
     ])
     const enrolledStudents = new Set(toDocs<ClassEnrollment>(enrollmentsSnap).map(e => e.studentId))
     const scheduledStudents = new Set(toDocs<PrivateSession>(privateSchedulesSnap).map(p => p.studentId))
     const privateStudents = toDocs<Student>(activeStudentsSnap).filter(s => !enrolledStudents.has(s.id))
     totalPrivateStudents = privateStudents.length
     unscheduledPrivateStudentsThisMonth = privateStudents.filter(s => !scheduledStudents.has(s.id)).length
-    const tuitionRecords = toDocs<TuitionRecord>(tuitionSnap)
-    const studentsWithInvoice = new Set(tuitionRecords.map(t => t.studentId))
-    const unpaidStudents = new Set(tuitionRecords
-      .filter(t => ['PENDING', 'PARTIAL', 'OVERDUE'].includes(t.status) && t.studentId)
-      .map(t => t.studentId))
-    for (const student of toDocs<Student>(activeStudentsSnap)) {
-      if (!studentsWithInvoice.has(student.id)) unpaidStudents.add(student.id)
-    }
-    unpaidStudentsThisMonth = unpaidStudents.size
+
   } catch (error: any) {
     console.warn('[Dashboard] Firebase monthly metrics unavailable', error?.code ?? error?.name ?? 'unknown')
   }
@@ -100,7 +90,6 @@ async function computeDashboard() {
       const { rows } = await getSupabasePool().query<{
         total_private_students: number
         unscheduled_private_students: number
-        unpaid_students: number
       }>(
         `SELECT
            (SELECT COUNT(*)::int
@@ -131,40 +120,26 @@ async function computeDashboard() {
                   AND p.data->>'sessionDate' >= $1
                   AND p.data->>'sessionDate' < $2
               )
-           ) AS unscheduled_private_students,
-           (SELECT COUNT(*)::int FROM (
-              SELECT t.data->>'studentId' AS student_id
-              FROM qlhv_migration.documents t
-              WHERE t.collection_path = $6
-                AND t.data->>'billingMonth' = $7
-                AND t.data->>'billingYear' = $8
-                AND t.data->>'studentId' IS NOT NULL
-                AND t.data->>'status' IN ('PENDING', 'PARTIAL', 'OVERDUE')
-              UNION
-              SELECT s.document_id AS student_id
-              FROM qlhv_migration.documents s
-              WHERE s.collection_path = $3
-                AND s.data->>'status' = 'ACTIVE'
-                AND NOT EXISTS (
-                  SELECT 1 FROM qlhv_migration.documents t
-                  WHERE t.collection_path = $6
-                    AND t.data->>'studentId' = s.document_id
-                    AND t.data->>'billingMonth' = $7
-                    AND t.data->>'billingYear' = $8
-                )
-            ) unpaid
-           ) AS unpaid_students`,
+           ) AS unscheduled_private_students`,
         [
           `${thisMonth}-01`, nextMonth, C.STUDENTS, C.ENROLLMENTS, C.PRIVATE_SCHEDULES,
-          C.TUITION_RECORDS, String(Number(thisMonth.slice(5))), thisMonth.slice(0, 4),
         ],
       )
       totalPrivateStudents = Number(rows[0]?.total_private_students ?? 0)
       unscheduledPrivateStudentsThisMonth = Number(rows[0]?.unscheduled_private_students ?? 0)
-      unpaidStudentsThisMonth = Number(rows[0]?.unpaid_students ?? 0)
     } catch (error: any) {
       console.warn('[Dashboard] Supabase monthly metrics unavailable', error?.code ?? error?.name ?? 'unknown')
     }
+  }
+
+  // Use the same schedule rows and outstanding amounts as the tuition page.
+  try {
+    const rows = await getTuitionScheduleSummary(Number(thisMonth.slice(5)), Number(thisMonth.slice(0, 4)))
+    unpaidStudentsThisMonth = new Set(rows
+      .filter(row => (row.tuitionRecord ? row.tuitionRecord.remainingAmount : row.finalAmount) > 0)
+      .map(row => row.studentId)).size
+  } catch (error: any) {
+    console.warn('[Dashboard] Tuition summary unavailable', error?.code ?? error?.name ?? 'unknown')
   }
 
   return {
@@ -182,7 +157,7 @@ async function computeDashboard() {
     sessionsToday,
     recentPayments,
     metricsMonth: thisMonth,
-    metricsVersion: 3,
+    metricsVersion: 4,
     cachedAt: Date.now(),
   }
 }
@@ -195,7 +170,7 @@ router.get('/', async (_req: AuthRequest, res: Response, next: NextFunction) => 
 
     if (aggSnap.exists) {
       const cached = aggSnap.data() as { cachedAt?: number; metricsMonth?: string; metricsVersion?: number; stats?: Record<string, unknown> }
-      const hasMonthlyMetrics = cached.metricsVersion === 3 && cached.metricsMonth === dateInVietnam().slice(0, 7)
+      const hasMonthlyMetrics = cached.metricsVersion === 4 && cached.metricsMonth === dateInVietnam().slice(0, 7)
         && ['unscheduledPrivateStudentsThisMonth', 'totalPrivateStudents', 'unpaidStudentsThisMonth']
           .every(key => typeof cached.stats?.[key] === 'number' && Number.isFinite(cached.stats[key]))
       if (cached.cachedAt && Date.now() - cached.cachedAt < DASHBOARD_TTL_MS && hasMonthlyMetrics) {

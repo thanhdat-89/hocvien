@@ -217,7 +217,7 @@ export default function Dashboard() {
               <div className="mt-5 flex items-end justify-between gap-4">
                 <div>
                   <h2 className="text-lg font-headline font-bold text-on-surface">Học viên chưa thanh toán học phí — tháng {monthLabel}</h2>
-                  <p className="text-sm text-on-surface-variant mt-1">Bao gồm học viên còn nợ, thanh toán một phần hoặc chưa có phiếu học phí tháng này</p>
+                  <p className="text-sm text-on-surface-variant mt-1">Học viên phát sinh học phí trong tháng và còn tiền phải trả, kể cả chưa có phiếu</p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <span className="text-4xl font-headline font-black text-on-surface">{stats?.unpaidStudentsThisMonth ?? '—'}</span>
