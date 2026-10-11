@@ -71,6 +71,21 @@ Nguồn: https://xaydungchinhsach.chinhphu.vn/nguoi-nop-thue-can-chuan-bi-gi-de-
 
 Đây là điểm cần kế toán/đơn vị chốt trước phát hành thật: loại hóa đơn của hộ kinh doanh, cách thể hiện thuế, tên người mua, gộp lớp, thu từng phần và dịch vụ đã hoàn thành. Không tự áp 0% cho học phí. API cancel là khả năng kỹ thuật, không quyết định trường hợp pháp luật cho phép hủy; hoàn tiền/bỏ tích đã đóng không tự hủy hóa đơn.
 
+## So sánh bổ sung MEINVOICEBOT — 11/10/2026
+
+Link https://developer.misa.vn/products-openapi/MEINVOICEBOT cũng chuyển về danh sách sản phẩm và báo đang cập nhật trong phiên chưa đăng nhập. Chưa đọc được danh sách endpoint/quyền/giá riêng của sản phẩm này. Nhận định BOT thuộc nhóm xử lý hóa đơn là suy luận từ tên sản phẩm và tài liệu MISA về meInvoicebot/meInbot, chưa xác minh trực tiếp catalog API MEINVOICEBOT.
+
+- MEINVOICE phù hợp luồng lập/ký/phát hành hóa đơn học phí; bộ API integration đã mô tả các chức năng này.
+- Tài liệu eShop xác nhận meInbot là nhóm xử lý hóa đơn đầu vào, có kết nối cơ quan thuế và chọn thời gian đồng bộ. Đây là chức năng sản phẩm/tích hợp eShop, không chứng minh API BOT công khai có cùng quyền.
+- Phân hệ xử lý hóa đơn có AVA kiểm tra thông tin người mua/bán, tiền và liên hệ điều chỉnh/thay thế; MISA lưu ý phải kiểm chứng kết quả. Chưa xác minh AVA được cung cấp qua API BOT.
+- Tài liệu SME còn mô tả lấy hóa đơn đầu ra đã phát hành từ nhà cung cấp khác hoặc CQT về hạch toán. Vì vậy nhóm xử lý hóa đơn không chỉ có đầu vào; đồng bộ hóa đơn đầu ra đã có khác với phát hành hóa đơn mới.
+- Với QLHV, BOT có thể hữu ích khi mở rộng quản lý chi phí/đối soát hóa đơn thủ công, nếu API được cấp hỗ trợ. Không thay đổi lựa chọn MEINVOICE cho phát hành học phí, không mặc định AppID/quyền/gói tài nguyên dùng chung hoặc BOT giải quyết ký eSign.
+
+Nguồn:
+- https://helpeshop.misa.vn/kb/ket-noi-misa-meinvoice-xu-ly-hoa-don-va-tao-nhanh-phieu-nhap-kho-tu-hoa-don-mua-hang-cua-nha-cung-cap-tren-dien-thoai
+- https://helpv4.meinvoice.vn/kb/misa-ava-giai-thich-ket-qua-kiem-tra-hoa-don-dau-vao/
+- https://helpsme2021.misa.vn/2026/kb/misa-outbot/ (nội dung từ kết quả tìm kiếm chính thức; mở trực tiếp chưa thành công).
+
 ## Quy trình đề xuất và mốc 01/11/2026
 
 1. Chốt quy tắc thời điểm lập, người mua, số tiền và hóa đơn đã lập thủ công.
