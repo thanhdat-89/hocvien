@@ -39,6 +39,10 @@ export function misaConnectionConfig(product: Product) {
 export function misaConnectionStatus() {
   return {
     mode: 'READ_ONLY', publishingEnabled: false,
+    selectedCertificate: setting('ESIGN_CERT_ALIAS') && setting('ESIGN_CERT_SERIAL') ? {
+      keyAlias: setting('ESIGN_CERT_ALIAS'), serialNumber: setting('ESIGN_CERT_SERIAL'),
+      name: setting('ESIGN_CERT_NAME'),
+    } : null,
     products: (['meinvoice', 'esign'] as const).map(product => {
       const { fields, missing } = misaConnectionConfig(product)
       return { product, configured: Object.keys(fields).filter(key => !missing.includes(key)), missing }

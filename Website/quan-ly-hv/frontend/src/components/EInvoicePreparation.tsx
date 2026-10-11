@@ -34,7 +34,7 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
   rows: Row[]; loading: boolean; error: string | null; month: number; year: number; retry: () => void
 }) {
   const [filter, setFilter] = useState<'ready' | 'all' | 'unpaid'>('ready')
-  const [connection, setConnection] = useState<{ products: { product: string; missing: string[] }[] } | null>(null)
+  const [connection, setConnection] = useState<{ products: { product: string; missing: string[] }[]; selectedCertificate: { keyAlias: string; serialNumber: string; name: string } | null } | null>(null)
   const [checking, setChecking] = useState<string | null>(null)
   const [connectionMessage, setConnectionMessage] = useState('')
   const [otpRequired, setOtpRequired] = useState(false)
@@ -92,10 +92,17 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
           <button disabled={!!checking || !!product.missing.length} onClick={() => checkConnection(product.product)} className="mt-2 px-3 py-2 rounded-lg bg-primary text-on-primary text-sm disabled:opacity-40">{checking === product.product ? 'Đang kiểm tra...' : `Kiểm tra ${product.product === 'meinvoice' ? 'meInvoice' : 'eSign'}`}</button>
         </div>)}
         {connectionMessage && <p role="status" className="text-sm mt-3">{connectionMessage}</p>}
+        {connection?.selectedCertificate && <div className="mt-4 rounded-xl bg-white border border-primary/20 p-4 text-sm space-y-1">
+          <p className="font-semibold text-primary">Chứng thư đã chọn: {connection.selectedCertificate.name || connection.selectedCertificate.keyAlias}</p>
+          <p className="break-all">Mã chứng thư: {connection.selectedCertificate.keyAlias}</p>
+          <p className="break-all">Số sê-ri: {connection.selectedCertificate.serialNumber}</p>
+          <p className="text-xs text-outline">Đã lưu cấu hình. Kiểm tra eSign để đối chiếu chứng thư hiện tại. Chức năng ký và phát hành vẫn tắt.</p>
+        </div>}
         {certificates.length > 0 && <div className="mt-4 space-y-3">
           <h4 className="font-semibold text-on-surface">Danh sách chứng thư số eSign</h4>
           {certificates.map((cert, index) => <div key={`${cert.keyAlias}-${index}`} className="p-4 rounded-xl bg-white border border-amber-200 text-sm space-y-1">
             <p className="font-semibold">{index + 1}. {cert.subject.match(/(?:^|\n)CN=([^\n]+)/)?.[1] || cert.keyAlias || 'Chứng thư số'}</p>
+            {cert.keyAlias === connection?.selectedCertificate?.keyAlias && cert.serialNumber.toUpperCase() === connection.selectedCertificate.serialNumber.toUpperCase() && <p className="font-semibold text-primary">Đã chọn cho đơn vị xuất hóa đơn</p>}
             <p>Trạng thái eSign: {cert.status === 'ACTIVE' ? 'Đang hoạt động' : cert.status}</p>
             <p className="break-all">Mã chứng thư: {cert.keyAlias || 'Chưa có thông tin'}</p>
             <p className="break-all">Số sê-ri: {cert.serialNumber || 'Chưa đọc được'}</p>
