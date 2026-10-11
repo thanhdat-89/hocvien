@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import api from '../services/api'
+import { isAxiosError } from 'axios'
 import { Link } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import { buildInvoiceWorkbook } from '../lib/invoiceExport'
@@ -44,7 +45,9 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
     setChecking(product)
     try {
       const { data } = await api.post('/tuition/misa/connection/check', { product, ...(verifyOtp ? { otp: { code: otpCode, otpType } } : {}) })
-      if (product === 'esign') setOtpRequired(data.state === 'OTP_REQUIRED' || data.state === 'OTP_FAILED')
+      if (product === 'esign' && ['CONNECTED', 'OTP_REQUIRED', 'OTP_FAILED'].includes(data.state)) {
+        setOtpRequired(data.state !== 'CONNECTED')
+      }
       const name = product === 'meinvoice' ? 'meInvoice' : 'eSign'
       setConnectionMessage(data.state === 'CONNECTED'
         ? `${name}: kết nối thành công, tìm thấy ${data.count} ${product === 'meinvoice' ? 'mẫu hóa đơn' : 'chứng thư số'} (${data.activeCount} đang hoạt động).`
@@ -52,7 +55,15 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
         : data.state === 'OTP_REQUIRED' ? `${name}: cần nhập mã xác thực hai lớp.`
         : data.state === 'OTP_FAILED' ? `${name}: mã xác thực chưa hợp lệ hoặc đã hết hạn.`
         : `${name}: chưa xác minh được kết nối. Kiểm tra tài khoản và quyền API.`)
-    } catch { setConnectionMessage('Không kiểm tra được kết nối. Vui lòng thử lại sau.') }
+    } catch (error) {
+      const status = isAxiosError(error) ? error.response?.status : undefined
+      setConnectionMessage(status === 429
+        ? `Bạn đang kiểm tra quá nhanh. Chờ ${isAxiosError(error) ? error.response?.data?.retryAfter ?? 30 : 30} giây rồi thử lại.`
+        : status === 400 ? 'Mã OTP phải gồm 6 chữ số và chọn đúng nguồn mã.'
+        : status === 403 ? 'Chỉ quản trị viên có quyền kiểm tra kết nối MISA.'
+        : status ? `Backend trả lỗi HTTP ${status}. Chưa xác minh được kết nối MISA.`
+        : 'Không liên lạc được với backend. Kiểm tra mạng rồi thử lại.')
+    }
     finally { if (verifyOtp) setOtpCode(''); setChecking(null) }
   }
   const ready = rows.filter(isReadyForInvoice)
@@ -78,7 +89,7 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
           <label className="text-sm">Mã xác thực eSign<input type="password" inputMode="numeric" autoComplete="one-time-code" value={otpCode} onChange={event => setOtpCode(event.target.value.replace(/\D/g, '').slice(0, 6))} maxLength={6} className="block mt-1 p-2 rounded-lg border border-outline-variant bg-white" /></label>
           <label className="text-sm">Nguồn mã<select value={otpType} onChange={event => setOtpType(Number(event.target.value) as 0 | 1)} className="block mt-1 p-2 rounded-lg border border-outline-variant bg-white"><option value={1}>Ứng dụng xác thực</option><option value={0}>Email / SMS</option></select></label>
           <button type="submit" disabled={!!checking || otpCode.length !== 6} className="px-3 py-2 rounded-lg bg-primary text-on-primary text-sm disabled:opacity-40">Xác thực và đọc chứng thư</button>
-          <p className="w-full text-xs text-outline">Mã chỉ dùng cho lần kiểm tra này. Chờ 30 giây giữa các lần kiểm tra; không gửi mã vào chat.</p>
+          <p className="w-full text-xs text-outline">Có thể nhập OTP ngay sau bước đăng nhập. Chờ 30 giây nếu thử lại cùng bước; không gửi mã vào chat.</p>
         </form>}
       </div>
     </div>

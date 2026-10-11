@@ -24,7 +24,7 @@ router.get('/misa/connection', requireRole('ADMIN'), (_req, res) => {
 })
 
 const misaCheckTimes = new Map<string, number>()
-router.post('/misa/connection/check', requireRole('ADMIN'), async (req, res) => {
+router.post('/misa/connection/check', requireRole('ADMIN'), async (req: AuthRequest, res) => {
   const product = req.body?.product
   if (product !== 'meinvoice' && product !== 'esign') {
     res.status(400).json({ message: 'Sản phẩm không hợp lệ' }); return
@@ -34,10 +34,16 @@ router.post('/misa/connection/check', requireRole('ADMIN'), async (req, res) => 
     || !/^\d{6}$/.test(otp.code) || ![0, 1].includes(otp.otpType))) {
     res.status(400).json({ message: 'OTP phải có 6 chữ số và đúng loại xác thực.' }); return
   }
-  if (Date.now() - (misaCheckTimes.get(product) ?? 0) < 30000) {
-    res.status(429).json({ message: 'Chờ 30 giây trước khi kiểm tra lại.' }); return
+  // Login and OTP are consecutive steps, not repeated attempts at the same step.
+  const checkKey = `${req.user!.userId}:${product}:${otp ? 'otp' : 'login'}`
+  const checkedAt = Date.now()
+  for (const [key, at] of misaCheckTimes) if (checkedAt - at >= 30000) misaCheckTimes.delete(key)
+  const retryAfter = Math.ceil((30000 - (checkedAt - (misaCheckTimes.get(checkKey) ?? 0))) / 1000)
+  if (retryAfter > 0) {
+    res.setHeader('Retry-After', String(retryAfter))
+    res.status(429).json({ message: `Chờ ${retryAfter} giây trước khi thử lại bước này.`, retryAfter }); return
   }
-  misaCheckTimes.set(product, Date.now())
+  misaCheckTimes.set(checkKey, checkedAt)
   res.setHeader('Cache-Control', 'no-store')
   res.json(await checkMisaConnection(product, fetch, otp))
 })
