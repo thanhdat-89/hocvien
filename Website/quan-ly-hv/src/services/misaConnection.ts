@@ -8,9 +8,9 @@ export function misaConnectionConfig(product: Product) {
   const fields = invoice ? {
     MEINVOICE_CLIENT_ID: setting('MEINVOICE_CLIENT_ID', 'Client_ID'),
     MEINVOICE_CLIENT_SECRET: setting('MEINVOICE_CLIENT_SECRET', 'Client_Secret'),
-    MEINVOICE_TAXCODE: setting('MEINVOICE_TAXCODE'),
-    MEINVOICE_USERNAME: setting('MEINVOICE_USERNAME'),
-    MEINVOICE_PASSWORD: setting('MEINVOICE_PASSWORD'),
+    MEINVOICE_TAXCODE: setting('MEINVOICE_TAXCODE', 'taxcode'),
+    MEINVOICE_USERNAME: setting('MEINVOICE_USERNAME', 'username'),
+    MEINVOICE_PASSWORD: setting('MEINVOICE_PASSWORD', 'password'),
   } : {
     ESIGN_CLIENT_ID: setting('ESIGN_CLIENT_ID'),
     ESIGN_CLIENT_SECRET: setting('ESIGN_CLIENT_SECRET'),
@@ -35,7 +35,7 @@ function decode(value: unknown): any {
   try { return JSON.parse(value) } catch { return value }
 }
 
-export async function checkMisaConnection(product: Product, request: typeof fetch = fetch) {
+export async function checkMisaConnection(product: Product, request: typeof fetch = fetch, otp?: { code: string; otpType: 0 | 1 }) {
   const { fields, missing } = misaConnectionConfig(product)
   if (missing.length) return { product, state: 'MISSING_CONFIG', missing }
   const invoice = product === 'meinvoice'
@@ -52,15 +52,17 @@ export async function checkMisaConnection(product: Product, request: typeof fetc
     return body
   }
   try {
-    const login = await call(invoice ? '/itg/meinvoice/invoice/token' : '/esign/v1/auth/login-api', {
+    const login = await call(invoice ? '/itg/meinvoice/invoice/token' : otp ? '/esign/v1/auth/two-factor-auth' : '/esign/v1/auth/login-api', {
       method: 'POST', headers,
       body: JSON.stringify(invoice ? {
         taxcode: fields.MEINVOICE_TAXCODE, username: fields.MEINVOICE_USERNAME, password: fields.MEINVOICE_PASSWORD,
-      } : { userName: fields.ESIGN_USERNAME, password: fields.ESIGN_PASSWORD }),
+      } : otp ? { userName: fields.ESIGN_USERNAME, code: otp.code, otpType: otp.otpType, remember: false }
+        : { userName: fields.ESIGN_USERNAME, password: fields.ESIGN_PASSWORD }),
     })
     const data = decode(login.data ?? login.Data)
     if (invoice && (login.success ?? login.Success) !== true) return { product, state: 'AUTH_FAILED' }
-    if (!invoice && (login.status?.error === true || Number(login.status?.code) !== 200)) return { product, state: 'AUTH_FAILED_OR_OTP_REQUIRED' }
+    if (!invoice && Number(login.status?.errorCode) === 122) return { product, state: 'OTP_REQUIRED' }
+    if (!invoice && (login.status?.error === true || Number(login.status?.code) !== 200)) return { product, state: otp ? 'OTP_FAILED' : 'AUTH_FAILED' }
     const token = invoice ? data : data?.remoteSigningAccessToken
     if (typeof token !== 'string' || !token) return { product, state: invoice ? 'INVALID_RESPONSE' : 'OTP_REQUIRED' }
     const result = await call(invoice

@@ -29,12 +29,17 @@ router.post('/misa/connection/check', requireRole('ADMIN'), async (req, res) => 
   if (product !== 'meinvoice' && product !== 'esign') {
     res.status(400).json({ message: 'Sản phẩm không hợp lệ' }); return
   }
+  const otp = req.body?.otp
+  if (otp !== undefined && (product !== 'esign' || !otp || typeof otp.code !== 'string'
+    || !/^\d{6}$/.test(otp.code) || ![0, 1].includes(otp.otpType))) {
+    res.status(400).json({ message: 'OTP phải có 6 chữ số và đúng loại xác thực.' }); return
+  }
   if (Date.now() - (misaCheckTimes.get(product) ?? 0) < 30000) {
     res.status(429).json({ message: 'Chờ 30 giây trước khi kiểm tra lại.' }); return
   }
   misaCheckTimes.set(product, Date.now())
   res.setHeader('Cache-Control', 'no-store')
-  res.json(await checkMisaConnection(product))
+  res.json(await checkMisaConnection(product, fetch, otp))
 })
 
 // GET /api/tuition

@@ -31,24 +31,29 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
   const [connection, setConnection] = useState<{ products: { product: string; missing: string[] }[] } | null>(null)
   const [checking, setChecking] = useState<string | null>(null)
   const [connectionMessage, setConnectionMessage] = useState('')
+  const [otpRequired, setOtpRequired] = useState(false)
+  const [otpCode, setOtpCode] = useState('')
+  const [otpType, setOtpType] = useState<0 | 1>(1)
   useEffect(() => {
     let active = true
     api.get('/tuition/misa/connection').then(({ data }) => { if (active) setConnection(data) })
       .catch(() => { if (active) setConnectionMessage('Chỉ quản trị viên có thể kiểm tra kết nối MISA.') })
     return () => { active = false }
   }, [])
-  const checkConnection = async (product: string) => {
+  const checkConnection = async (product: string, verifyOtp = false) => {
     setChecking(product)
     try {
-      const { data } = await api.post('/tuition/misa/connection/check', { product })
+      const { data } = await api.post('/tuition/misa/connection/check', { product, ...(verifyOtp ? { otp: { code: otpCode, otpType } } : {}) })
+      if (product === 'esign') setOtpRequired(data.state === 'OTP_REQUIRED' || data.state === 'OTP_FAILED')
       const name = product === 'meinvoice' ? 'meInvoice' : 'eSign'
       setConnectionMessage(data.state === 'CONNECTED'
         ? `${name}: kết nối thành công, tìm thấy ${data.count} ${product === 'meinvoice' ? 'mẫu hóa đơn' : 'chứng thư số'} (${data.activeCount} đang hoạt động).`
         : data.state === 'MISSING_CONFIG' ? `${name}: cần bổ sung ${data.missing.join(', ')} trên backend.`
-        : ['OTP_REQUIRED', 'AUTH_FAILED_OR_OTP_REQUIRED'].includes(data.state) ? `${name}: cần xác minh tài khoản hoặc xác thực OTP.`
+        : data.state === 'OTP_REQUIRED' ? `${name}: cần nhập mã xác thực hai lớp.`
+        : data.state === 'OTP_FAILED' ? `${name}: mã xác thực chưa hợp lệ hoặc đã hết hạn.`
         : `${name}: chưa xác minh được kết nối. Kiểm tra tài khoản và quyền API.`)
     } catch { setConnectionMessage('Không kiểm tra được kết nối. Vui lòng thử lại sau.') }
-    finally { setChecking(null) }
+    finally { if (verifyOtp) setOtpCode(''); setChecking(null) }
   }
   const ready = rows.filter(isReadyForInvoice)
   const visible = rows.filter(row => filter === 'all' || (filter === 'ready' ? isReadyForInvoice(row) : !isReadyForInvoice(row)))
@@ -69,6 +74,12 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
           <button disabled={!!checking || !!product.missing.length} onClick={() => checkConnection(product.product)} className="mt-2 px-3 py-2 rounded-lg bg-primary text-on-primary text-sm disabled:opacity-40">{checking === product.product ? 'Đang kiểm tra...' : `Kiểm tra ${product.product === 'meinvoice' ? 'meInvoice' : 'eSign'}`}</button>
         </div>)}
         {connectionMessage && <p role="status" className="text-sm mt-3">{connectionMessage}</p>}
+        {otpRequired && <form className="flex flex-wrap items-end gap-3 mt-3" onSubmit={event => { event.preventDefault(); checkConnection('esign', true) }}>
+          <label className="text-sm">Mã xác thực eSign<input type="password" inputMode="numeric" autoComplete="one-time-code" value={otpCode} onChange={event => setOtpCode(event.target.value.replace(/\D/g, '').slice(0, 6))} maxLength={6} className="block mt-1 p-2 rounded-lg border border-outline-variant bg-white" /></label>
+          <label className="text-sm">Nguồn mã<select value={otpType} onChange={event => setOtpType(Number(event.target.value) as 0 | 1)} className="block mt-1 p-2 rounded-lg border border-outline-variant bg-white"><option value={1}>Ứng dụng xác thực</option><option value={0}>Email / SMS</option></select></label>
+          <button type="submit" disabled={!!checking || otpCode.length !== 6} className="px-3 py-2 rounded-lg bg-primary text-on-primary text-sm disabled:opacity-40">Xác thực và đọc chứng thư</button>
+          <p className="w-full text-xs text-outline">Mã chỉ dùng cho lần kiểm tra này. Chờ 30 giây giữa các lần kiểm tra; không gửi mã vào chat.</p>
+        </form>}
       </div>
     </div>
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

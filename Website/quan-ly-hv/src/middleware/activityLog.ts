@@ -20,6 +20,7 @@ declare module 'express-serve-static-core' {
 const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
 const SKIP_PATTERNS: RegExp[] = [
+  /^\/api\/tuition\/misa\/connection/,
   /^\/api\/auth\//,
   /^\/api\/public\//,
   /^\/api\/zalo/,
