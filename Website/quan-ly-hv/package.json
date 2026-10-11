@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
+    "test:misa-preview": "npm run build && node --test test/misa-preview.test.cjs",
     "start": "node dist/index.js",
     "db:seed": "tsx src/scripts/seedFirebase.ts",
     "deploy": "vercel --prod --yes"

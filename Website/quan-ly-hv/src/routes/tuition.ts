@@ -1,5 +1,6 @@
 import { getTuitionScheduleSummary } from '../services/tuitionScheduleSummary'
 import { misaConnectionStatus, checkMisaConnection } from '../services/misaConnection'
+import misaDrafts from './misaDrafts'
 import { activityContext } from '../middleware/activityContext'
 import { Router, Response, NextFunction } from 'express'
 import { db, C, s, toDocs, toObj, paginate } from '../lib/firebase'
@@ -16,6 +17,7 @@ import {
 const router = Router()
 router.use(authenticate)
 router.use(activityContext)
+router.use('/misa', misaDrafts)
 const now = () => new Date().toISOString()
 
 router.get('/misa/connection', requireRole('ADMIN'), (_req, res) => {

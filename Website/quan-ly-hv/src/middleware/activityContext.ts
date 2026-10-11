@@ -6,7 +6,7 @@ import { ActivityHint } from './activityLog'
 type Data = Record<string, any>
 const object = (value: unknown): Data => value && typeof value === 'object' && !Array.isArray(value) ? value as Data : {}
 const text = (value: unknown) => typeof value === 'string' ? value.trim() : ''
-const reserved = new Set(['calculate', 'calculate-bulk', 'toggle-paid', 'bulk', 'bulk-delete', 'student-promotions', 'promotions', 'payment'])
+const reserved = new Set(['calculate', 'calculate-bulk', 'toggle-paid', 'bulk', 'bulk-delete', 'student-promotions', 'promotions', 'payment', 'misa'])
 
 async function read(collection: string, id: unknown): Promise<Data> {
   if (!text(id) || text(id).includes('/')) return {}

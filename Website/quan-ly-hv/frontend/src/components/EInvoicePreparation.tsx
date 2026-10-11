@@ -4,6 +4,7 @@ import { isAxiosError } from 'axios'
 import { Link } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import { buildInvoiceWorkbook } from '../lib/invoiceExport'
+import InvoiceDraftDialog from './InvoiceDraftDialog'
 
 interface Row {
   studentId: string
@@ -34,6 +35,7 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
   rows: Row[]; loading: boolean; error: string | null; month: number; year: number; retry: () => void
 }) {
   const [filter, setFilter] = useState<'ready' | 'all' | 'unpaid'>('ready')
+  const [draftRecordId, setDraftRecordId] = useState<string | null>(null)
   const [connection, setConnection] = useState<{ products: { product: string; missing: string[] }[]; selectedCertificate: { keyAlias: string; serialNumber: string; name: string } | null } | null>(null)
   const [checking, setChecking] = useState<string | null>(null)
   const [connectionMessage, setConnectionMessage] = useState('')
@@ -110,7 +112,7 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
             <p className="whitespace-pre-line break-words">Đơn vị cấp: {cert.issuer || 'Chưa đọc được'}</p>
             <p>Hiệu lực từ: {cert.validFrom ? new Date(cert.validFrom).toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) : 'Chưa đọc được'} — đến: {cert.validTo ? new Date(cert.validTo).toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) : 'Chưa đọc được'}</p>
           </div>)}
-          <p className="text-xs text-outline">Danh sách này chỉ để đối chiếu. Chưa chọn chứng thư để ký hoặc phát hành hóa đơn.</p>
+          <p className="text-xs text-outline">Danh sách này chỉ để đối chiếu với chứng thư đã chọn. Chức năng ký và phát hành vẫn tắt.</p>
         </div>}
         {otpRequired && <form className="flex flex-wrap items-end gap-3 mt-3" onSubmit={event => { event.preventDefault(); checkConnection('esign', true) }}>
           <label className="text-sm">Mã xác thực eSign<input type="password" inputMode="numeric" autoComplete="one-time-code" value={otpCode} onChange={event => setOtpCode(event.target.value.replace(/\D/g, '').slice(0, 6))} maxLength={6} className="block mt-1 p-2 rounded-lg border border-outline-variant bg-white" /></label>
@@ -134,7 +136,7 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
       <button disabled={!exportable.length} onClick={() => XLSX.writeFile(buildInvoiceWorkbook(exportable), `misa-phieu-da-thanh-toan-${month}-${year}.xlsx`)} className="px-4 py-2 rounded-xl bg-secondary/10 text-secondary font-semibold text-sm disabled:opacity-40">Xuất Excel phiếu đã thanh toán</button>
     </div>
     {exportable.length < ready.length && <p className="text-sm text-amber-700">Có {ready.length - exportable.length} phiếu chênh lệch với lịch học hiện tại. Các phiếu này được bỏ qua khi xuất Excel; hãy kiểm tra lại số tiền.</p>}
-    <p className="text-sm text-outline">Mỗi dòng là một khoản học phí theo lớp. Thông tin người đứng tên hóa đơn và cách gộp các lớp sẽ được thiết lập trước khi bật kết nối.</p>
+    <p className="text-sm text-outline">Mỗi dòng là một khoản học phí theo lớp. Với phiếu đã thanh toán đủ, mở “Bản nháp / xem trước” để chọn mẫu và kiểm tra người mua. Bản nháp lưu trên website, chưa đồng bộ vào danh sách hóa đơn MISA.</p>
     <div className="bg-surface-container-lowest rounded-2xl overflow-x-auto border border-outline-variant/10">
       <table className="w-full"><thead><tr>{['STT', 'Học viên', 'Lớp học', 'Số tiền phiếu', 'Thanh toán', 'Kết nối hóa đơn', 'Thao tác'].map(label => <th key={label} className="table-header">{label}</th>)}</tr></thead>
         <tbody>{visible.map((row, index) => <tr key={`${row.studentId}:${row.classId}`} className="border-t border-outline-variant/10">
@@ -142,10 +144,13 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
           <td className="table-cell whitespace-nowrap">{row.tuitionRecord ? money(row.tuitionRecord.finalAmount) : 'Chưa có phiếu'}</td>
           <td className={`table-cell ${isReadyForInvoice(row) ? 'text-secondary' : 'text-amber-700'}`}>{isReadyForInvoice(row) ? 'Đã thanh toán đủ' : row.tuitionRecord ? 'Chưa thanh toán đủ' : 'Chưa có phiếu'}</td>
           <td className="table-cell text-outline">Chưa đồng bộ MISA</td>
-          <td className="table-cell"><Link to={`/students/${encodeURIComponent(row.studentId)}`} className="text-primary font-semibold whitespace-nowrap">Xem học viên</Link></td>
+          <td className="table-cell"><div className="flex flex-col items-start gap-2"><Link to={`/students/${encodeURIComponent(row.studentId)}`} className="text-primary font-semibold whitespace-nowrap">Xem học viên</Link>
+            {isReadyForInvoice(row) && connection && <button type="button" onClick={() => setDraftRecordId(row.tuitionRecord!.id)} className="text-primary font-semibold whitespace-nowrap">Bản nháp / xem trước</button>}
+          </div></td>
         </tr>)}</tbody>
       </table>
       {!visible.length && <p className="py-12 text-center text-outline">Không có khoản học phí phù hợp trong tháng {month}/{year}.</p>}
     </div>
+    {draftRecordId && <InvoiceDraftDialog recordId={draftRecordId} onClose={() => setDraftRecordId(null)} />}
   </section>
 }
