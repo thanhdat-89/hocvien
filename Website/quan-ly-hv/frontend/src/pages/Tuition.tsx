@@ -107,6 +107,9 @@ export default function Tuition() {
   const totalAmount = filtered.reduce((s, r) => s + r.finalAmount, 0)
   const totalSessions = filtered.reduce((s, r) => s + r.totalSessions, 0)
   const uniqueStudents = new Set(filtered.map(r => r.studentId)).size
+  const unpaidStudents = new Set(filtered
+    .filter(r => (r.tuitionRecord ? r.tuitionRecord.remainingAmount : r.finalAmount) > 0)
+    .map(r => r.studentId)).size
 
   const years = Array.from({ length: 4 }, (_, i) => thisYear - 1 + i)
 
@@ -337,9 +340,10 @@ export default function Tuition() {
             <p className="text-sm text-outline font-medium">Học viên</p>
             <p className="text-3xl font-black text-primary mt-2">{uniqueStudents}</p>
           </div>
-          <div className="bg-surface-container-lowest p-6 rounded-2xl shadow-sm border border-outline-variant/10">
-            <p className="text-sm text-outline font-medium">Tổng số buổi</p>
-            <p className="text-3xl font-black text-secondary mt-2">{totalSessions}</p>
+          <div className="bg-surface-container-lowest p-6 rounded-2xl shadow-sm border border-red-200">
+            <p className="text-sm text-outline font-medium">Chưa thanh toán</p>
+            <p className="text-3xl font-black text-red-700 mt-2">{loading || loadError ? '—' : unpaidStudents}</p>
+            <p className="text-xs text-outline mt-2">Học viên còn nợ hoặc chưa có phiếu học phí</p>
           </div>
         </div>
 
