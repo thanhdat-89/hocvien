@@ -1,5 +1,7 @@
 # Chuẩn bị tích hợp MISA meInvoice
 
+Nghiên cứu ngày 11/10/2026: xem [MEINVOICE-RESEARCH.md](MEINVOICE-RESEARCH.md). Quy tắc thanh toán đủ dưới đây chỉ dùng rà soát; trước triển khai phải chốt thời điểm lập theo giao dịch thu tiền/hoàn thành dịch vụ, không mặc định chờ thu đủ mới lập hóa đơn. Ký eSign không mặc định tương đương API HSM.
+
 ## Đã chuẩn bị
 
 Trang Học phí có tab Hóa đơn điện tử, dùng chung tháng/năm và dữ liệu lịch học phí. Tab rà soát các khoản có phiếu thanh toán đủ, chưa thanh toán đủ hoặc chưa có phiếu; chỉ dựa vào giao dịch đã lưu, không dùng checkbox chưa áp dụng. Một dòng tương ứng một khoản học phí theo lớp, chưa phải một hóa đơn MISA.
