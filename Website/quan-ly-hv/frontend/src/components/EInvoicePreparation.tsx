@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import api from '../services/api'
 import { Link } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import { buildInvoiceWorkbook } from '../lib/invoiceExport'
@@ -27,6 +28,28 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
   rows: Row[]; loading: boolean; error: string | null; month: number; year: number; retry: () => void
 }) {
   const [filter, setFilter] = useState<'ready' | 'all' | 'unpaid'>('ready')
+  const [connection, setConnection] = useState<{ products: { product: string; missing: string[] }[] } | null>(null)
+  const [checking, setChecking] = useState<string | null>(null)
+  const [connectionMessage, setConnectionMessage] = useState('')
+  useEffect(() => {
+    let active = true
+    api.get('/tuition/misa/connection').then(({ data }) => { if (active) setConnection(data) })
+      .catch(() => { if (active) setConnectionMessage('Chỉ quản trị viên có thể kiểm tra kết nối MISA.') })
+    return () => { active = false }
+  }, [])
+  const checkConnection = async (product: string) => {
+    setChecking(product)
+    try {
+      const { data } = await api.post('/tuition/misa/connection/check', { product })
+      const name = product === 'meinvoice' ? 'meInvoice' : 'eSign'
+      setConnectionMessage(data.state === 'CONNECTED'
+        ? `${name}: kết nối thành công, tìm thấy ${data.count} ${product === 'meinvoice' ? 'mẫu hóa đơn' : 'chứng thư số'} (${data.activeCount} đang hoạt động).`
+        : data.state === 'MISSING_CONFIG' ? `${name}: cần bổ sung ${data.missing.join(', ')} trên backend.`
+        : ['OTP_REQUIRED', 'AUTH_FAILED_OR_OTP_REQUIRED'].includes(data.state) ? `${name}: cần xác minh tài khoản hoặc xác thực OTP.`
+        : `${name}: chưa xác minh được kết nối. Kiểm tra tài khoản và quyền API.`)
+    } catch { setConnectionMessage('Không kiểm tra được kết nối. Vui lòng thử lại sau.') }
+    finally { setChecking(null) }
+  }
   const ready = rows.filter(isReadyForInvoice)
   const visible = rows.filter(row => filter === 'all' || (filter === 'ready' ? isReadyForInvoice(row) : !isReadyForInvoice(row)))
   const money = (value: number) => value.toLocaleString('vi-VN') + 'đ'
@@ -39,8 +62,13 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
   return <section className="space-y-6">
     <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 flex gap-3">
       <span className="material-symbols-outlined text-amber-700">info</span>
-      <div><h3 className="font-bold text-on-surface">Chưa kết nối MISA meInvoice</h3>
-        <p className="text-sm text-outline mt-1">Danh sách dưới đây giúp rà soát thanh toán trước khi lập hóa đơn. Chưa gửi dữ liệu, ký số hoặc phát hành hóa đơn. Hóa đơn đã lập bên MISA chưa được đồng bộ.</p>
+      <div><h3 className="font-bold text-on-surface">Thiết lập kết nối MISA — thử nghiệm</h3>
+        <p className="text-sm text-outline mt-1">Kiểm tra đăng nhập, mẫu hóa đơn và chứng thư số. Chức năng ký và phát hành hóa đơn đang tắt. Hóa đơn đã lập bên MISA chưa được đồng bộ.</p>
+        {connection?.products.map(product => <div key={product.product} className="mt-3">
+          <p className="text-sm">{product.product === 'meinvoice' ? 'meInvoice' : 'eSign'}: {product.missing.length ? `Cần bổ sung ${product.missing.join(', ')}` : 'Đủ cấu hình, cần kiểm tra kết nối'}</p>
+          <button disabled={!!checking || !!product.missing.length} onClick={() => checkConnection(product.product)} className="mt-2 px-3 py-2 rounded-lg bg-primary text-on-primary text-sm disabled:opacity-40">{checking === product.product ? 'Đang kiểm tra...' : `Kiểm tra ${product.product === 'meinvoice' ? 'meInvoice' : 'eSign'}`}</button>
+        </div>)}
+        {connectionMessage && <p role="status" className="text-sm mt-3">{connectionMessage}</p>}
       </div>
     </div>
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

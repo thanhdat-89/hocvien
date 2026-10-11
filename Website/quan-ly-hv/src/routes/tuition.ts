@@ -1,4 +1,5 @@
 import { getTuitionScheduleSummary } from '../services/tuitionScheduleSummary'
+import { misaConnectionStatus, checkMisaConnection } from '../services/misaConnection'
 import { activityContext } from '../middleware/activityContext'
 import { Router, Response, NextFunction } from 'express'
 import { db, C, s, toDocs, toObj, paginate } from '../lib/firebase'
@@ -16,6 +17,25 @@ const router = Router()
 router.use(authenticate)
 router.use(activityContext)
 const now = () => new Date().toISOString()
+
+router.get('/misa/connection', requireRole('ADMIN'), (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store')
+  res.json(misaConnectionStatus())
+})
+
+const misaCheckTimes = new Map<string, number>()
+router.post('/misa/connection/check', requireRole('ADMIN'), async (req, res) => {
+  const product = req.body?.product
+  if (product !== 'meinvoice' && product !== 'esign') {
+    res.status(400).json({ message: 'Sản phẩm không hợp lệ' }); return
+  }
+  if (Date.now() - (misaCheckTimes.get(product) ?? 0) < 30000) {
+    res.status(429).json({ message: 'Chờ 30 giây trước khi kiểm tra lại.' }); return
+  }
+  misaCheckTimes.set(product, Date.now())
+  res.setHeader('Cache-Control', 'no-store')
+  res.json(await checkMisaConnection(product))
+})
 
 // GET /api/tuition
 router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
