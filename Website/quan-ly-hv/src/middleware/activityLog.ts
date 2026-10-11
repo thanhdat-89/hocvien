@@ -3,6 +3,7 @@ import { AuthRequest } from '../types'
 import { logActivity, ActivityAction } from '../lib/activityLog'
 
 export interface ActivityHint {
+  action?: ActivityAction
   description?: string
   resourceType?: string
   resourceId?: string
@@ -76,9 +77,9 @@ export function activityLogMiddleware(req: AuthRequest, res: Response, next: Nex
     if (res.statusCode < 200 || res.statusCode >= 300) return
     if (!req.user) return
 
-    const action: ActivityAction =
+    const action: ActivityAction = req.activity?.action ?? (
       method === 'POST' ? 'CREATE' :
-      method === 'DELETE' ? 'DELETE' : 'UPDATE'
+      method === 'DELETE' ? 'DELETE' : 'UPDATE')
 
     const hint: ActivityHint = req.activity ?? {}
     const resourceType = hint.resourceType ?? deriveResourceType(originalPath)

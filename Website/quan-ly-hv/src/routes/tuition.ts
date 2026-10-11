@@ -1,4 +1,5 @@
 import { getTuitionScheduleSummary } from '../services/tuitionScheduleSummary'
+import { activityContext } from '../middleware/activityContext'
 import { Router, Response, NextFunction } from 'express'
 import { db, C, s, toDocs, toObj, paginate } from '../lib/firebase'
 import { authenticate, requireRole } from '../middleware/auth'
@@ -13,6 +14,7 @@ import {
 
 const router = Router()
 router.use(authenticate)
+router.use(activityContext)
 const now = () => new Date().toISOString()
 
 // GET /api/tuition

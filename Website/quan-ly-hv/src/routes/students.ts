@@ -6,11 +6,13 @@ import { computeTuitionSummary } from '../lib/tuition'
 import { getSupabasePool } from '../lib/supabase'
 import { requireRole } from '../middleware/auth'
 import { authenticate } from '../middleware/auth'
+import { activityContext } from '../middleware/activityContext'
 import { AuthRequest } from '../types'
 import type { Student, ClassEnrollment, StudentAttendance, PrivateSession } from '../types/models'
 
 const router = Router()
 router.use(authenticate)
+router.use(activityContext)
 
 const now = () => new Date().toISOString()
 const STUDENT_COUNT_TTL_MS = 60 * 1000

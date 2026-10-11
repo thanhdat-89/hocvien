@@ -1,11 +1,13 @@
 import { Router, Response, NextFunction } from 'express'
 import { db, C, s, toDocs, toObj, paginate } from '../lib/firebase'
 import { authenticate, requireRole } from '../middleware/auth'
+import { activityContext } from '../middleware/activityContext'
 import { AuthRequest } from '../types'
 import type { Class, ClassEnrollment } from '../types/models'
 
 const router = Router()
 router.use(authenticate)
+router.use(activityContext)
 const now = () => new Date().toISOString()
 
 // GET /api/classes
