@@ -1,4 +1,20 @@
 // Developer Portal gateway, verified 11/10/2026. No signing/publishing endpoints.
+import { X509Certificate } from 'node:crypto'
+
+export function certificateSummary(item: any) {
+  const metadata = {
+    keyAlias: typeof item.keyAlias === 'string' ? item.keyAlias : '',
+    status: typeof item.keyStatus === 'string' ? item.keyStatus : 'UNKNOWN',
+    subject: '', issuer: '', serialNumber: '', validFrom: '', validTo: '',
+  }
+  try {
+    const raw = item.certificate
+    if (typeof raw !== 'string' || !raw) return metadata
+    const cert = new X509Certificate(raw.includes('-----BEGIN CERTIFICATE-----') ? raw : Buffer.from(raw, 'base64'))
+    return { ...metadata, subject: cert.subject, issuer: cert.issuer, serialNumber: cert.serialNumber,
+      validFrom: cert.validFrom, validTo: cert.validTo }
+  } catch { return metadata }
+}
 const GATEWAY = 'https://developer.misa.vn/apis'
 type Product = 'meinvoice' | 'esign'
 const setting = (name: string, alias?: string) => process.env[name]?.trim() || (alias ? process.env[alias]?.trim() : '') || ''
@@ -73,9 +89,10 @@ export async function checkMisaConnection(product: Product, request: typeof fetc
     if (invoice && (result.success ?? result.Success) !== true) return { product, state: 'LOOKUP_FAILED' }
     const list = decode(invoice ? (result.data ?? result.Data) : (Array.isArray(result) ? result : result.data))
     if (!Array.isArray(list)) return { product, state: 'INVALID_RESPONSE' }
-    // Return counts only. Tokens, raw certificates and provider responses stay server-side.
+    // Public certificate metadata only; no tokens or raw provider responses.
     return { product, state: 'CONNECTED', count: list.length,
-      activeCount: invoice ? list.filter(item => item.Inactive !== true).length : list.filter(item => item.keyStatus === 'ACTIVE').length }
+      activeCount: invoice ? list.filter(item => item.Inactive !== true).length : list.filter(item => item.keyStatus === 'ACTIVE').length,
+      ...(!invoice ? { certificates: list.map(certificateSummary) } : {}) }
   } catch {
     return { product, state: 'REQUEST_FAILED' }
   }

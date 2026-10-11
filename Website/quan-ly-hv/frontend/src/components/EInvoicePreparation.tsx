@@ -17,6 +17,11 @@ interface Row {
   tuitionRecord: { id: string; finalAmount: number; paidAmount: number; remainingAmount: number; status: string } | null
 }
 
+interface CertificateSummary {
+  keyAlias: string; status: string; subject: string; issuer: string
+  serialNumber: string; validFrom: string; validTo: string
+}
+
 // Eligibility is based only on saved payments, never the unsaved checkbox state.
 export function isReadyForInvoice(row: Row) {
   const record = row.tuitionRecord
@@ -35,6 +40,7 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
   const [otpRequired, setOtpRequired] = useState(false)
   const [otpCode, setOtpCode] = useState('')
   const [otpType, setOtpType] = useState<0 | 1>(1)
+  const [certificates, setCertificates] = useState<CertificateSummary[]>([])
   useEffect(() => {
     let active = true
     api.get('/tuition/misa/connection').then(({ data }) => { if (active) setConnection(data) })
@@ -48,6 +54,7 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
       if (product === 'esign' && ['CONNECTED', 'OTP_REQUIRED', 'OTP_FAILED'].includes(data.state)) {
         setOtpRequired(data.state !== 'CONNECTED')
       }
+      if (product === 'esign') setCertificates(data.state === 'CONNECTED' ? data.certificates ?? [] : [])
       const name = product === 'meinvoice' ? 'meInvoice' : 'eSign'
       setConnectionMessage(data.state === 'CONNECTED'
         ? `${name}: kết nối thành công, tìm thấy ${data.count} ${product === 'meinvoice' ? 'mẫu hóa đơn' : 'chứng thư số'} (${data.activeCount} đang hoạt động).`
@@ -85,6 +92,19 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
           <button disabled={!!checking || !!product.missing.length} onClick={() => checkConnection(product.product)} className="mt-2 px-3 py-2 rounded-lg bg-primary text-on-primary text-sm disabled:opacity-40">{checking === product.product ? 'Đang kiểm tra...' : `Kiểm tra ${product.product === 'meinvoice' ? 'meInvoice' : 'eSign'}`}</button>
         </div>)}
         {connectionMessage && <p role="status" className="text-sm mt-3">{connectionMessage}</p>}
+        {certificates.length > 0 && <div className="mt-4 space-y-3">
+          <h4 className="font-semibold text-on-surface">Danh sách chứng thư số eSign</h4>
+          {certificates.map((cert, index) => <div key={`${cert.keyAlias}-${index}`} className="p-4 rounded-xl bg-white border border-amber-200 text-sm space-y-1">
+            <p className="font-semibold">{index + 1}. {cert.subject.match(/(?:^|\n)CN=([^\n]+)/)?.[1] || cert.keyAlias || 'Chứng thư số'}</p>
+            <p>Trạng thái eSign: {cert.status === 'ACTIVE' ? 'Đang hoạt động' : cert.status}</p>
+            <p className="break-all">Mã chứng thư: {cert.keyAlias || 'Chưa có thông tin'}</p>
+            <p className="break-all">Số sê-ri: {cert.serialNumber || 'Chưa đọc được'}</p>
+            <p className="whitespace-pre-line break-words">Chủ thể: {cert.subject || 'Chưa đọc được'}</p>
+            <p className="whitespace-pre-line break-words">Đơn vị cấp: {cert.issuer || 'Chưa đọc được'}</p>
+            <p>Hiệu lực từ: {cert.validFrom ? new Date(cert.validFrom).toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) : 'Chưa đọc được'} — đến: {cert.validTo ? new Date(cert.validTo).toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) : 'Chưa đọc được'}</p>
+          </div>)}
+          <p className="text-xs text-outline">Danh sách này chỉ để đối chiếu. Chưa chọn chứng thư để ký hoặc phát hành hóa đơn.</p>
+        </div>}
         {otpRequired && <form className="flex flex-wrap items-end gap-3 mt-3" onSubmit={event => { event.preventDefault(); checkConnection('esign', true) }}>
           <label className="text-sm">Mã xác thực eSign<input type="password" inputMode="numeric" autoComplete="one-time-code" value={otpCode} onChange={event => setOtpCode(event.target.value.replace(/\D/g, '').slice(0, 6))} maxLength={6} className="block mt-1 p-2 rounded-lg border border-outline-variant bg-white" /></label>
           <label className="text-sm">Nguồn mã<select value={otpType} onChange={event => setOtpType(Number(event.target.value) as 0 | 1)} className="block mt-1 p-2 rounded-lg border border-outline-variant bg-white"><option value={1}>Ứng dụng xác thực</option><option value={0}>Email / SMS</option></select></label>
