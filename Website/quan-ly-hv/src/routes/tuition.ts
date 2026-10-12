@@ -1,4 +1,4 @@
-import { getTuitionScheduleSummary } from '../services/tuitionScheduleSummary'
+import { getTuitionScheduleWithFallback } from '../services/tuitionScheduleRead'
 import { misaConnectionStatus, checkMisaConnection } from '../services/misaConnection'
 import misaDrafts from './misaDrafts'
 import { activityContext } from '../middleware/activityContext'
@@ -77,7 +77,9 @@ router.get('/schedule-summary', async (req: AuthRequest, res: Response, next: Ne
     if (!Number.isInteger(month) || month < 1 || month > 12 || !Number.isInteger(year) || year < 2000 || year > 2100) {
       res.status(400).json({ message: 'Month/year không hợp lệ' }); return
     }
-    res.json(await getTuitionScheduleSummary(month, year))
+    const result = await getTuitionScheduleWithFallback(month, year)
+    res.setHeader('X-Tuition-Data-Source', result.source)
+    res.json(result.rows)
   } catch (err) { next(err) }
 })
 

@@ -55,6 +55,7 @@ export default function Tuition() {
   const [rows, setRows] = useState<ScheduleRow[]>([])
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [dataSource, setDataSource] = useState<'firebase' | 'supabase-fallback' | null>(null)
   const [tab, setTab] = useState<'tuition' | 'invoices'>('tuition')
   const latestRequest = useRef(0)
   const [classFilter, setClassFilter] = useState<string | null>(null)
@@ -65,8 +66,8 @@ export default function Tuition() {
     setLoading(true)
     setLoadError(null)
     api.get(`/tuition/schedule-summary?month=${month}&year=${year}`)
-      .then(r => { if (request === latestRequest.current) setRows(r.data) })
-      .catch(() => { if (request === latestRequest.current) { setRows([]); setLoadError('Không tải được dữ liệu học phí.'); } })
+      .then(r => { if (request === latestRequest.current) { setRows(r.data); setDataSource(r.headers['x-tuition-data-source'] || 'firebase') } })
+      .catch(() => { if (request === latestRequest.current) { setRows([]); setDataSource(null); setLoadError('Không tải được dữ liệu học phí.'); } })
       .finally(() => { if (request === latestRequest.current) setLoading(false) })
   }
 
@@ -330,6 +331,7 @@ export default function Tuition() {
         </div>
         {tab === 'invoices' ? <div role="tabpanel" id="panel-invoices" aria-labelledby="tab-invoices"><EInvoicePreparation rows={rows} loading={loading} error={loadError} month={month} year={year} retry={loadData} /></div> : <div role="tabpanel" id="panel-tuition" aria-labelledby="tab-tuition" className="space-y-8">
         {loadError && <div role="alert" className="text-red-700">{loadError} <button className="underline" onClick={loadData}>Thử lại</button></div>}
+        {dataSource === 'supabase-fallback' && <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Firebase đang chạm hạn mức đọc; đang hiển thị dữ liệu dự phòng từ Supabase.</div>}
         {/* Stats */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="bg-surface-container-lowest p-6 rounded-2xl shadow-sm border border-outline-variant/10">

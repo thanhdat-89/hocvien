@@ -1,36 +1,8 @@
 import { C, rawDb } from '../lib/firebase'
 import { getSupabasePool } from '../lib/supabase'
 import { flushSupabaseSyncQueue } from '../lib/firestoreMirror'
+import { firestoreSnapshotStore } from '../lib/firestoreSnapshot'
 import { getTuitionScheduleSummary } from './tuitionScheduleSummary'
-
-/** Read-only Firestore-shaped store so exports use the exact website calculation. */
-export function tuitionSnapshotStore(documents: { collection_path: string; document_id: string; data: Record<string, any> }[]) {
-  const collections = new Map<string, typeof documents>()
-  for (const row of documents) {
-    const group = collections.get(row.collection_path) ?? []
-    group.push(row); collections.set(row.collection_path, group)
-  }
-  const snapshot = (row?: typeof documents[number]) => ({ id: row?.document_id, exists: !!row, data: () => row?.data })
-  function query(path: string, filters: ((data: Record<string, any>) => boolean)[] = []) {
-    return {
-      where(field: string, operator: string, value: any) {
-        return query(path, [...filters, data => {
-          if (operator === '==') return data[field] === value
-          if (operator === '>=') return data[field] >= value
-          if (operator === '<=') return data[field] <= value
-          if (operator === 'in') return value.includes(data[field])
-          throw new Error('Unsupported export query operator')
-        }])
-      },
-      doc(id: string) { return { get: async () => snapshot((collections.get(path) ?? []).find(row => row.document_id === id)) } },
-      async get() {
-        const docs = (collections.get(path) ?? []).filter(row => filters.every(f => f(row.data))).map(snapshot)
-        return { docs, size: docs.length, empty: docs.length === 0, forEach: (callback: (doc: any) => void) => docs.forEach(callback) }
-      },
-    }
-  }
-  return { collection: query } as unknown as Pick<FirebaseFirestore.Firestore, 'collection'>
-}
 
 export const invoiceHeaderRows = [
   ['File mẫu danh sách hóa đơn để nhập vào phần mềm '],
@@ -56,7 +28,7 @@ export async function buildTuitionExport(month: number, year: number) {
         'SELECT collection_path, document_id, data FROM qlhv_migration.documents WHERE collection_path = ANY($1::text[])', [paths],
       )
       if (!result.rows.some(row => row.collection_path === C.STUDENTS)) throw new Error('Supabase student snapshot is empty')
-      rows = await getTuitionScheduleSummary(month, year, tuitionSnapshotStore(result.rows))
+      rows = await getTuitionScheduleSummary(month, year, firestoreSnapshotStore(result.rows))
       source = 'supabase'
     } catch (error) {
       if (process.env.REPORTS_FIREBASE_FALLBACK === 'false') throw error
