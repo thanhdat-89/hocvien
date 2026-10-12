@@ -103,6 +103,17 @@ export default function Tuition() {
     return true
   })
 
+  // Khi nhiều hồ sơ có cùng tên, hiện mã hồ sơ ngắn để tránh nhầm phiếu giữa các học viên.
+  const studentIdsByName = new Map<string, Set<string>>()
+  filtered.forEach(r => {
+    const nameKey = r.studentName.trim().replace(/\s+/g, ' ').toLocaleLowerCase('vi')
+    const ids = studentIdsByName.get(nameKey) ?? new Set<string>()
+    ids.add(r.studentId)
+    studentIdsByName.set(nameKey, ids)
+  })
+  const hasDuplicateName = (row: ScheduleRow) =>
+    (studentIdsByName.get(row.studentName.trim().replace(/\s+/g, ' ').toLocaleLowerCase('vi'))?.size ?? 0) > 1
+
   const totalAmount = filtered.reduce((s, r) => s + r.finalAmount, 0)
   const totalSessions = filtered.reduce((s, r) => s + r.totalSessions, 0)
   const uniqueStudents = new Set(filtered.map(r => r.studentId)).size
@@ -454,7 +465,10 @@ export default function Tuition() {
                       return (
                         <tr key={`${r.studentId}-${r.classId}`} className={`hover:bg-surface-container-low/30 transition-colors ${isFirst && sttCounter > 1 ? 'border-t border-outline-variant/10' : !isFirst ? 'border-t border-dashed border-outline-variant/10' : ''}`}>
                           {isFirst && <td className="table-cell text-sm text-outline align-top" rowSpan={span}>{sttCounter}</td>}
-                          {isFirst && <td className="table-cell font-semibold text-on-surface align-top" rowSpan={span}>{r.studentName}</td>}
+                          {isFirst && <td className="table-cell font-semibold text-on-surface align-top" rowSpan={span}>
+                            <div>{r.studentName}</div>
+                            {hasDuplicateName(r) && <div className="mt-1 text-[10px] font-medium text-outline" title={`Mã hồ sơ đầy đủ: ${r.studentId}`}>Mã HV · {r.studentId.slice(-6)}</div>}
+                          </td>}
                           <td className="table-cell text-sm text-center">
                             {r.gradeLevel != null
                               ? <span className="inline-block px-2.5 py-0.5 rounded-full bg-primary/8 text-primary text-xs font-bold whitespace-nowrap">Lớp {r.gradeLevel}</span>
