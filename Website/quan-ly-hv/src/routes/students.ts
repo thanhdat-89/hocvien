@@ -478,7 +478,7 @@ router.post('/', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthReque
 // PUT /api/students/:id
 router.put('/:id', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { fullName, dateOfBirth, gender, school, gradeLevel, address, status, notes, parentName, phone, parentId } = req.body
+    const { fullName, dateOfBirth, gender, school, gradeLevel, address, idCard, studentPhone, studentEmail, enrollmentDate, status, notes, parentName, phone, parentId } = req.body
     const studentId = s(req.params.id)
 
     const updates: Record<string, unknown> = { updatedAt: now() }
@@ -488,6 +488,10 @@ router.put('/:id', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: 
     if (school !== undefined) updates.school = school
     if (gradeLevel !== undefined) updates.gradeLevel = gradeLevel ? Number(gradeLevel) : null
     if (address !== undefined) updates.address = address
+    if (idCard !== undefined) updates.idCard = idCard
+    if (studentPhone !== undefined) updates.studentPhone = studentPhone
+    if (studentEmail !== undefined) updates.studentEmail = studentEmail
+    if (enrollmentDate !== undefined) updates.enrollmentDate = enrollmentDate
     if (status !== undefined) updates.status = status
     if (notes !== undefined) updates.notes = notes
 
