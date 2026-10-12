@@ -108,3 +108,26 @@ test('MISA status refresh distinguishes draft, issued and accepted by tax author
     env.forEach(key => previous[key] === undefined ? delete process.env[key] : process.env[key] = previous[key])
   }
 })
+
+test('MISA status refresh marks a missing draft as removed without treating provider errors as deletion', async () => {
+  const previous = Object.fromEntries(env.map(key => [key, process.env[key]]))
+  env.forEach(key => { process.env[key] = 'test-placeholder' })
+  try {
+    const missing = await service.readMisaInvoiceStatus(input().refId, async url => {
+      const path = new URL(url).pathname
+      if (path === '/api/v2/oauth') return new Response(JSON.stringify({ access_token: 'opaque-test-token' }), { status: 200 })
+      if (path.includes('/api/v2/v3sainvoice/code/')) return new Response('', { status: 404 })
+      throw new Error('Unexpected endpoint ' + path)
+    })
+    assert.deepEqual(missing, { status: 'REMOVED_FROM_MISA' })
+
+    await assert.rejects(service.readMisaInvoiceStatus(input().refId, async url => {
+      const path = new URL(url).pathname
+      if (path === '/api/v2/oauth') return new Response(JSON.stringify({ access_token: 'opaque-test-token' }), { status: 200 })
+      if (path.includes('/api/v2/v3sainvoice/code/')) return new Response('', { status: 503 })
+      throw new Error('Unexpected endpoint ' + path)
+    }), error => error.status === 502)
+  } finally {
+    env.forEach(key => previous[key] === undefined ? delete process.env[key] : process.env[key] = previous[key])
+  }
+})

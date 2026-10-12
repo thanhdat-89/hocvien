@@ -62,9 +62,14 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
     setRefreshingStatusId(id)
     try {
       const { data } = await api.post(`/tuition/misa/invoices/${encodeURIComponent(id)}/refresh-status`)
-      const ids = data.invoice.recordIds?.length ? data.invoice.recordIds : [id]
-      setInvoiceStatuses(previous => ({ ...previous, ...Object.fromEntries(ids.map((recordId: string) => [recordId, data.invoice])) }))
-    } catch { setConnectionMessage('Chưa đọc được trạng thái từ MISA. Hãy thử lại sau.') }
+      const invoices = data.invoices?.length ? data.invoices : [data.invoice]
+      setInvoiceStatuses(previous => ({ ...previous, ...Object.fromEntries(invoices.flatMap((invoice: any) =>
+        (invoice.recordIds?.length ? invoice.recordIds : [invoice.id || id]).map((recordId: string) => [recordId, invoice]))) }))
+    } catch (error) {
+      const message = isAxiosError(error) && typeof error.response?.data?.message === 'string'
+        ? error.response.data.message : 'Chưa đọc được trạng thái từ MISA. Hãy thử lại sau.'
+      setConnectionMessage(message)
+    }
     finally { setRefreshingStatusId(null) }
   }
   const checkConnection = async (product: string, verifyOtp = false) => {
@@ -175,11 +180,11 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
           <td className="table-cell">{index + 1}</td><td className="table-cell font-semibold">{row.studentName}</td><td className="table-cell">{row.className}</td>
           <td className="table-cell whitespace-nowrap">{row.tuitionRecord ? money(row.tuitionRecord.finalAmount) : 'Chưa có phiếu'}</td>
           <td className={`table-cell ${isReadyForInvoice(row) ? 'text-secondary' : 'text-amber-700'}`}>{isReadyForInvoice(row) ? 'Đã thanh toán đủ' : row.tuitionRecord ? 'Chưa thanh toán đủ' : 'Chưa có phiếu'}</td>
-          <td className={`table-cell ${invoiceStatuses[row.tuitionRecord?.id || '']?.status === 'NOT_CREATED' || !invoiceStatuses[row.tuitionRecord?.id || ''] ? 'text-outline' : 'text-secondary'}`}>{({ NOT_CREATED: 'Chưa tạo HĐ', CREATING: 'Đang tạo trên MISA…', DRAFT_CREATED: 'Đã tạo HĐ nháp', ISSUED: 'Đã phát hành', SENT_TO_TAX: 'Đã gửi CQT' } as Record<string, string>)[invoiceStatuses[row.tuitionRecord?.id || '']?.status || 'NOT_CREATED']}</td>
+          <td className={`table-cell ${invoiceStatuses[row.tuitionRecord?.id || '']?.status === 'REMOVED_FROM_MISA' ? 'text-red-600 font-semibold' : invoiceStatuses[row.tuitionRecord?.id || '']?.status === 'NOT_CREATED' || !invoiceStatuses[row.tuitionRecord?.id || ''] ? 'text-outline' : 'text-secondary'}`}>{({ NOT_CREATED: 'Chưa tạo HĐ', CREATING: 'Đang tạo trên MISA…', DRAFT_CREATED: 'Đã tạo HĐ nháp', ISSUED: 'Đã phát hành', SENT_TO_TAX: 'Đã gửi CQT', REMOVED_FROM_MISA: 'Đã xóa trên MISA' } as Record<string, string>)[invoiceStatuses[row.tuitionRecord?.id || '']?.status || 'NOT_CREATED']}</td>
           <td className="table-cell"><div className="flex flex-col items-start gap-2"><Link to={`/students/${encodeURIComponent(row.studentId)}`} className="text-primary font-semibold whitespace-nowrap">Xem học viên</Link>
             {row.tuitionRecord && ['DRAFT_CREATED', 'ISSUED', 'SENT_TO_TAX'].includes(invoiceStatuses[row.tuitionRecord.id]?.status || '') && <button type="button" disabled={refreshingStatusId === row.tuitionRecord.id} onClick={() => refreshInvoiceStatus(row.tuitionRecord!.id)} className="text-primary font-semibold whitespace-nowrap disabled:opacity-40">{refreshingStatusId === row.tuitionRecord.id ? 'Đang kiểm tra…' : 'Cập nhật trạng thái'}</button>}
             {row.tuitionRecord && invoiceStatuses[row.tuitionRecord.id]?.invoiceUrl && <a href={invoiceStatuses[row.tuitionRecord.id].invoiceUrl} target="_blank" rel="noopener noreferrer" className="text-primary font-semibold whitespace-nowrap">Xem hóa đơn MISA</a>}
-            {isReadyForInvoice(row) && connection && invoiceStatuses[row.tuitionRecord?.id || '']?.status !== 'DRAFT_CREATED' && invoiceStatuses[row.tuitionRecord?.id || '']?.status !== 'ISSUED' && invoiceStatuses[row.tuitionRecord?.id || '']?.status !== 'SENT_TO_TAX' && <button type="button" onClick={() => setDraftRecordId(row.tuitionRecord!.id)} className="text-primary font-semibold whitespace-nowrap">Tạo HĐ nháp MISA</button>}
+            {isReadyForInvoice(row) && connection && !['CREATING', 'DRAFT_CREATED', 'ISSUED', 'SENT_TO_TAX'].includes(invoiceStatuses[row.tuitionRecord?.id || '']?.status || '') && <button type="button" onClick={() => setDraftRecordId(row.tuitionRecord!.id)} className="text-primary font-semibold whitespace-nowrap">{invoiceStatuses[row.tuitionRecord?.id || '']?.status === 'REMOVED_FROM_MISA' ? 'Tạo lại HĐ nháp MISA' : 'Tạo HĐ nháp MISA'}</button>}
           </div></td>
         </tr>)}</tbody>
       </table>

@@ -18,7 +18,7 @@ export interface InvoiceSource {
   month: number; year: number; baseAmount: number; discountAmount: number; finalAmount: number
   paidAmount: number; paymentMethodName: string; fingerprint: string
 }
-export type MisaInvoiceStatus = 'NOT_CREATED' | 'DRAFT_CREATED' | 'ISSUED' | 'SENT_TO_TAX'
+export type MisaInvoiceStatus = 'NOT_CREATED' | 'DRAFT_CREATED' | 'ISSUED' | 'SENT_TO_TAX' | 'REMOVED_FROM_MISA'
 export interface MisaInvoiceRecord {
   id: string; refId: string; status: MisaInvoiceStatus; source: InvoiceSource; template: InvoiceTemplate
   buyer: InvoiceBuyer; invoiceDate: string; createdAt: string; updatedAt: string
@@ -101,13 +101,33 @@ async function legacyToken(request: typeof fetch) {
 
 export async function readMisaInvoiceStatus(refId: string, request: typeof fetch = fetch) {
   const { fields, token } = await legacyToken(request)
-  const result = await legacyCall(`https://app.meinvoice.vn/api/v2/v3sainvoice/code/?refID=${encodeURIComponent(refId)}`, {
-    method: 'GET', headers: { Authorization: `Bearer ${token}`, TaxCode: fields.MEINVOICE_TAXCODE!, 'Content-Type': 'application/json' },
-  }, request)
+  let response: Response
+  try {
+    response = await request(`https://app.meinvoice.vn/api/v2/v3sainvoice/code/${encodeURIComponent(refId)}`, {
+      method: 'GET', headers: { Authorization: `Bearer ${token}`, TaxCode: fields.MEINVOICE_TAXCODE!, 'Content-Type': 'application/json' },
+      redirect: 'error', signal: AbortSignal.timeout(20000),
+    })
+  } catch { throw new InvoicePreviewError(502, 'Không nhận được trạng thái từ MISA. Vui lòng thử lại sau.') }
+  let result: any = null
+  try { result = await response.json() } catch { /* A 404 may have an empty response body. */ }
+  if (response.status === 404) return { status: 'REMOVED_FROM_MISA' } as const
+  if (!response.ok) throw new InvoicePreviewError(502, 'MISA chưa trả được trạng thái hóa đơn. Website giữ nguyên trạng thái hiện tại.')
+  const errorText = [result?.error, result?.Error, result?.message, result?.Message, result?.content, result?.ErrorMessage,
+    ...(Array.isArray(result?.errorCode) ? result.errorCode : []), ...(Array.isArray(result?.ErrorCode) ? result.ErrorCode : [])]
+    .filter(value => typeof value === 'string').join(' ')
+  if ((result?.success ?? result?.Success) === false) {
+    if (/not found|không tìm thấy|không tồn tại/i.test(errorText)) return { status: 'REMOVED_FROM_MISA' } as const
+    throw new InvoicePreviewError(502, 'MISA chưa xác nhận được trạng thái hóa đơn. Website giữ nguyên trạng thái hiện tại.')
+  }
   let invoice: any = decode(result.data ?? result.Data)
   if (typeof invoice === 'string') invoice = decode(invoice)
-  if (Array.isArray(invoice)) invoice = invoice[0]
+  if (Array.isArray(invoice)) {
+    if (invoice.length === 0) return { status: 'REMOVED_FROM_MISA' } as const
+    invoice = invoice[0]
+  }
   if (invoice?.Data && typeof invoice.Data === 'string') invoice = decode(invoice.Data)
+  if (invoice?.IsInvoiceDeleted === true || invoice?.IsInvoiceDeleted === 1) return { status: 'REMOVED_FROM_MISA' } as const
+  if (!invoice && Number(result?.recordsFiltered) === 0) return { status: 'REMOVED_FROM_MISA' } as const
   if (!invoice || invoice.RefID !== refId) throw new InvoicePreviewError(502, 'MISA chưa trả về trạng thái hóa đơn khớp mã tham chiếu.')
   const published = Number(invoice.PublishStatus) > 0
   const sentToTax = [1, 2].includes(Number(invoice.SendToTaxStatus))
