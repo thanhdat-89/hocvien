@@ -18,6 +18,17 @@ export async function getTuitionScheduleSummary(month: number, year: number, sou
     return false
   })
 
+  // A student can have multiple enrollment documents for the same class (for example,
+  // after re-registering). The student profile shows one schedule per class, using the
+  // first matching enrollment; keep the tuition summary consistent with that view and
+  // avoid counting the same class sessions once per enrollment document.
+  const enrollmentByStudentClass = new Map<string, any>()
+  for (const enrollment of relevantEnrollments) {
+    const key = `${enrollment.studentId}-${enrollment.classId}`
+    if (!enrollmentByStudentClass.has(key)) enrollmentByStudentClass.set(key, enrollment)
+  }
+  const billableEnrollments = Array.from(enrollmentByStudentClass.values())
+
 
   // 2. Unique classIds, studentIds
   const classIds = [...new Set(relevantEnrollments.map((e: any) => e.classId as string))]
@@ -51,7 +62,7 @@ export async function getTuitionScheduleSummary(month: number, year: number, sou
 
   // 6. Fetch promotions per unique (studentId, classId) — song song thay vì tuần tự
   const uniquePairs = new Map<string, { studentId: string; classId: string }>()
-  for (const e of relevantEnrollments) {
+  for (const e of billableEnrollments) {
     const key = `${e.studentId}-${e.classId}`
     if (!uniquePairs.has(key)) uniquePairs.set(key, { studentId: e.studentId, classId: e.classId })
   }
@@ -76,7 +87,7 @@ export async function getTuitionScheduleSummary(month: number, year: number, sou
       }
     : null
 
-  for (const enrollment of relevantEnrollments) {
+  for (const enrollment of billableEnrollments) {
     const cls = classMap[enrollment.classId]
     const student = studentMap[enrollment.studentId]
     if (!cls || !student) continue
