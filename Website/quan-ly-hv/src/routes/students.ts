@@ -410,7 +410,23 @@ router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) =
     const enrollSnap = await db.collection(C.ENROLLMENTS)
       .where('studentId', '==', student.id)
       .get()
-    const enrollments = toDocs<ClassEnrollment>(enrollSnap)
+    const allEnrollments = toDocs<ClassEnrollment>(enrollSnap)
+    // Multiple historical enrollments can exist for one class. Display the latest
+    // active enrollment so the profile and tuition summary use the same schedule.
+    const enrollmentsByClass = new Map<string, ClassEnrollment[]>()
+    for (const enrollment of allEnrollments) {
+      const candidates = enrollmentsByClass.get(enrollment.classId) ?? []
+      candidates.push(enrollment)
+      enrollmentsByClass.set(enrollment.classId, candidates)
+    }
+    const enrollments = Array.from(enrollmentsByClass.values(), candidates =>
+      candidates.sort((a, b) => {
+        const activeFirst = Number(b.status === 'ACTIVE') - Number(a.status === 'ACTIVE')
+        return activeFirst || String(b.enrollmentDate ?? '').localeCompare(String(a.enrollmentDate ?? ''))
+          || String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))
+          || String(a.id ?? '').localeCompare(String(b.id ?? ''))
+      })[0]
+    )
 
     // Tuition records (6 tháng gần nhất) — sort in memory to avoid composite index requirement
     const tuitionSnap = await db.collection(C.TUITION_RECORDS)
@@ -754,11 +770,26 @@ router.get('/:id/schedule', async (req: AuthRequest, res: Response, next: NextFu
     const month = Number((req.query.month as string) || now.getMonth() + 1)
     const year  = Number((req.query.year  as string) || now.getFullYear())
 
-    // 1. Lấy tất cả enrollments của học viên (kể cả dropped để xem lịch cũ)
+    // 1. Lấy lịch hiện tại theo lớp. Nếu có enrollment lịch sử trùng lớp,
+    // ưu tiên enrollment đang ACTIVE mới nhất để tránh tính buổi của đợt cũ.
     const enrollSnap = await db.collection(C.ENROLLMENTS)
       .where('studentId', '==', studentId)
       .get()
-    const enrollments = toDocs<ClassEnrollment>(enrollSnap)
+    const allEnrollments = toDocs<ClassEnrollment>(enrollSnap)
+    const enrollmentsByClass = new Map<string, ClassEnrollment[]>()
+    for (const enrollment of allEnrollments) {
+      const candidates = enrollmentsByClass.get(enrollment.classId) ?? []
+      candidates.push(enrollment)
+      enrollmentsByClass.set(enrollment.classId, candidates)
+    }
+    const enrollments = Array.from(enrollmentsByClass.values(), candidates =>
+      candidates.sort((a, b) => {
+        const activeFirst = Number(b.status === 'ACTIVE') - Number(a.status === 'ACTIVE')
+        return activeFirst || String(b.enrollmentDate ?? '').localeCompare(String(a.enrollmentDate ?? ''))
+          || String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))
+          || String(a.id ?? '').localeCompare(String(b.id ?? ''))
+      })[0]
+    )
 
     // 2. Với mỗi lớp, lấy sessions của tháng đó (filter in memory tránh index)
     const monthStr = `${year}-${String(month).padStart(2, '0')}`

@@ -19,15 +19,23 @@ export async function getTuitionScheduleSummary(month: number, year: number, sou
   })
 
   // A student can have multiple enrollment documents for the same class (for example,
-  // after re-registering). The student profile shows one schedule per class, using the
-  // first matching enrollment; keep the tuition summary consistent with that view and
-  // avoid counting the same class sessions once per enrollment document.
-  const enrollmentByStudentClass = new Map<string, any>()
+  // after re-registering). Use the most recent active enrollment, matching the current
+  // schedule shown in the student profile; never let unspecified database ordering pick it.
+  const enrollmentsByStudentClass = new Map<string, any[]>()
   for (const enrollment of relevantEnrollments) {
     const key = `${enrollment.studentId}-${enrollment.classId}`
-    if (!enrollmentByStudentClass.has(key)) enrollmentByStudentClass.set(key, enrollment)
+    const candidates = enrollmentsByStudentClass.get(key) ?? []
+    candidates.push(enrollment)
+    enrollmentsByStudentClass.set(key, candidates)
   }
-  const billableEnrollments = Array.from(enrollmentByStudentClass.values())
+  const billableEnrollments = Array.from(enrollmentsByStudentClass.values(), candidates =>
+    candidates.sort((a, b) => {
+      const activeFirst = Number(b.status === 'ACTIVE') - Number(a.status === 'ACTIVE')
+      return activeFirst || String(b.enrollmentDate ?? '').localeCompare(String(a.enrollmentDate ?? ''))
+        || String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))
+        || String(a.id ?? '').localeCompare(String(b.id ?? ''))
+    })[0]
+  )
 
 
   // 2. Unique classIds, studentIds
