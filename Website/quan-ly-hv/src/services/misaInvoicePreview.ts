@@ -134,17 +134,22 @@ export async function readMisaInvoiceStatus(refId: string, request: typeof fetch
   } as const
 }
 
-export async function createMisaDraft(input: { refId: string; source: InvoiceSource; template: InvoiceTemplate; buyer: InvoiceBuyer; invoiceDate: string }, request: typeof fetch = fetch) {
-  const { fields, token } = await legacyToken(request)
+export async function createMisaDraft(input: { refId: string; source: InvoiceSource; sources?: InvoiceSource[]; template: InvoiceTemplate; buyer: InvoiceBuyer; invoiceDate: string }, request: typeof fetch = fetch) {
   const { source: s, buyer: b, template: t } = input
-  const detail = {
-    RefDetailID: randomUUID(), RefID: input.refId, Description: `Học phí ${s.className}`,
-    UnitName: 'Tháng', Quantity: 1, UnitPrice: s.baseAmount, AmountOC: s.baseAmount, Amount: s.baseAmount,
-    DiscountRate: s.baseAmount ? s.discountAmount / s.baseAmount * 100 : 0,
-    DiscountAmountOC: s.discountAmount, DiscountAmount: s.discountAmount, VATRate: 0, VATAmountOC: 0, VATAmount: 0,
-    AmountWithoutVATOC: s.finalAmount, AmountWithoutVAT: s.finalAmount,
-    IsPromotion: false, SortOrder: 1, SortOrderView: 1, CustomField1Detail: String(s.discountAmount),
-  }
+  const sources = input.sources?.length ? input.sources : [s]
+  if (sources.some(item => item.studentId !== s.studentId)) throw new InvoicePreviewError(400, 'Không thể gộp phiếu của nhiều học viên vào cùng hóa đơn.')
+  const total = (field: 'baseAmount' | 'discountAmount' | 'finalAmount') => sources.reduce((sum, item) => sum + item[field], 0)
+  const baseAmount = total('baseAmount'), discountAmount = total('discountAmount'), finalAmount = total('finalAmount')
+  if (![baseAmount, discountAmount, finalAmount].every(Number.isSafeInteger)) throw new InvoicePreviewError(400, 'Tổng tiền hóa đơn vượt quá giới hạn an toàn.')
+  const { fields, token } = await legacyToken(request)
+  const details = sources.map((item, index) => ({
+    RefDetailID: randomUUID(), RefID: input.refId, Description: `Học phí ${item.className}`,
+    UnitName: 'Tháng', Quantity: 1, UnitPrice: item.baseAmount, AmountOC: item.baseAmount, Amount: item.baseAmount,
+    DiscountRate: item.baseAmount ? item.discountAmount / item.baseAmount * 100 : 0,
+    DiscountAmountOC: item.discountAmount, DiscountAmount: item.discountAmount, VATRate: 0, VATAmountOC: 0, VATAmount: 0,
+    AmountWithoutVATOC: item.finalAmount, AmountWithoutVAT: item.finalAmount,
+    IsPromotion: false, SortOrder: index + 1, SortOrderView: index + 1, CustomField1Detail: String(item.discountAmount),
+  }))
   const payload = [{
     EntityState: 1, MISAEntityState: 1, RefID: input.refId,
     ...(process.env.MEINVOICE_ORGANIZATION_UNIT_ID ? { OrganizationUnitID: process.env.MEINVOICE_ORGANIZATION_UNIT_ID } : {}),
@@ -155,12 +160,12 @@ export async function createMisaDraft(input: { refId: string; source: InvoiceSou
     AccountObjectAddress: b.address, ContactName: b.fullName, ReceiverEmail: b.email, ReceiverMobile: b.phone,
     SendInvoiceStatus: 0, SendNumber: 0, IsInvoiceReceipted: false, PaymentMethod: 'TM/CK',
     CurrencyCode: 'VND', CurrencyID: 'VND', ExchangeRate: 1,
-    TotalSaleAmountOC: s.baseAmount, TotalSaleAmount: s.baseAmount,
-    TotalDiscountAmountOC: s.discountAmount, TotalDiscountAmount: s.discountAmount,
-    TotalVATAmountOC: 0, TotalVATAmount: 0, TotalAmountWithoutVATOC: s.finalAmount, TotalAmountWithoutVAT: s.finalAmount,
-    TotalAmountOC: s.finalAmount, TotalAmount: s.finalAmount, EInvoiceStatus: 1, PaymentStatus: 0,
-    IsInvoiceDiscount: s.discountAmount > 0, TypeDiscount: 0, DiscountRate: s.baseAmount ? s.discountAmount / s.baseAmount * 100 : 0,
-    InvoiceDetails: [detail], IsInvoiceDeleted: false, IsInvoiceSummary: t.isInvoiceSummary,
+    TotalSaleAmountOC: baseAmount, TotalSaleAmount: baseAmount,
+    TotalDiscountAmountOC: discountAmount, TotalDiscountAmount: discountAmount,
+    TotalVATAmountOC: 0, TotalVATAmount: 0, TotalAmountWithoutVATOC: finalAmount, TotalAmountWithoutVAT: finalAmount,
+    TotalAmountOC: finalAmount, TotalAmount: finalAmount, EInvoiceStatus: 1, PaymentStatus: 0,
+    IsInvoiceDiscount: discountAmount > 0, TypeDiscount: 0, DiscountRate: baseAmount ? discountAmount / baseAmount * 100 : 0,
+    InvoiceDetails: details, IsInvoiceDeleted: false, IsInvoiceSummary: t.isInvoiceSummary,
   }]
   const result = await legacyCall('https://app.meinvoice.vn/api/v2/v3sainvoice/Code', {
     method: 'POST', headers: { Authorization: `Bearer ${token}`, TaxCode: fields.MEINVOICE_TAXCODE!, 'Content-Type': 'application/json' },

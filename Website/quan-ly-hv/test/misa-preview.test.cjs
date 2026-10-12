@@ -68,6 +68,17 @@ test('direct MISA workflow creates only an unpublished draft and does not call a
     await service.createMisaDraft(classInvoiceInput, mockFetch)
     const classDescription = JSON.parse(calls[3].init.body)[0].InvoiceDetails[0].Description
     assert.equal(classDescription, 'Học phí Toán 8 - CQT02')
+
+    const privateSource = { ...input().source, className: 'Học riêng', baseAmount: 2500000, discountAmount: 0, finalAmount: 2500000 }
+    await service.createMisaDraft({ ...input(), sources: [input().source, privateSource] }, mockFetch)
+    const groupedPayload = JSON.parse(calls[5].init.body)[0]
+    assert.deepEqual(groupedPayload.InvoiceDetails.map(item => item.Description), ['Học phí Toán 6', 'Học phí Học riêng'])
+    assert.equal(groupedPayload.TotalSaleAmount, 4000000)
+    assert.equal(groupedPayload.TotalDiscountAmount, 150000)
+    assert.equal(groupedPayload.TotalAmount, 3850000)
+    await assert.rejects(service.createMisaDraft({ ...input(), sources: [input().source, { ...privateSource, studentId: 'another-student' }] }, async () => {
+      throw new Error('MISA must not be called for a mixed-student invoice')
+    }), error => error.status === 400)
   } finally {
     env.forEach(key => previous[key] === undefined ? delete process.env[key] : process.env[key] = previous[key])
   }

@@ -36,6 +36,8 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
 }) {
   const [filter, setFilter] = useState<'ready' | 'all' | 'unpaid'>('ready')
   const [draftRecordId, setDraftRecordId] = useState<string | null>(null)
+  const [groupRecordIds, setGroupRecordIds] = useState<string[] | null>(null)
+  const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([])
   const [invoiceStatuses, setInvoiceStatuses] = useState<Record<string, { status: string; invoiceNumber?: string; invoiceUrl?: string }>>({})
   const [refreshingStatusId, setRefreshingStatusId] = useState<string | null>(null)
   const [connection, setConnection] = useState<{ products: { product: string; missing: string[] }[]; selectedCertificate: { keyAlias: string; serialNumber: string; name: string } | null } | null>(null)
@@ -45,6 +47,7 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
   const [otpCode, setOtpCode] = useState('')
   const [otpType, setOtpType] = useState<0 | 1>(1)
   const [certificates, setCertificates] = useState<CertificateSummary[]>([])
+  useEffect(() => { setSelectedRecordIds([]) }, [month, year])
   useEffect(() => {
     let active = true
     api.get('/tuition/misa/connection').then(({ data }) => { if (active) setConnection(data) })
@@ -59,7 +62,8 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
     setRefreshingStatusId(id)
     try {
       const { data } = await api.post(`/tuition/misa/invoices/${encodeURIComponent(id)}/refresh-status`)
-      setInvoiceStatuses(previous => ({ ...previous, [id]: data.invoice }))
+      const ids = data.invoice.recordIds?.length ? data.invoice.recordIds : [id]
+      setInvoiceStatuses(previous => ({ ...previous, ...Object.fromEntries(ids.map((recordId: string) => [recordId, data.invoice])) }))
     } catch { setConnectionMessage('Chưa đọc được trạng thái từ MISA. Hãy thử lại sau.') }
     finally { setRefreshingStatusId(null) }
   }
@@ -91,6 +95,14 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
   }
   const ready = rows.filter(isReadyForInvoice)
   const visible = rows.filter(row => filter === 'all' || (filter === 'ready' ? isReadyForInvoice(row) : !isReadyForInvoice(row)))
+  const selectable = (row: Row) => isReadyForInvoice(row) && !!row.tuitionRecord
+    && !['CREATING', 'DRAFT_CREATED', 'ISSUED', 'SENT_TO_TAX'].includes(invoiceStatuses[row.tuitionRecord.id]?.status || '')
+  const selectedRows = selectedRecordIds.map(id => rows.find(row => row.tuitionRecord?.id === id)).filter((row): row is Row => !!row)
+  const selectedStudentId = selectedRows[0]?.studentId
+  const toggleSelection = (row: Row) => {
+    const id = row.tuitionRecord!.id
+    setSelectedRecordIds(previous => previous.includes(id) ? previous.filter(item => item !== id) : [...previous, id])
+  }
   const money = (value: number) => value.toLocaleString('vi-VN') + 'đ'
   // A recalculated schedule can differ from the saved paid invoice. Export only matching amounts.
   const exportable = ready.filter(row => row.finalAmount === row.tuitionRecord!.finalAmount)
@@ -149,11 +161,17 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
       </div>
       <button disabled={!exportable.length} onClick={() => XLSX.writeFile(buildInvoiceWorkbook(exportable), `misa-phieu-da-thanh-toan-${month}-${year}.xlsx`)} className="px-4 py-2 rounded-xl bg-secondary/10 text-secondary font-semibold text-sm disabled:opacity-40">Xuất Excel phiếu đã thanh toán</button>
     </div>
+    <div className="flex flex-wrap items-center gap-3 rounded-xl bg-surface-container-low p-4">
+      <p className="text-sm text-outline flex-1">Chọn ít nhất 2 phiếu đã thanh toán đủ của cùng một học viên để gộp thành một hóa đơn với từng lớp là một dòng.</p>
+      <button type="button" disabled={selectedRecordIds.length < 2 || !connection} onClick={() => setGroupRecordIds(selectedRecordIds)} className="px-4 py-2 rounded-xl bg-primary text-on-primary font-semibold text-sm disabled:opacity-40">Tạo hóa đơn gộp ({selectedRecordIds.length})</button>
+      {selectedRecordIds.length > 0 && <button type="button" onClick={() => setSelectedRecordIds([])} className="px-3 py-2 rounded-xl text-primary font-semibold text-sm">Bỏ chọn</button>}
+    </div>
     {exportable.length < ready.length && <p className="text-sm text-amber-700">Có {ready.length - exportable.length} phiếu chênh lệch với lịch học hiện tại. Các phiếu này được bỏ qua khi xuất Excel; hãy kiểm tra lại số tiền.</p>}
     <p className="text-sm text-outline">Mỗi dòng là một khoản học phí theo lớp. Phiếu đã thanh toán đủ có thể tạo hóa đơn nháp trực tiếp trên MISA; website hiển thị phần xem trước trước khi gửi.</p>
     <div className="bg-surface-container-lowest rounded-2xl overflow-x-auto border border-outline-variant/10">
-      <table className="w-full"><thead><tr>{['STT', 'Học viên', 'Lớp học', 'Số tiền phiếu', 'Thanh toán', 'Trạng thái hóa đơn', 'Thao tác'].map(label => <th key={label} className="table-header">{label}</th>)}</tr></thead>
-        <tbody>{visible.map((row, index) => <tr key={`${row.studentId}:${row.classId}`} className="border-t border-outline-variant/10">
+      <table className="w-full"><thead><tr>{['Gộp', 'STT', 'Học viên', 'Lớp học', 'Số tiền phiếu', 'Thanh toán', 'Trạng thái hóa đơn', 'Thao tác'].map(label => <th key={label} className="table-header">{label}</th>)}</tr></thead>
+        <tbody>{visible.map((row, index) => <tr key={row.tuitionRecord?.id || `${row.studentId}:${row.classId}:${index}`} className="border-t border-outline-variant/10">
+          <td className="table-cell"><input type="checkbox" aria-label={`Chọn phiếu ${row.className} của ${row.studentName} để gộp`} checked={!!row.tuitionRecord && selectedRecordIds.includes(row.tuitionRecord.id)} disabled={!selectable(row) || (!!selectedStudentId && selectedStudentId !== row.studentId)} onChange={() => toggleSelection(row)} /></td>
           <td className="table-cell">{index + 1}</td><td className="table-cell font-semibold">{row.studentName}</td><td className="table-cell">{row.className}</td>
           <td className="table-cell whitespace-nowrap">{row.tuitionRecord ? money(row.tuitionRecord.finalAmount) : 'Chưa có phiếu'}</td>
           <td className={`table-cell ${isReadyForInvoice(row) ? 'text-secondary' : 'text-amber-700'}`}>{isReadyForInvoice(row) ? 'Đã thanh toán đủ' : row.tuitionRecord ? 'Chưa thanh toán đủ' : 'Chưa có phiếu'}</td>
@@ -168,5 +186,10 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
       {!visible.length && <p className="py-12 text-center text-outline">Không có khoản học phí phù hợp trong tháng {month}/{year}.</p>}
     </div>
     {draftRecordId && <InvoiceDraftDialog recordId={draftRecordId} onClose={() => setDraftRecordId(null)} onCreated={invoice => { setInvoiceStatuses(previous => ({ ...previous, [draftRecordId]: invoice })); }} />}
+    {groupRecordIds && <InvoiceDraftDialog recordIds={groupRecordIds} onClose={() => setGroupRecordIds(null)} onCreated={invoice => {
+      const ids = invoice.recordIds?.length ? invoice.recordIds : groupRecordIds
+      setInvoiceStatuses(previous => ({ ...previous, ...Object.fromEntries(ids.map(id => [id, invoice])) }))
+      setSelectedRecordIds(previous => previous.filter(id => !ids.includes(id)))
+    }} />}
   </section>
 }
