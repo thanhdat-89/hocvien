@@ -63,6 +63,11 @@ test('direct MISA workflow creates only an unpublished draft and does not call a
     assert.equal(payload.CitizenIDNumber, '012345678901')
     assert.equal(payload.TotalAmount, 1350000)
     assert.equal(payload.InvoiceDetails[0].VATRate, 0)
+
+    const classInvoiceInput = { ...input(), source: { ...input().source, className: 'Toán 8 - CQT02' } }
+    await service.createMisaDraft(classInvoiceInput, mockFetch)
+    const classDescription = JSON.parse(calls[3].init.body)[0].InvoiceDetails[0].Description
+    assert.equal(classDescription, 'Học phí Toán 8 - CQT02')
   } finally {
     env.forEach(key => previous[key] === undefined ? delete process.env[key] : process.env[key] = previous[key])
   }
