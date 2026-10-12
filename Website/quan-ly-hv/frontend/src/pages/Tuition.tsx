@@ -101,7 +101,12 @@ export default function Tuition() {
     if (gradeFilter != null && r.gradeLevel !== gradeFilter) return false
     if (classFilter && r.className !== classFilter) return false
     return true
-  })
+  }).sort((a, b) =>
+    a.studentName.localeCompare(b.studentName, 'vi') ||
+    a.studentId.localeCompare(b.studentId) ||
+    a.className.localeCompare(b.className, 'vi') ||
+    a.classId.localeCompare(b.classId)
+  )
 
   // Khi nhiều hồ sơ có cùng tên, hiện mã hồ sơ ngắn để tránh nhầm phiếu giữa các học viên.
   const studentIdsByName = new Map<string, Set<string>>()
@@ -457,13 +462,13 @@ export default function Tuition() {
                     const seen = new Set<string>()
                     let sttCounter = 0
 
-                    return filtered.map((r) => {
+                    return filtered.map((r, rowIndex) => {
                       const isFirst = !seen.has(r.studentId)
                       if (isFirst) { seen.add(r.studentId); sttCounter++ }
                       const span = spanMap[r.studentId]
 
                       return (
-                        <tr key={`${r.studentId}-${r.classId}`} className={`hover:bg-surface-container-low/30 transition-colors ${isFirst && sttCounter > 1 ? 'border-t border-outline-variant/10' : !isFirst ? 'border-t border-dashed border-outline-variant/10' : ''}`}>
+                        <tr key={`${r.studentId}-${r.classId}-${rowIndex}`} className={`hover:bg-surface-container-low/30 transition-colors ${isFirst && sttCounter > 1 ? 'border-t border-outline-variant/10' : !isFirst ? 'border-t border-dashed border-outline-variant/10' : ''}`}>
                           {isFirst && <td className="table-cell text-sm text-outline align-top" rowSpan={span}>{sttCounter}</td>}
                           {isFirst && <td className="table-cell font-semibold text-on-surface align-top" rowSpan={span}>
                             <div>{r.studentName}</div>
