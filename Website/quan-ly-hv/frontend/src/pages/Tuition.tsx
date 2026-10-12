@@ -5,7 +5,6 @@ import api from '../services/api'
 import * as XLSX from 'xlsx'
 import { buildInvoiceWorkbook } from '../lib/invoiceExport'
 import { useAlert, useConfirm } from '../components/ConfirmDialog'
-import EInvoicePreparation from '../components/EInvoicePreparation'
 
 interface TuitionRecordSummary {
   id: string
@@ -56,7 +55,6 @@ export default function Tuition() {
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [dataSource, setDataSource] = useState<'firebase' | 'supabase-fallback' | null>(null)
-  const [tab, setTab] = useState<'tuition' | 'invoices'>('tuition')
   const latestRequest = useRef(0)
   const [classFilter, setClassFilter] = useState<string | null>(null)
   const [gradeFilter, setGradeFilter] = useState<number | null>(null)
@@ -305,14 +303,14 @@ export default function Tuition() {
             <h2 className="text-4xl font-black text-on-surface font-headline tracking-tight">Quản lý Học phí</h2>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            {tab === 'tuition' && <button
+            <button
               onClick={exportExcel}
               disabled={filtered.length === 0}
               className="flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 rounded-xl bg-secondary/10 text-secondary text-sm font-semibold hover:bg-secondary/20 transition-all disabled:opacity-40"
             >
               <span className="material-symbols-outlined text-[18px]">download</span>
               Xuất Excel
-            </button>}
+            </button>
             <select value={month} onChange={e => setMonth(Number(e.target.value))}
               className="bg-surface-container-lowest border border-outline-variant/20 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
               {Array.from({ length: 12 }, (_, i) => (
@@ -326,10 +324,7 @@ export default function Tuition() {
           </div>
         </div>
 
-        <div role="tablist" aria-label="Quản lý tài chính" className="flex gap-2 border-b border-outline-variant/20 pb-3">
-          {([['tuition', 'Học phí'], ['invoices', 'Hóa đơn điện tử']] as const).map(([value, label]) => <button key={value} id={`tab-${value}`} role="tab" aria-selected={tab === value} aria-controls={`panel-${value}`} onClick={() => setTab(value)} className={`px-5 py-3 rounded-xl font-semibold text-sm ${tab === value ? 'bg-primary text-on-primary' : 'text-outline hover:bg-surface-container-low'}`}>{label}</button>)}
-        </div>
-        {tab === 'invoices' ? <div role="tabpanel" id="panel-invoices" aria-labelledby="tab-invoices"><EInvoicePreparation rows={rows} loading={loading} error={loadError} month={month} year={year} retry={loadData} /></div> : <div role="tabpanel" id="panel-tuition" aria-labelledby="tab-tuition" className="space-y-8">
+        <div className="space-y-8">
         {loadError && <div role="alert" className="text-red-700">{loadError} <button className="underline" onClick={loadData}>Thử lại</button></div>}
         {dataSource === 'supabase-fallback' && <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Firebase đang chạm hạn mức đọc; đang hiển thị dữ liệu dự phòng từ Supabase.</div>}
         {/* Stats */}
@@ -622,7 +617,7 @@ export default function Tuition() {
           )}
         </div>
 
-        </div>}
+        </div>
       </div>
       {Object.keys(pendingToggles).length > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-surface-container-highest shadow-xl border border-outline-variant/30 px-6 py-4 rounded-2xl z-50 flex items-center gap-6 animate-in slide-in-from-bottom-5">
