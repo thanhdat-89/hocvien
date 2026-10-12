@@ -2,6 +2,7 @@ import { getTuitionScheduleWithFallback } from '../services/tuitionScheduleRead'
 import { misaConnectionStatus, checkMisaConnection } from '../services/misaConnection'
 import misaDrafts from './misaDrafts'
 import { activityContext } from '../middleware/activityContext'
+import { tryCreateAutomaticMisaDraft } from '../services/misaAutoDraft'
 import { Router, Response, NextFunction } from 'express'
 import { db, C, s, toDocs, toObj, paginate } from '../lib/firebase'
 import { authenticate, requireRole } from '../middleware/auth'
@@ -319,7 +320,10 @@ router.post('/toggle-paid', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req
     }
 
     const finalStatus = await getPaymentStatus(record.id)
-    res.json({ recordId: record.id, paid, finalStatus })
+    const invoiceDraft = paid && finalStatus.remaining <= 0
+      ? await tryCreateAutomaticMisaDraft(record.id, req.user!.userId)
+      : undefined
+    res.json({ recordId: record.id, paid, finalStatus, invoiceDraft })
   } catch (err: any) {
     console.error('[toggle-paid] ERROR:', err?.message || err)
     next(err)
@@ -365,8 +369,11 @@ router.post('/calculate', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: 
           tuitionRecord.status = 'PENDING'
         }
       }
-
-      res.json(tuitionRecord)
+      const paymentStatus = await getPaymentStatus(tuitionRecord.id)
+      const invoiceDraft = paid === true && paymentStatus.remaining <= 0
+        ? await tryCreateAutomaticMisaDraft(tuitionRecord.id, req.user!.userId)
+        : undefined
+      res.json({ ...tuitionRecord, invoiceDraft })
     } else {
       const result = await calculateTuitionForClass(classId, Number(month), Number(year))
       res.json({ message: `Tạo ${result.created} phiếu mới, cập nhật ${result.updated} phiếu`, ...result })
@@ -406,7 +413,8 @@ router.post('/:id/payment', requireRole('ADMIN', 'STAFF'), async (req: AuthReque
     await refreshTuitionStatus(tuitionRecordId)
 
     const { remaining, status } = await getPaymentStatus(tuitionRecordId)
-    res.status(201).json({ payment: { id: ref.id, ...paymentData }, status, remaining })
+    const invoiceDraft = remaining <= 0 ? await tryCreateAutomaticMisaDraft(tuitionRecordId, req.user!.userId) : undefined
+    res.status(201).json({ payment: { id: ref.id, ...paymentData }, status, remaining, invoiceDraft })
   } catch (err) { next(err) }
 })
 

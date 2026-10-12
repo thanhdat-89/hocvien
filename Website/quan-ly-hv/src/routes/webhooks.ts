@@ -5,6 +5,7 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { db, C } from '../lib/firebase'
 import { refreshTuitionStatus, getPaymentStatus } from '../services/tuitionCalculator'
+import { tryCreateAutomaticMisaDraft } from '../services/misaAutoDraft'
 import { sendMessage as sendZaloMessage } from '../services/zaloService'
 import { sendZnsAndLog, findActiveTemplate, resolveRecipient } from './zns'
 import {
@@ -192,6 +193,10 @@ router.post('/sepay', async (req: Request, res: Response, next: NextFunction) =>
     const paymentRef = await db.collection(C.PAYMENTS).add(paymentData)
 
     await refreshTuitionStatus(target.id)
+    const paymentStatus = await getPaymentStatus(target.id)
+    const invoiceDraft = paymentStatus.remaining <= 0
+      ? await tryCreateAutomaticMisaDraft(target.id, 'sepay-webhook')
+      : undefined
 
     const record: BankTransaction = {
       id: docId, ...baseRecord, status: 'matched',
@@ -220,7 +225,7 @@ router.post('/sepay', async (req: Request, res: Response, next: NextFunction) =>
       txDate:       body.transactionDate || now,
     }).catch(err => console.error('[ZNS] Case B failed:', err))
 
-    res.json({ success: true, status: 'matched', paymentId: paymentRef.id })
+    res.json({ success: true, status: 'matched', paymentId: paymentRef.id, invoiceDraft })
   } catch (err) {
     next(err)
   }

@@ -171,10 +171,10 @@ export default function Tuition() {
     setIsSavingToggles(true)
     let hasError = false
     try {
-      await Promise.all(keys.map(async key => {
+      const results = await Promise.all(keys.map(async key => {
         const [studentId, classId] = key.split('___')
         const data = pendingToggleData[key]
-        await api.post('/tuition/toggle-paid', {
+        return api.post('/tuition/toggle-paid', {
           studentId,
           classId,
           month,
@@ -183,6 +183,9 @@ export default function Tuition() {
           tuitionRecordId: data?.tuitionRecordId || undefined,
         })
       }))
+      const draftFailures = results
+        .map(result => result.data?.invoiceDraft)
+        .filter((draft: any) => draft?.status === 'FAILED')
       // Optimistic update để tránh lỗi stale index từ Firestore
       setRows(prevRows => prevRows.map(r => {
         const k = `${r.studentId}___${r.classId}`
@@ -201,6 +204,13 @@ export default function Tuition() {
         }
         return r
       }))
+      if (draftFailures.length) {
+        const detail = draftFailures[0]?.message || 'MISA không trả được kết quả.'
+        await showAlert({
+          title: 'Đã ghi nhận thanh toán',
+          message: `${draftFailures.length} phiếu đã thanh toán đủ nhưng chưa tạo được hóa đơn nháp trên MISA. ${detail} Hãy kiểm tra trạng thái trong trang Hóa đơn điện tử trước khi thử lại.`,
+        })
+      }
     } catch (e: any) {
       console.error('Lỗi khi lưu hàng loạt:', e)
       const serverMsg = e?.response?.data?.message || e?.message || 'Lỗi không xác định'
