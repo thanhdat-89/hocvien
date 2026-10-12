@@ -9,6 +9,7 @@ import InvoiceDraftDialog from './InvoiceDraftDialog'
 interface Row {
   studentId: string
   studentName: string
+  gradeLevel: number | null
   classId: string
   className: string
   totalSessions: number
@@ -35,6 +36,7 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
   rows: Row[]; loading: boolean; error: string | null; month: number; year: number; retry: () => void
 }) {
   const [filter, setFilter] = useState<'ready' | 'all' | 'unpaid'>('ready')
+  const [gradeFilter, setGradeFilter] = useState<number | null>(null)
   const [draftRecordId, setDraftRecordId] = useState<string | null>(null)
   const [groupRecordIds, setGroupRecordIds] = useState<string[] | null>(null)
   const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([])
@@ -100,6 +102,7 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
   }
   const ready = rows.filter(isReadyForInvoice)
   const visible = rows.filter(row => filter === 'all' || (filter === 'ready' ? isReadyForInvoice(row) : !isReadyForInvoice(row)))
+  const gradeFiltered = visible.filter(row => gradeFilter == null || row.gradeLevel === gradeFilter)
   const selectable = (row: Row) => isReadyForInvoice(row) && !!row.tuitionRecord
     && !['CREATING', 'DRAFT_CREATED', 'ISSUED', 'SENT_TO_TAX'].includes(invoiceStatuses[row.tuitionRecord.id]?.status || '')
   const selectedRows = selectedRecordIds.map(id => rows.find(row => row.tuitionRecord?.id === id)).filter((row): row is Row => !!row)
@@ -166,6 +169,15 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
       </div>
       <button disabled={!exportable.length} onClick={() => XLSX.writeFile(buildInvoiceWorkbook(exportable), `misa-phieu-da-thanh-toan-${month}-${year}.xlsx`)} className="px-4 py-2 rounded-xl bg-secondary/10 text-secondary font-semibold text-sm disabled:opacity-40">Xuất Excel phiếu đã thanh toán</button>
     </div>
+    <div className="rounded-2xl bg-surface-container-lowest p-4 border border-outline-variant/10">
+      <p className="text-sm font-semibold text-outline mb-3">Lọc theo khối lớp</p>
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Lọc hóa đơn theo khối lớp">
+        <button type="button" aria-pressed={gradeFilter === null} onClick={() => { setGradeFilter(null); setSelectedRecordIds([]) }} className={`px-4 py-2 rounded-full text-sm font-semibold ${gradeFilter === null ? 'bg-primary text-on-primary' : 'bg-surface-container-low text-outline'}`}>Tất cả</button>
+        {[6, 7, 8, 9, 10, 11, 12].map(grade =>
+          <button key={grade} type="button" aria-pressed={gradeFilter === grade} onClick={() => { setGradeFilter(grade); setSelectedRecordIds([]) }} className={`px-4 py-2 rounded-full text-sm font-semibold ${gradeFilter === grade ? 'bg-primary text-on-primary' : 'bg-surface-container-low text-outline'}`}>Lớp {grade}</button>
+        )}
+      </div>
+    </div>
     <div className="flex flex-wrap items-center gap-3 rounded-xl bg-surface-container-low p-4">
       <p className="text-sm text-outline flex-1">Chọn ít nhất 2 phiếu đã thanh toán đủ của cùng một học viên để gộp thành một hóa đơn với từng lớp là một dòng.</p>
       <button type="button" disabled={selectedRecordIds.length < 2 || !connection} onClick={() => setGroupRecordIds(selectedRecordIds)} className="px-4 py-2 rounded-xl bg-primary text-on-primary font-semibold text-sm disabled:opacity-40">Tạo hóa đơn gộp ({selectedRecordIds.length})</button>
@@ -175,7 +187,7 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
     <p className="text-sm text-outline">Mỗi dòng là một khoản học phí theo lớp. Phiếu đã thanh toán đủ có thể tạo hóa đơn nháp trực tiếp trên MISA; website hiển thị phần xem trước trước khi gửi.</p>
     <div className="bg-surface-container-lowest rounded-2xl overflow-x-auto border border-outline-variant/10">
       <table className="w-full"><thead><tr>{['Gộp', 'STT', 'Học viên', 'Lớp học', 'Số tiền phiếu', 'Thanh toán', 'Trạng thái hóa đơn', 'Thao tác'].map(label => <th key={label} className="table-header">{label}</th>)}</tr></thead>
-        <tbody>{visible.map((row, index) => <tr key={row.tuitionRecord?.id || `${row.studentId}:${row.classId}:${index}`} className="border-t border-outline-variant/10">
+        <tbody>{gradeFiltered.map((row, index) => <tr key={row.tuitionRecord?.id || `${row.studentId}:${row.classId}:${index}`} className="border-t border-outline-variant/10">
           <td className="table-cell"><input type="checkbox" aria-label={`Chọn phiếu ${row.className} của ${row.studentName} để gộp`} checked={!!row.tuitionRecord && selectedRecordIds.includes(row.tuitionRecord.id)} disabled={!selectable(row) || (!!selectedStudentId && selectedStudentId !== row.studentId)} onChange={() => toggleSelection(row)} /></td>
           <td className="table-cell">{index + 1}</td><td className="table-cell font-semibold">{row.studentName}</td><td className="table-cell">{row.className}</td>
           <td className="table-cell whitespace-nowrap">{row.tuitionRecord ? money(row.tuitionRecord.finalAmount) : 'Chưa có phiếu'}</td>
@@ -188,7 +200,7 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
           </div></td>
         </tr>)}</tbody>
       </table>
-      {!visible.length && <p className="py-12 text-center text-outline">Không có khoản học phí phù hợp trong tháng {month}/{year}.</p>}
+      {!gradeFiltered.length && <p className="py-12 text-center text-outline">Không có khoản học phí phù hợp với bộ lọc trong tháng {month}/{year}.</p>}
     </div>
     {draftRecordId && <InvoiceDraftDialog recordId={draftRecordId} onClose={() => setDraftRecordId(null)} onCreated={invoice => { setInvoiceStatuses(previous => ({ ...previous, [draftRecordId]: invoice })); }} />}
     {groupRecordIds && <InvoiceDraftDialog recordIds={groupRecordIds} onClose={() => setGroupRecordIds(null)} onCreated={invoice => {
