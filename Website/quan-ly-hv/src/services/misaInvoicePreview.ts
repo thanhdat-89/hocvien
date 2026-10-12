@@ -11,7 +11,7 @@ export interface InvoiceTemplate {
   id: string; name: string; series: string; templateNo: string; isInvoiceSummary: boolean; invoiceType?: number
 }
 export interface InvoiceBuyer {
-  fullName: string; legalName: string; taxCode: string; address: string; email: string; phone: string
+  fullName: string; legalName: string; citizenIdNumber: string; address: string; email: string; phone: string
 }
 export interface InvoiceSource {
   recordId: string; studentId: string; studentName: string; className: string
@@ -151,7 +151,7 @@ export async function createMisaDraft(input: { refId: string; source: InvoiceSou
     // Legacy v2 Web API uses InvoiceType=10 for the cash-register (MTT) invoice.
     SourceType: 0, InvTemplateNo: t.templateNo, InvoiceType: 10, InvSeries: t.series,
     InvDate: `${input.invoiceDate}T00:00:00+07:00`, InvNo: '', PublishStatus: 0,
-    InvoiceTemplateID: t.id, AccountObjectName: b.legalName || b.fullName, AccountObjectTaxCode: b.taxCode,
+    InvoiceTemplateID: t.id, AccountObjectName: b.legalName || b.fullName, AccountObjectTaxCode: '', CitizenIDNumber: b.citizenIdNumber,
     AccountObjectAddress: b.address, ContactName: b.fullName, ReceiverEmail: b.email, ReceiverMobile: b.phone,
     SendInvoiceStatus: 0, SendNumber: 0, IsInvoiceReceipted: false, PaymentMethod: 'TM/CK',
     CurrencyCode: 'VND', CurrencyID: 'VND', ExchangeRate: 1,
@@ -217,13 +217,10 @@ export function validateDraftInput(body: any) {
   }
   const buyer: InvoiceBuyer = {
     fullName: text(body?.buyer?.fullName, 255), legalName: text(body?.buyer?.legalName, 255),
-    taxCode: text(body?.buyer?.taxCode, 20), address: text(body?.buyer?.address, 400),
+    citizenIdNumber: text(body?.buyer?.citizenIdNumber, 20), address: text(body?.buyer?.address, 400),
     email: text(body?.buyer?.email, 255), phone: text(body?.buyer?.phone, 30),
   }
   if (!buyer.fullName && !buyer.legalName) throw new InvoicePreviewError(400, 'Cần nhập tên người mua hoặc tên đơn vị.')
-  if (buyer.taxCode && (!/^\d{10}(?:-\d{3})?$|^\d{12}$/.test(buyer.taxCode) || !buyer.legalName || !buyer.address)) {
-    throw new InvoicePreviewError(400, 'Khi có mã số thuế cần nhập đúng mã, tên đơn vị và địa chỉ.')
-  }
   if (buyer.email && !/^[^\s@;]+@[^\s@;]+\.[^\s@;]+$/.test(buyer.email)) throw new InvoicePreviewError(400, 'Email người mua không hợp lệ.')
   const invoiceDate = body?.invoiceDate
   if (typeof invoiceDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(invoiceDate)

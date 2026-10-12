@@ -49,8 +49,8 @@ router.get('/invoices/:recordId', async (req, res, next) => {
     const student = await db.collection(C.STUDENTS).doc(source.studentId).get()
     const data = student.data()
     res.json({ source, invoice: invoice.exists ? invoice.data() : null, publishingEnabled: false,
-      suggestedBuyer: { fullName: data?.primaryParentName || source.studentName, legalName: '', taxCode: '',
-        address: data?.address || '', email: '', phone: data?.primaryParentPhone || '' } })
+      suggestedBuyer: { fullName: data?.fullName || source.studentName, legalName: '', citizenIdNumber: data?.idCard || '',
+        address: data?.address || '', email: data?.studentEmail || '', phone: data?.studentPhone || '' } })
   } catch (error) { next(error) }
 })
 

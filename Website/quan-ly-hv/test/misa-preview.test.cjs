@@ -7,7 +7,7 @@ const record = { id: 'fee-1', studentId: 'student-1', studentName: 'Học viên 
   finalAmount: 1350000, status: 'PAID' }
 const payment = { id: 'pay-1', tuitionRecordId: 'fee-1', amount: 1350000, method: 'BANK_TRANSFER' }
 const template = { id: 'template-1', name: 'Hóa đơn bán hàng', series: '2C26MHP', templateNo: '2', isInvoiceSummary: false, invoiceType: 10 }
-const buyer = { fullName: 'Người mua thử nghiệm', legalName: '', taxCode: '', address: '', email: '', phone: '' }
+const buyer = { fullName: 'Người mua thử nghiệm', legalName: '', citizenIdNumber: '012345678901', address: '', email: '', phone: '' }
 const input = () => ({ refId: 'a1111111-1111-4111-8111-111111111111', source: service.invoiceSource(record, [payment]), template, buyer, invoiceDate: '2026-10-11' })
 
  test('invoice requires a valid tuition record paid in full and fingerprints saved payments', () => {
@@ -28,7 +28,7 @@ test('buyer and invoice date are validated; client cannot supply invoice totals'
   for (const invalid of [
     { buyer, invoiceDate: '2026-02-30', templateId: template.id, revision: 0 },
     { buyer: { ...buyer, fullName: '' }, invoiceDate: '2026-10-11', templateId: template.id, revision: 0 },
-    { buyer: { ...buyer, taxCode: '0101243150' }, invoiceDate: '2026-10-11', templateId: template.id, revision: 0 },
+    { buyer: { ...buyer, citizenIdNumber: '1'.repeat(21) }, invoiceDate: '2026-10-11', templateId: template.id, revision: 0 },
     { buyer, invoiceDate: '2026-10-11', templateId: template.id, revision: -1 },
   ]) assert.throws(() => service.validateDraftInput(invalid), error => error.status === 400)
 })
@@ -59,6 +59,8 @@ test('direct MISA workflow creates only an unpublished draft and does not call a
     assert.equal(payload.InvoiceType, 10)
     assert.equal(payload.InvoiceDetails[0].CustomField1Detail, '150000')
     assert.equal(payload.PaymentMethod, 'TM/CK')
+    assert.equal(payload.AccountObjectTaxCode, '')
+    assert.equal(payload.CitizenIDNumber, '012345678901')
     assert.equal(payload.TotalAmount, 1350000)
     assert.equal(payload.InvoiceDetails[0].VATRate, 0)
   } finally {
