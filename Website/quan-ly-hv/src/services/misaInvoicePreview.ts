@@ -138,7 +138,7 @@ export async function createMisaDraft(input: { refId: string; source: InvoiceSou
   const { fields, token } = await legacyToken(request)
   const { source: s, buyer: b, template: t } = input
   const detail = {
-    RefDetailID: randomUUID(), RefID: input.refId, Description: `Học phí ${s.className} — ${s.studentName} — tháng ${s.month}/${s.year}`,
+    RefDetailID: randomUUID(), RefID: input.refId, Description: `Học phí ${s.className}`,
     UnitName: 'Tháng', Quantity: 1, UnitPrice: s.baseAmount, AmountOC: s.baseAmount, Amount: s.baseAmount,
     DiscountRate: s.baseAmount ? s.discountAmount / s.baseAmount * 100 : 0,
     DiscountAmountOC: s.discountAmount, DiscountAmount: s.discountAmount, VATRate: 0, VATAmountOC: 0, VATAmount: 0,

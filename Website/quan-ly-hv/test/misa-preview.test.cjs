@@ -49,11 +49,13 @@ test('direct MISA workflow creates only an unpublished draft and does not call a
       }), { status: 200 })
       throw new Error('Unexpected endpoint ' + parsed.pathname)
     }
-    const result = await service.createMisaDraft(input(), mockFetch)
+    const invoiceInput = { ...input(), source: { ...input().source, className: 'Học riêng' } }
+    const result = await service.createMisaDraft(invoiceInput, mockFetch)
     assert.equal(result.invoiceNumber, 'Chưa cấp số')
     assert.deepEqual(calls.map(call => call.path), ['/api/v2/oauth', '/api/v2/v3sainvoice/Code'])
     const payload = JSON.parse(calls[1].init.body)[0]
     assert.equal(payload.PublishStatus, 0)
+    assert.equal(payload.InvoiceDetails[0].Description, 'Học phí Học riêng')
     assert.equal(payload.InvoiceType, 10)
     assert.equal(payload.InvoiceDetails[0].CustomField1Detail, '150000')
     assert.equal(payload.PaymentMethod, 'TM/CK')
