@@ -1,5 +1,6 @@
 import { db, C, toDocs } from '../lib/firebase'
 import type { ClassEnrollment, StudentPromotion, TuitionRecord, Payment } from '../types/models'
+import { createTuitionWithInvoiceDraft, ensureInvoiceDraftForTuitionRecord } from './invoiceDraftService'
 
 const now = () => new Date().toISOString()
 
@@ -117,8 +118,7 @@ export async function calculateTuitionForStudent(
 
   let recordId: string
   if (isNew) {
-    const ref = await db.collection(C.TUITION_RECORDS).add({ ...recordData, createdAt: now() })
-    recordId = ref.id
+    recordId = await createTuitionWithInvoiceDraft({ ...recordData, createdAt: now() }, studentDoc.data() ?? {})
   } else {
     recordId = existingSnap.docs[0].id
     await db.collection(C.TUITION_RECORDS).doc(recordId).update(recordData)
@@ -128,6 +128,7 @@ export async function calculateTuitionForStudent(
   await refreshTuitionStatus(recordId)
 
   const doc = await db.collection(C.TUITION_RECORDS).doc(recordId).get()
+  if (!isNew) await ensureInvoiceDraftForTuitionRecord(recordId)
   return {
     tuitionRecord: { id: doc.id, ...doc.data() } as TuitionRecord & { id: string },
     isNew,
@@ -208,8 +209,7 @@ async function calculatePrivateTuition(
 
   let recordId: string
   if (isNew) {
-    const ref = await db.collection(C.TUITION_RECORDS).add({ ...recordData, createdAt: now() })
-    recordId = ref.id
+    recordId = await createTuitionWithInvoiceDraft({ ...recordData, createdAt: now() }, studentDoc.data() ?? {})
   } else {
     recordId = existingSnap.docs[0].id
     await db.collection(C.TUITION_RECORDS).doc(recordId).update(recordData)
@@ -217,6 +217,7 @@ async function calculatePrivateTuition(
   await refreshTuitionStatus(recordId)
 
   const doc = await db.collection(C.TUITION_RECORDS).doc(recordId).get()
+  if (!isNew) await ensureInvoiceDraftForTuitionRecord(recordId)
   return {
     tuitionRecord: { id: doc.id, ...doc.data() } as TuitionRecord & { id: string },
     isNew,

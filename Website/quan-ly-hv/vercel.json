@@ -1,6 +1,8 @@
 {
   "version": 2,
-  "regions": ["sin1"],
+  "regions": [
+    "sin1"
+  ],
   "builds": [
     {
       "src": "src/index.ts",
@@ -17,8 +19,21 @@
     }
   ],
   "crons": [
-    { "path": "/api/activity/cleanup", "schedule": "0 3 * * 0" },
-    { "path": "/api/schedules/cron/generate-monthly", "schedule": "0 1 1 * *" },
-    { "path": "/api/zns/cron/remind-overdue", "schedule": "0 1 * * *" }
+    {
+      "path": "/api/activity/cleanup",
+      "schedule": "0 3 * * 0"
+    },
+    {
+      "path": "/api/schedules/cron/generate-monthly",
+      "schedule": "0 1 1 * *"
+    },
+    {
+      "path": "/api/zns/cron/remind-overdue",
+      "schedule": "0 1 * * *"
+    },
+    {
+      "path": "/api/tuition/cron/process-invoices",
+      "schedule": "0 2 * * *"
+    }
   ]
 }

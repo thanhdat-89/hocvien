@@ -164,6 +164,15 @@ export default function Tuition() {
     })
   }
 
+  const [invoiceNotice, setInvoiceNotice] = useState('')
+  const workflowNotice = (workflow: any) => {
+    if (!workflow) return 'Phiếu đã lưu; chưa có thông tin workflow hóa đơn từ backend.'
+    if (!workflow.enabled) return 'Phiếu và bản nháp đã lưu. Backend chưa bật tự động chuẩn bị XML trên MISA.'
+    if (workflow.status === 'MISA_XML_PREPARED') return 'Phiếu đã lưu; MISA đã chuẩn bị XML chưa ký.'
+    if (workflow.status === 'OUTCOME_UNKNOWN') return 'Phiếu đã lưu; kết quả MISA chưa rõ, cần đối chiếu trước khi gửi lại.'
+    return workflow.message || 'Phiếu đã lưu; hóa đơn đang chờ xử lý hoặc cần kiểm tra.'
+  }
+
   const handleSaveToggles = async () => {
     const keys = Object.keys(pendingToggles)
     if (keys.length === 0) return
@@ -174,7 +183,7 @@ export default function Tuition() {
       const results = await Promise.all(keys.map(async key => {
         const [studentId, classId] = key.split('___')
         const data = pendingToggleData[key]
-        return api.post('/tuition/toggle-paid', {
+        const response = await api.post('/tuition/toggle-paid', {
           studentId,
           classId,
           month,
@@ -182,10 +191,9 @@ export default function Tuition() {
           paid: pendingToggles[key],
           tuitionRecordId: data?.tuitionRecordId || undefined,
         })
+        return { key, ...response.data }
       }))
-      const draftFailures = results
-        .map(result => result.data?.invoiceDraft)
-        .filter((draft: any) => draft?.status === 'FAILED')
+      setInvoiceNotice([...new Set(results.map(result => workflowNotice(result.invoiceWorkflow)))].join(' '))
       // Optimistic update để tránh lỗi stale index từ Firestore
       setRows(prevRows => prevRows.map(r => {
         const k = `${r.studentId}___${r.classId}`
@@ -194,7 +202,7 @@ export default function Tuition() {
           return {
             ...r,
             tuitionRecord: {
-              id: r.tuitionRecord?.id || 'temp',
+              id: results.find(result => result.key === k)?.recordId || r.tuitionRecord?.id || '',
               finalAmount: r.finalAmount,
               status: newPaid ? 'PAID' : 'PENDING',
               paidAmount: newPaid ? r.finalAmount : 0,
@@ -204,13 +212,6 @@ export default function Tuition() {
         }
         return r
       }))
-      if (draftFailures.length) {
-        const detail = draftFailures[0]?.message || 'MISA không trả được kết quả.'
-        await showAlert({
-          title: 'Đã ghi nhận thanh toán',
-          message: `${draftFailures.length} phiếu đã thanh toán đủ nhưng chưa tạo được hóa đơn nháp trên MISA. ${detail} Hãy kiểm tra trạng thái trong trang Hóa đơn điện tử trước khi thử lại.`,
-        })
-      }
     } catch (e: any) {
       console.error('Lỗi khi lưu hàng loạt:', e)
       const serverMsg = e?.response?.data?.message || e?.message || 'Lỗi không xác định'
@@ -294,9 +295,10 @@ export default function Tuition() {
     const key = `${row.studentId}-${row.classId}`
     setCreatingRow(key)
     try {
-      await api.post('/tuition/calculate', {
+      const { data } = await api.post('/tuition/calculate', {
         studentId: row.studentId, classId: row.classId, month, year,
       })
+      setInvoiceNotice(workflowNotice(data.invoiceWorkflow))
       loadData()
     } catch (e: any) {
       await showAlert({
@@ -320,6 +322,7 @@ export default function Tuition() {
   return (
     <div>
       <TopBar title="Quản lý Học phí" />
+      {invoiceNotice && <p role="status" className="bg-blue-50 text-blue-800 rounded-xl p-3 text-sm mb-4">{invoiceNotice}</p>}
       <div className="px-8 py-8 space-y-8">
 
         {/* Header */}

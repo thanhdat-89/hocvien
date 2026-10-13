@@ -2,7 +2,8 @@ import { getTuitionScheduleWithFallback } from '../services/tuitionScheduleRead'
 import { misaConnectionStatus, checkMisaConnection } from '../services/misaConnection'
 import misaDrafts from './misaDrafts'
 import { activityContext } from '../middleware/activityContext'
-import { tryCreateAutomaticMisaDraft } from '../services/misaAutoDraft'
+import misaInvoiceCron from './misaInvoiceCron'
+import { runTuitionInvoiceWorkflow } from '../services/tuitionInvoiceWorkflow'
 import { Router, Response, NextFunction } from 'express'
 import { db, C, s, toDocs, toObj, paginate } from '../lib/firebase'
 import { authenticate, requireRole } from '../middleware/auth'
@@ -16,6 +17,7 @@ import {
 } from '../services/tuitionCalculator'
 
 const router = Router()
+router.use(misaInvoiceCron)
 router.use(authenticate)
 router.use(activityContext)
 router.use('/misa', misaDrafts)
@@ -320,10 +322,8 @@ router.post('/toggle-paid', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req
     }
 
     const finalStatus = await getPaymentStatus(record.id)
-    const invoiceDraft = paid && finalStatus.remaining <= 0
-      ? await tryCreateAutomaticMisaDraft(record.id, req.user!.userId)
-      : undefined
-    res.json({ recordId: record.id, paid, finalStatus, invoiceDraft })
+    const invoiceWorkflow = await runTuitionInvoiceWorkflow(record.id)
+    res.json({ recordId: record.id, paid, finalStatus, invoiceWorkflow })
   } catch (err: any) {
     console.error('[toggle-paid] ERROR:', err?.message || err)
     next(err)
@@ -369,11 +369,8 @@ router.post('/calculate', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: 
           tuitionRecord.status = 'PENDING'
         }
       }
-      const paymentStatus = await getPaymentStatus(tuitionRecord.id)
-      const invoiceDraft = paid === true && paymentStatus.remaining <= 0
-        ? await tryCreateAutomaticMisaDraft(tuitionRecord.id, req.user!.userId)
-        : undefined
-      res.json({ ...tuitionRecord, invoiceDraft })
+      const invoiceWorkflow = await runTuitionInvoiceWorkflow(tuitionRecord.id)
+      res.json({ ...tuitionRecord, invoiceWorkflow })
     } else {
       const result = await calculateTuitionForClass(classId, Number(month), Number(year))
       res.json({ message: `Tạo ${result.created} phiếu mới, cập nhật ${result.updated} phiếu`, ...result })
@@ -413,8 +410,8 @@ router.post('/:id/payment', requireRole('ADMIN', 'STAFF'), async (req: AuthReque
     await refreshTuitionStatus(tuitionRecordId)
 
     const { remaining, status } = await getPaymentStatus(tuitionRecordId)
-    const invoiceDraft = remaining <= 0 ? await tryCreateAutomaticMisaDraft(tuitionRecordId, req.user!.userId) : undefined
-    res.status(201).json({ payment: { id: ref.id, ...paymentData }, status, remaining, invoiceDraft })
+    const invoiceWorkflow = await runTuitionInvoiceWorkflow(tuitionRecordId)
+    res.status(201).json({ payment: { id: ref.id, ...paymentData }, status, remaining, invoiceWorkflow })
   } catch (err) { next(err) }
 })
 

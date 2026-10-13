@@ -8,10 +8,11 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "test:misa-preview": "npm run build && node --test test/misa-preview.test.cjs",
+    "test:misa-preview": "npm run build && node --test test/misa-preview.test.cjs test/misa-outbox.test.cjs",
     "start": "node dist/index.js",
     "db:seed": "tsx src/scripts/seedFirebase.ts",
-    "deploy": "vercel --prod --yes"
+    "deploy": "vercel --prod --yes",
+    "invoices:worker": "tsx src/scripts/processInvoiceOutbox.ts --watch"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
