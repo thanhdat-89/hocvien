@@ -59,12 +59,16 @@ export async function processInvoiceOutbox(id: string, provider = prepareUnsigne
       lastSyncAt: new Date().toISOString(), lastErrorCode: '', lastErrorMessage: '' }
     queueStatus = 'DONE'
   } catch (error) {
-    const ambiguous = !(error instanceof InvoicePreviewError) || error instanceof MisaPreparationError && error.ambiguous
-    const invalid = error instanceof InvoicePreviewError && [400, 409].includes(error.status)
+    // Keep this classification robust if a provider error crosses a module boundary.
+    const providerError = error as any
+    const previewError = error instanceof InvoicePreviewError
+      || (providerError && typeof providerError.status === 'number' && typeof providerError.message === 'string')
+    const ambiguous = !previewError || providerError.ambiguous === true
+    const invalid = previewError && [400, 409].includes(Number(providerError.status))
     queueStatus = ambiguous ? 'OUTCOME_UNKNOWN' : invalid || (draft.syncAttempts ?? 0) >= 5 ? 'NEEDS_REVIEW' : 'RETRY'
     patch = { status: ambiguous ? 'OUTCOME_UNKNOWN' : queueStatus === 'NEEDS_REVIEW' ? 'NEEDS_REVIEW' : 'SYNC_FAILED',
-      lastErrorCode: error instanceof MisaPreparationError ? error.code : 'PREPARATION_FAILED',
-      lastErrorMessage: error instanceof InvoicePreviewError ? error.message : 'Không xử lý được yêu cầu; cần kiểm tra kết nối MISA.' }
+      lastErrorCode: typeof providerError.code === 'string' ? providerError.code : 'PREPARATION_FAILED',
+      lastErrorMessage: previewError ? providerError.message : 'Không xử lý được yêu cầu; cần kiểm tra kết nối MISA.' }
   }
   // If persistence fails after the provider call, the PROCESSING lease remains and will
   // become OUTCOME_UNKNOWN rather than resending an invoice whose outcome may be known only to MISA.
