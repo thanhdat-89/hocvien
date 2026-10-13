@@ -1,3 +1,4 @@
+import InvoiceWorkflowResultDialog, { type InvoiceWorkflowResult } from '../components/InvoiceWorkflowResultDialog'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import TopBar from '../components/TopBar'
@@ -164,69 +165,57 @@ export default function Tuition() {
     })
   }
 
-  const [invoiceNotice, setInvoiceNotice] = useState('')
-  const workflowNotice = (workflow: any) => {
-    if (!workflow) return 'Phiếu đã lưu; chưa có thông tin workflow hóa đơn từ backend.'
-    if (!workflow.enabled) return 'Phiếu và bản nháp đã lưu. Backend chưa bật tự động chuẩn bị XML trên MISA.'
-    if (workflow.status === 'MISA_XML_PREPARED') return 'Phiếu đã lưu; MISA đã chuẩn bị XML chưa ký.'
-    if (workflow.status === 'OUTCOME_UNKNOWN') return 'Phiếu đã lưu; kết quả MISA chưa rõ, cần đối chiếu trước khi gửi lại.'
-    return workflow.message || 'Phiếu đã lưu; hóa đơn đang chờ xử lý hoặc cần kiểm tra.'
+  const [invoiceResults, setInvoiceResults] = useState<InvoiceWorkflowResult[] | null>(null)
+  const pendingResult = (row: ScheduleRow, key: string): InvoiceWorkflowResult => ({
+    key, studentName: row.studentName, className: row.className, month, year, phase: 'processing',
+  })
+  const updateInvoiceResult = (key: string, patch: Partial<InvoiceWorkflowResult>) => {
+    setInvoiceResults(previous => previous?.map(item => item.key === key ? { ...item, ...patch } : item) ?? null)
   }
+  const responseWorkflow = (data: any): InvoiceWorkflowResult['workflow'] => data.invoiceWorkflow ?? data.invoiceDraft
+  const requestError = (error: any) => error?.response?.data?.message || 'Không nhận được phản hồi. Phiếu có thể đã lưu; kiểm tra trước khi thử lại.'
 
   const handleSaveToggles = async () => {
     const keys = Object.keys(pendingToggles)
     if (keys.length === 0) return
-
     setIsSavingToggles(true)
-    let hasError = false
+    setInvoiceResults(keys.map(key => {
+      const [studentId, classId] = key.split('___')
+      const row = rows.find(item => item.studentId === studentId && item.classId === classId)
+      return row ? pendingResult(row, key) : { key, studentName: 'Học viên', className: classId, month, year, phase: 'processing' }
+    }))
     try {
-      const results = await Promise.all(keys.map(async key => {
+      const settled = await Promise.allSettled(keys.map(async key => {
         const [studentId, classId] = key.split('___')
-        const data = pendingToggleData[key]
-        const response = await api.post('/tuition/toggle-paid', {
-          studentId,
-          classId,
-          month,
-          year,
-          paid: pendingToggles[key],
-          tuitionRecordId: data?.tuitionRecordId || undefined,
-        })
-        return { key, ...response.data }
-      }))
-      setInvoiceNotice([...new Set(results.map(result => workflowNotice(result.invoiceWorkflow)))].join(' '))
-      // Optimistic update để tránh lỗi stale index từ Firestore
-      setRows(prevRows => prevRows.map(r => {
-        const k = `${r.studentId}___${r.classId}`
-        if (pendingToggles[k] !== undefined) {
-          const newPaid = pendingToggles[k]
-          return {
-            ...r,
-            tuitionRecord: {
-              id: results.find(result => result.key === k)?.recordId || r.tuitionRecord?.id || '',
-              finalAmount: r.finalAmount,
-              status: newPaid ? 'PAID' : 'PENDING',
-              paidAmount: newPaid ? r.finalAmount : 0,
-              remainingAmount: newPaid ? 0 : r.finalAmount,
-            }
-          }
+        try {
+          const { data } = await api.post('/tuition/toggle-paid', {
+            studentId, classId, month, year, paid: pendingToggles[key],
+            tuitionRecordId: pendingToggleData[key]?.tuitionRecordId || undefined,
+          })
+          updateInvoiceResult(key, { phase: 'complete', recordId: data.recordId, workflow: responseWorkflow(data) })
+          return { key, recordId: data.recordId }
+        } catch (error) {
+          updateInvoiceResult(key, { phase: 'request_failed', error: requestError(error) })
+          throw error
         }
-        return r
       }))
-    } catch (e: any) {
-      console.error('Lỗi khi lưu hàng loạt:', e)
-      const serverMsg = e?.response?.data?.message || e?.message || 'Lỗi không xác định'
-      showAlert({ title: 'Lỗi', message: `Chi tiết: ${serverMsg}` })
-      hasError = true
+      const completed = settled.flatMap(result => result.status === 'fulfilled' ? [result.value] : [])
+      setRows(previous => previous.map(row => {
+        const key = `${row.studentId}___${row.classId}`
+        const result = completed.find(item => item.key === key)
+        if (!result) return row
+        const paid = pendingToggles[key]
+        return { ...row, tuitionRecord: { id: result.recordId || row.tuitionRecord?.id || '',
+          finalAmount: row.finalAmount, status: paid ? 'PAID' : 'PENDING',
+          paidAmount: paid ? row.finalAmount : 0, remainingAmount: paid ? 0 : row.finalAmount } }
+      }))
+      // Preserve failed rows for review; do not replay successful payment requests.
+      const successful = new Set(completed.map(item => item.key))
+      setPendingToggles(previous => Object.fromEntries(Object.entries(previous).filter(([key]) => !successful.has(key))))
+      setPendingToggleData(previous => Object.fromEntries(Object.entries(previous).filter(([key]) => !successful.has(key))))
     } finally {
-      if (!hasError) {
-        setPendingToggles({})
-        setPendingToggleData({})
-      }
       setIsSavingToggles(false)
-      // Delay loadData để chờ Firestore index cập nhật xong
-      setTimeout(() => {
-        loadData()
-      }, 1500)
+      setTimeout(() => { loadData() }, 1500)
     }
   }
 
@@ -294,17 +283,15 @@ export default function Tuition() {
     }
     const key = `${row.studentId}-${row.classId}`
     setCreatingRow(key)
+    setInvoiceResults([pendingResult(row, key)])
     try {
       const { data } = await api.post('/tuition/calculate', {
         studentId: row.studentId, classId: row.classId, month, year,
       })
-      setInvoiceNotice(workflowNotice(data.invoiceWorkflow))
+      updateInvoiceResult(key, { phase: 'complete', recordId: data.id, workflow: responseWorkflow(data) })
       loadData()
     } catch (e: any) {
-      await showAlert({
-        title: 'Lỗi',
-        message: e?.response?.data?.message || (isRecalc ? 'Tính lại phiếu thất bại' : 'Tạo phiếu thất bại'),
-      })
+      updateInvoiceResult(key, { phase: 'request_failed', error: requestError(e) })
     } finally {
       setCreatingRow(null)
     }
@@ -322,7 +309,7 @@ export default function Tuition() {
   return (
     <div>
       <TopBar title="Quản lý Học phí" />
-      {invoiceNotice && <p role="status" className="bg-blue-50 text-blue-800 rounded-xl p-3 text-sm mb-4">{invoiceNotice}</p>}
+      {invoiceResults && <InvoiceWorkflowResultDialog results={invoiceResults} onClose={() => setInvoiceResults(null)} />}
       <div className="px-8 py-8 space-y-8">
 
         {/* Header */}

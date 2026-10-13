@@ -1,7 +1,7 @@
 import { db, C, toObj, toDocs } from '../lib/firebase'
 import type { TuitionRecord, Payment } from '../types/models'
 import { ensureInvoiceDraftForTuitionRecord } from './invoiceDraftService'
-import { InvoiceDraft, invoiceSource } from './misaInvoicePreview'
+import { InvoiceDraft, InvoicePreviewError, invoiceSource } from './misaInvoicePreview'
 import { invoiceAutomationEnabled, makeInvoiceOutbox, processInvoiceOutbox } from './invoiceOutbox'
 
 /** Called after all fee/payment writes. Failure never rolls back a saved tuition record. */
@@ -27,13 +27,16 @@ export async function runTuitionInvoiceWorkflow(recordId: string) {
       tx.set(draftRef, updated)
       tx.set(queueRef, makeInvoiceOutbox(updated))
     })
+    let processingMessage = ''
     if (invoiceAutomationEnabled()) {
-      try { await processInvoiceOutbox(recordId) } catch { /* Durable outbox retains failures or a concurrent claim. */ }
+      try { await processInvoiceOutbox(recordId) } catch (error) {
+        processingMessage = error instanceof InvoicePreviewError ? error.message : 'Chưa nhận được kết quả xử lý hóa đơn; cần kiểm tra hàng đợi.'
+      }
     }
     const saved = await draftRef.get()
     const draft = saved.data() as InvoiceDraft | undefined
     return { enabled: invoiceAutomationEnabled(), status: draft?.status ?? 'NEEDS_REVIEW',
-      message: draft?.lastErrorMessage ?? '', refId: draft?.refId ?? '', transactionId: draft?.providerInvoiceId ?? '' }
+      message: processingMessage || draft?.lastErrorMessage || '', refId: draft?.refId ?? '', transactionId: draft?.providerInvoiceId ?? '' }
   } catch {
     return { enabled: invoiceAutomationEnabled(), status: 'NEEDS_REVIEW',
       message: 'Phiếu đã lưu nhưng chưa hoàn tất xử lý hóa đơn; cần kiểm tra hàng đợi.' }
