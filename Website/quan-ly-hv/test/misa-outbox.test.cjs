@@ -199,3 +199,27 @@ test('existing legacy MISA invoice blocks a second provider request', async () =
     assert.equal(calls, 0)
   } finally { f.restore() }
 })
+
+
+test('real Firestore wrapper generates fee IDs without network and preserves explicit ID validation', async () => {
+  const { Firestore } = require('firebase-admin/firestore')
+  const { createMirroredFirestore } = require('../dist/lib/firestoreMirror')
+  const raw = new Firestore({ projectId: 'local-regression-test' })
+  const db = createMirroredFirestore(raw)
+  try {
+    const first = db.collection('tuitionRecords').doc()
+    const second = db.collection('tuitionRecords').doc()
+    assert.match(first.id, /^[A-Za-z0-9]{20}$/)
+    assert.notEqual(first.id, second.id)
+    assert.equal(first.path, `tuitionRecords/${first.id}`)
+    assert.equal(db.collection('tuitionRecords').doc('fee-1').id, 'fee-1')
+    assert.equal(first.collection('children').doc().id.length, 20)
+    assert.throws(() => db.collection('tuitionRecords').doc(undefined), /documentPath/)
+    assert.throws(() => db.collection('tuitionRecords').doc(''), /documentPath/)
+    // Construct the real atomic write, without committing or contacting Firestore.
+    const batch = db.batch()
+    batch.set(first, { billingMonth: 7, billingYear: 2026, finalAmount: 1200000 })
+    batch.set(db.collection('invoiceDrafts').doc(first.id), { refId: 'fixed-ref', source: { recordId: first.id } })
+    batch.set(db.collection('invoiceOutbox').doc(first.id), { idempotencyKey: 'fixed-ref', status: 'PENDING' })
+  } finally { await raw.terminate() }
+})

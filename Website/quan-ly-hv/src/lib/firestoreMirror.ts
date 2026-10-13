@@ -80,7 +80,8 @@ function wrapSnapshotQuery(query: any, db: Firestore): any {
   const proxy = new Proxy(query, {
     get(target, prop) {
       if (prop === 'get') return async (...args: any[]) => wrapSnapshot(await target.get(...args), db)
-      if (prop === 'doc') return (id?: string) => wrapDocument(target.doc(id), db)
+      // Firestore distinguishes doc() from doc(undefined); only the former generates an ID.
+      if (prop === 'doc') return (...args: [] | [string]) => wrapDocument(target.doc(...args), db)
       if (prop === 'add') return async (data: any) => {
         const ref = await target.add(data)
         await mirrorOrQueue(db, [makeOperation('set', ref, data, false)])
