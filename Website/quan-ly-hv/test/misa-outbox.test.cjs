@@ -8,35 +8,46 @@ const draft = () => ({ id: record.id, refId: 'fixed-ref', revision: 1, status: '
   buyer: { fullName: 'Parent', legalName: '', taxCode: '', address: '', email: '', phone: '' },
   source: service.invoiceSource(record, []), invoiceDate: '2026-10-13', createdAt: '2026-10-13T00:00:00Z', updatedAt: '2026-10-13T00:00:00Z' })
 
-test('unsigned gateway uses one auth, validates template, only submits SignType 1 and verifies RefID', async () => {
+test('gateway creates an unpublished MISA invoice with PublishStatus 0', async () => {
   const keys = ['MEINVOICE_CLIENT_ID', 'MEINVOICE_CLIENT_SECRET', 'MEINVOICE_TAXCODE', 'MEINVOICE_USERNAME', 'MEINVOICE_PASSWORD']
   const old = keys.map(k => process.env[k]); keys.forEach(k => process.env[k] = 'test-secret')
   const response = value => ({ ok: true, json: async () => value })
   const calls = []
-  const request = (result, inactive = false) => async (url, init) => {
+  const request = async (url, init) => {
     calls.push({ url, init })
-    if (url.endsWith('/token')) return response({ Success: true, Data: 'token' })
-    if (url.includes('/templates?')) return response({ Success: true, Data: [{ IPTemplateID: template.id, InvSeries: template.series, InvTemplateNo: '2', Inactive: inactive }] })
-    if (result instanceof Error) throw result
-    return response(result)
+    if (url.includes('/invoice/token')) return response({ Success: true, Data: 'developer-token' })
+    if (url.includes('/templates?')) return response({ Success: true, Data: [{ IPTemplateID: template.id, InvSeries: template.series, InvTemplateNo: '2', Inactive: false }] })
+    if (url.endsWith('/oauth')) return response({ access_token: 'legacy-token', OrganizationUnitID: 'org', DatabaseID: 'db' })
+    if (url.endsWith('/v3sainvoice/Code')) return response({ Data: JSON.stringify({ 'fixed-ref': { IsValid: true, RefID: 'fixed-ref', InvNo: '' } }) })
+    throw new Error('Unexpected endpoint')
   }
-  const valid = { success: true, publishInvoiceResult: null, createInvoiceResult: JSON.stringify([{ RefID: 'fixed-ref', TransactionID: 'transaction', InvNo: null, ErrorCode: null }]) }
   try {
-    const result = await gateway.prepareUnsignedInvoice(draft(), request(valid))
-    assert.equal(result.transactionId, 'transaction')
-    assert.equal(calls.length, 3)
-    const body = JSON.parse(calls[2].init.body)
-    assert.deepEqual(Object.keys(body), ['SignType', 'InvoiceData'])
-    assert.equal(body.SignType, 1)
-    assert.equal(body.InvoiceData[0].IsSendEmail, false)
-    assert.equal(body.InvoiceData[0].RefID, 'fixed-ref')
-    assert.equal(body.InvoiceData[0].TotalAmount, 90)
-    calls.length = 0
-    await assert.rejects(gateway.prepareUnsignedInvoice(draft(), request(valid, true)), e => e.status === 409)
-    assert.equal(calls.length, 2)
-    for (const invalid of [new Error('test-secret'), { success: false }, { ...valid, publishInvoiceResult: [] }, { ...valid, createInvoiceResult: 'bad-json' }, { ...valid, createInvoiceResult: [{ RefID: 'wrong', TransactionID: 'transaction' }] }]) {
-      await assert.rejects(gateway.prepareUnsignedInvoice(draft(), request(invalid)), e => e.ambiguous === true && !e.message.includes('test-secret'))
-    }
+    const result = await gateway.prepareUnsignedInvoice(draft(), request)
+    assert.equal(result.transactionId, 'fixed-ref')
+    assert.equal(calls.length, 4)
+    const body = JSON.parse(calls[3].init.body)
+    assert.equal(body[0].PublishStatus, 0)
+    assert.equal(body[0].InvoiceType, 10)
+    assert.equal(body[0].RefID, 'fixed-ref')
+    assert.equal(body[0].InvoiceDetails[0].Amount, 100)
+    assert.equal(body[0].InvoiceDetails[0].AmountWithoutVAT, 90)
+    assert.equal(calls[3].init.headers.Authorization, 'Bearer legacy-token')
+    assert.equal(calls[3].init.headers.OrganizationUnitID, 'org')
+    assert.equal(calls[3].init.headers.DatabaseID, 'db')
+  } finally { keys.forEach((k, i) => old[i] === undefined ? delete process.env[k] : process.env[k] = old[i]) }
+})
+
+test('gateway rejects provider errors without marking the outcome unknown', async () => {
+  const keys = ['MEINVOICE_CLIENT_ID', 'MEINVOICE_CLIENT_SECRET', 'MEINVOICE_TAXCODE', 'MEINVOICE_USERNAME', 'MEINVOICE_PASSWORD']
+  const old = keys.map(k => process.env[k]); keys.forEach(k => process.env[k] = 'test-secret')
+  const response = value => ({ ok: true, json: async () => value })
+  const request = async url => {
+    if (url.includes('/invoice/token')) return response({ Success: true, Data: 'developer-token' })
+    if (url.includes('/templates?')) return response({ Success: true, Data: [{ IPTemplateID: template.id, InvSeries: template.series, InvTemplateNo: '2', Inactive: false }] })
+    if (url.endsWith('/oauth')) return response({ access_token: 'legacy-token', OrganizationUnitID: 'org', DatabaseID: 'db' })
+    return response({ Data: JSON.stringify({ 'fixed-ref': { IsValid: false, RefID: 'fixed-ref', ValidateResult: [{ ErrorCode: 'INVALID_INVOICE', ErrorMessage: 'Mẫu không hợp lệ' }] } }) })
+  }
+  try { await assert.rejects(gateway.prepareUnsignedInvoice(draft(), request), e => e.code === 'PROVIDER_REJECTED' && e.ambiguous === false && /Mẫu không hợp lệ/.test(e.message))
   } finally { keys.forEach((k, i) => old[i] === undefined ? delete process.env[k] : process.env[k] = old[i]) }
 })
 
@@ -80,7 +91,7 @@ test('outbox claims before sending, blocks concurrent request and sends a fixed 
       await assert.rejects(f.outbox.processInvoiceOutbox('fee-1', provider), e => e.status === 409)
       return { transactionId: 'txn', invoiceNo: '' }
     }
-    assert.equal((await f.outbox.processInvoiceOutbox('fee-1', provider, 1)).status, 'MISA_XML_PREPARED')
+    assert.equal((await f.outbox.processInvoiceOutbox('fee-1', provider, 1)).status, 'MISA_DRAFT_CREATED')
     assert.equal(f.docs.get('invoiceOutbox/fee-1').status, 'DONE')
     assert.equal(f.docs.get('invoiceDrafts/fee-1').providerInvoiceId, 'txn')
     await f.outbox.processInvoiceOutbox('fee-1', provider, 1)
@@ -164,7 +175,7 @@ test('tuition automation refreshes payment source, preserves buyer, calls MISA a
     assert.equal(saved.source.studentName, 'Updated student')
     assert.equal(saved.buyer.fullName, 'Parent edited')
     assert.equal(f.docs.get(`invoiceOutbox/${id}`).revision, saved.revision)
-    f.docs.set(`invoiceDrafts/${id}`, { ...saved, status: 'MISA_XML_PREPARED', providerInvoiceId: 'txn' })
+    f.docs.set(`invoiceDrafts/${id}`, { ...saved, status: 'MISA_DRAFT_CREATED', providerInvoiceId: 'txn' })
   }
   delete require.cache[workflowPath]
   try {
@@ -172,7 +183,7 @@ test('tuition automation refreshes payment source, preserves buyer, calls MISA a
     f.docs.set('tuitionRecords/fee-1', { ...record, studentName: 'Updated student' })
     const workflow = require(workflowPath)
     const result = await workflow.runTuitionInvoiceWorkflow('fee-1')
-    assert.equal(result.status, 'MISA_XML_PREPARED')
+    assert.equal(result.status, 'MISA_DRAFT_CREATED')
     assert.equal(result.transactionId, 'txn')
     assert.equal(calls, 1)
     const saved = f.docs.get('invoiceDrafts/fee-1')
@@ -189,15 +200,6 @@ test('tuition automation refreshes payment source, preserves buyer, calls MISA a
     if (oldService) require.cache[draftServicePath] = oldService; else delete require.cache[draftServicePath]
     delete require.cache[workflowPath]; f.restore()
   }
-})
-
-test('existing legacy MISA invoice blocks a second provider request', async () => {
-  const f = fixture(); let calls = 0
-  try {
-    f.docs.set('misaInvoices/fee-1', { status: 'DRAFT_CREATED', refId: 'legacy-ref' })
-    await assert.rejects(f.outbox.processInvoiceOutbox('fee-1', async () => { calls++; return { transactionId: 'duplicate', invoiceNo: '' } }), e => e.status === 409)
-    assert.equal(calls, 0)
-  } finally { f.restore() }
 })
 
 

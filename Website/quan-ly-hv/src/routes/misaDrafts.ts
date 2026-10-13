@@ -87,7 +87,7 @@ router.post('/drafts/:recordId/sync', async (req: AuthRequest, res, next) => {
     if (!Number.isInteger(req.body?.revision) || req.body.revision < 1) throw new InvoicePreviewError(400, 'Cần cung cấp phiên bản bản nháp.')
     const draft = await processInvoiceOutbox(id, undefined, req.body.revision)
     res.json({ draft, publishingEnabled: false, preparationEnabled: invoiceAutomationEnabled(),
-      message: draft.status === 'MISA_XML_PREPARED' ? 'MISA đã chuẩn bị XML chưa ký. Chưa xác minh việc hiển thị trong danh sách nháp MISA.' : draft.lastErrorMessage || 'Cần kiểm tra trạng thái xử lý.' })
+      message: draft.status === 'MISA_DRAFT_CREATED' ? 'MISA đã tạo hóa đơn ở trạng thái chưa phát hành.' : draft.status === 'MISA_XML_PREPARED' ? 'MISA đã chuẩn bị XML chưa ký. Chưa xác minh việc hiển thị trong danh sách nháp MISA.' : draft.lastErrorMessage || 'Cần kiểm tra trạng thái xử lý.' })
   } catch (error) { next(error) }
 })
 

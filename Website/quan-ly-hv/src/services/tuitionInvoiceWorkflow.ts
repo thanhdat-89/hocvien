@@ -17,9 +17,10 @@ export async function runTuitionInvoiceWorkflow(recordId: string) {
       ])
       if (!saved.exists || !fee.exists) return
       const draft = saved.data() as InvoiceDraft
-      // Never reset a request which may already have reached the provider.
-      if (!['LOCAL_DRAFT', 'PENDING_MISA', 'SYNC_FAILED', 'NEEDS_REVIEW'].includes(draft.status)
-        || ['PROCESSING', 'OUTCOME_UNKNOWN', 'DONE'].includes(queued.data()?.status)) return
+      // Never reset a request which may already have reached the provider, including
+      // historical generic PROVIDER_REJECTED states without the original response.
+      if (!['LOCAL_DRAFT', 'PENDING_MISA', 'SYNC_FAILED', 'NEEDS_REVIEW'].includes(draft.status)) return
+      if (['PROCESSING', 'OUTCOME_UNKNOWN', 'DONE'].includes(queued.data()?.status)) return
       const source = invoiceSource(toObj<TuitionRecord>(fee), toDocs<Payment>(payments))
       if (source.fingerprint === draft.source.fingerprint && queued.exists && queued.data()?.status !== 'BLOCKED') return
       const updated: InvoiceDraft = { ...draft, source, revision: draft.revision + 1,

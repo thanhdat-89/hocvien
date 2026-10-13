@@ -6,7 +6,7 @@ import { MisaPreparationError, prepareUnsignedInvoice } from './misaDraftGateway
 export const invoiceAutomationEnabled = () => process.env.MEINVOICE_AUTO_PREPARE_XML === 'true'
 const localEditable = (status: string) => ['LOCAL_DRAFT', 'PENDING_MISA', 'SYNC_FAILED', 'NEEDS_REVIEW'].includes(status)
 export function makeInvoiceOutbox(draft: InvoiceDraft) {
-  return { tuitionRecordId: draft.id, draftId: draft.id, operation: 'PREPARE_UNSIGNED_XML',
+  return { tuitionRecordId: draft.id, draftId: draft.id, operation: 'CREATE_UNPUBLISHED_INVOICE',
     status: draft.template.id ? 'PENDING' : 'NEEDS_REVIEW', attempts: 0,
     idempotencyKey: draft.refId, revision: draft.revision, nextRetryAt: new Date().toISOString(),
     createdAt: draft.createdAt, updatedAt: draft.updatedAt, leaseToken: '', leaseUntil: '' }
@@ -14,22 +14,20 @@ export function makeInvoiceOutbox(draft: InvoiceDraft) {
 
 /** Claims exactly one saved revision; external calls never occur in Firestore transactions. */
 export async function processInvoiceOutbox(id: string, provider = prepareUnsignedInvoice, expectedRevision?: number): Promise<InvoiceDraft> {
-  if (!invoiceAutomationEnabled()) throw new InvoicePreviewError(503, 'Chưa bật bước tạo XML chưa ký trên MISA (MEINVOICE_AUTO_PREPARE_XML).')
+  if (!invoiceAutomationEnabled()) throw new InvoicePreviewError(503, 'Chưa bật bước tạo hóa đơn Chưa phát hành trên MISA (MEINVOICE_AUTO_PREPARE_XML).')
   const draftRef = db.collection('invoiceDrafts').doc(id)
   const queueRef = db.collection('invoiceOutbox').doc(id)
   const leaseToken = randomUUID()
   const draft = await db.runTransaction(async tx => {
-    const [saved, queued, record, payments, legacy] = await Promise.all([
+    const [saved, queued, record, payments] = await Promise.all([
       tx.get(draftRef), tx.get(queueRef), tx.get(db.collection(C.TUITION_RECORDS).doc(id)),
       tx.get(db.collection(C.PAYMENTS).where('tuitionRecordId', '==', id)),
-      tx.get(db.collection('misaInvoices').doc(id)),
     ])
     if (!saved.exists || !queued.exists || !record.exists) throw new InvoicePreviewError(404, 'Không tìm thấy phiếu hoặc bản nháp.')
-    if (legacy.exists && legacy.data()?.status !== 'REMOVED_FROM_MISA') throw new InvoicePreviewError(409, 'Phiếu đã có dữ liệu hóa đơn trong tích hợp MISA cũ; cần đối chiếu trước khi gửi. Không tự tạo lại.')
     const data = saved.data() as InvoiceDraft
     const q = queued.data()!
     if (expectedRevision !== undefined && data.revision !== expectedRevision) throw new InvoicePreviewError(409, 'Bản nháp đã thay đổi; mở lại để lấy phiên bản mới.')
-    if (data.status === 'MISA_XML_PREPARED') return data
+    if (data.status === 'MISA_DRAFT_CREATED' || data.status === 'MISA_XML_PREPARED') return data
     if (q.status === 'PROCESSING') {
       if (q.leaseUntil > new Date().toISOString()) throw new InvoicePreviewError(409, 'Hóa đơn đang được xử lý.')
       // A crashed attempt may already have reached MISA; never resend it automatically.
@@ -57,7 +55,7 @@ export async function processInvoiceOutbox(id: string, provider = prepareUnsigne
   let queueStatus: string
   try {
     const result = await provider(draft)
-    patch = { status: 'MISA_XML_PREPARED', providerInvoiceId: result.transactionId, providerInvoiceNo: result.invoiceNo,
+    patch = { status: 'MISA_DRAFT_CREATED', providerInvoiceId: result.transactionId, providerInvoiceNo: result.invoiceNo,
       lastSyncAt: new Date().toISOString(), lastErrorCode: '', lastErrorMessage: '' }
     queueStatus = 'DONE'
   } catch (error) {

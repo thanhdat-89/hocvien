@@ -13,7 +13,7 @@ export function invoiceWorkflowLabel(result: InvoiceWorkflowResult) {
   if (workflow.enabled === false) return 'Phiếu đã lưu. Backend đang tắt tự động xử lý MISA.'
   const labels: Record<string, string> = {
     MISA_XML_PREPARED: 'MISA đã trả kết quả chuẩn bị XML chưa ký. Chưa xác nhận hóa đơn đã được lưu trong danh sách Chưa phát hành.',
-    MISA_DRAFT_CREATED: 'Backend báo đã tạo hóa đơn chưa phát hành trên MISA.',
+    MISA_DRAFT_CREATED: 'MISA đã tạo hóa đơn ở trạng thái Chưa phát hành.',
     DRAFT_CREATED: 'Backend báo đã tạo hóa đơn chưa phát hành trên MISA.',
     CREATING_MISA: 'Phiếu đã lưu. MISA đang được xử lý; chưa có kết quả cuối cùng.',
     PENDING_MISA: 'Phiếu đã lưu. Hóa đơn đang chờ xử lý.',
