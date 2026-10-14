@@ -5,6 +5,7 @@ import { useConfirm, useAlert } from '../components/ConfirmDialog'
 import api from '../services/api'
 import { Student, ClassEnrollment, TuitionRecord, Parent, Class, StudentPromotion, PrivateSession } from '../types'
 import { useAuth } from '../hooks/useAuth'
+import { gradeOfClass } from '../lib/classGrade'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -233,10 +234,16 @@ function ParentModal({ studentId, parent, onClose, onSaved }: {
 
 // ─── Enroll Modal ────────────────────────────────────────────────────────────
 
-function EnrollModal({ studentId, onClose, onSaved }: { studentId: string; onClose: () => void; onSaved: () => void }) {
+function EnrollModal({ student, enrollments, onClose, onSaved }: { student: Student; enrollments: ClassEnrollment[]; onClose: () => void; onSaved: () => void }) {
   const [classes, setClasses] = useState<Class[]>([])
   const [classId, setClassId] = useState('')
-  const [enrollmentDate, setEnrollmentDate] = useState(new Date().toISOString().slice(0, 10))
+  const [enrollmentDate, setEnrollmentDate] = useState(() => {
+    const today = new Date()
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+  })
+  const [classesLoading, setClassesLoading] = useState(true)
+  const [classesError, setClassesError] = useState(false)
+  const [showOtherGrades, setShowOtherGrades] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -245,15 +252,27 @@ function EnrollModal({ studentId, onClose, onSaved }: { studentId: string; onClo
       .then(r => setClasses([...(r.data?.data ?? r.data ?? [])].sort((a: Class, b: Class) =>
         a.name.localeCompare(b.name, 'vi', { numeric: true, sensitivity: 'base' })
       )))
-      .catch(() => {})
+      .catch(() => setClassesError(true))
+      .finally(() => setClassesLoading(false))
   }, [])
+
+  const activeClassIds = new Set(enrollments.filter(e => e.status === 'ACTIVE').map(e => e.classId))
+  const availableClasses = classes.filter(cls => !activeClassIds.has(cls.id))
+  const studentGrade = student.gradeLevel ? Number(student.gradeLevel) : null
+  const suggestedClasses = studentGrade
+    ? availableClasses.filter(cls => gradeOfClass(cls) === studentGrade)
+    : availableClasses
+  const otherClasses = studentGrade
+    ? availableClasses.filter(cls => gradeOfClass(cls) !== studentGrade)
+    : []
+  const selectedClass = availableClasses.find(cls => cls.id === classId)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!classId) { setError('Vui lòng chọn lớp học'); return }
     setSaving(true); setError('')
     try {
-      await api.post(`/students/${studentId}/enroll`, { classId, enrollmentDate })
+      await api.post(`/students/${student.id}/enroll`, { classId, enrollmentDate })
       onSaved()
     } catch (err: any) {
       setError(err.response?.data?.message ?? 'Có lỗi xảy ra')
@@ -262,29 +281,94 @@ function EnrollModal({ studentId, onClose, onSaved }: { studentId: string; onClo
     }
   }
 
+  const renderClass = (cls: Class) => {
+    const selected = classId === cls.id
+    return (
+      <button key={cls.id} type="button" onClick={() => setClassId(cls.id)} aria-pressed={selected}
+        aria-label={`Chọn lớp ${cls.name}`}
+        className={`flex min-h-12 w-full items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${selected ? 'border-primary bg-blue-50 text-primary' : 'border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-slate-50'}`}>
+        <span className="min-w-0">
+          <span className="block break-words text-sm font-semibold">{cls.name}</span>
+          {cls.teacherName && <span className="mt-0.5 block text-xs font-normal text-slate-500">Giáo viên: {cls.teacherName}</span>}
+        </span>
+        <span aria-hidden="true" className="material-symbols-outlined shrink-0 text-[20px]">{selected ? 'check_circle' : 'radio_button_unchecked'}</span>
+      </button>
+    )
+  }
+
   return (
-    <Modal title="Đăng ký lớp học" onClose={onClose}>
-      {error && <div className="mb-4 p-3 bg-error-container/10 text-error rounded-xl text-sm">{error}</div>}
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <Field label="Lớp học *">
-          <select value={classId} onChange={e => setClassId(e.target.value)} required className="input">
-            <option value="">Chọn lớp...</option>
-            {classes.map(c => (
-              <option key={c.id} value={c.id}>{c.name} — {c.teacherName ?? ''}</option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Ngày đăng ký">
-          <input value={enrollmentDate} onChange={e => setEnrollmentDate(e.target.value)} type="date" className="input" />
-        </Field>
-        <div className="flex gap-3 pt-2">
-          <button type="button" onClick={onClose} className="flex-1 btn-secondary justify-center">Huỷ</button>
-          <button type="submit" disabled={saving} className="flex-1 btn-primary justify-center disabled:opacity-60">
-            {saving ? 'Đang lưu...' : 'Đăng ký'}
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-5">
+      <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-[3px]" onClick={onClose} />
+      <div role="dialog" aria-modal="true" aria-labelledby="enroll-modal-title" className="relative z-10 flex max-h-[92dvh] w-full max-w-[620px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-7 sm:py-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-primary">
+              <span className="material-symbols-outlined text-[22px]">how_to_reg</span>
+            </div>
+            <div className="min-w-0">
+              <h3 id="enroll-modal-title" className="font-headline text-lg font-bold leading-6 text-on-surface">Đăng ký lớp học</h3>
+              <p className="mt-0.5 truncate text-sm text-slate-500" title={student.fullName}>{student.fullName}{studentGrade ? ` · Khối ${studentGrade}` : ''}</p>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Đóng cửa sổ đăng ký lớp" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+            <span className="material-symbols-outlined text-[20px]">close</span>
           </button>
         </div>
-      </form>
-    </Modal>
+
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 space-y-5 overflow-y-auto px-5 py-5 sm:px-7">
+            {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
+            <div>
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-sm font-semibold text-on-surface">{studentGrade ? `Lớp phù hợp với khối ${studentGrade}` : 'Lớp học đang hoạt động'}</h4>
+                  <p className="mt-0.5 text-xs text-slate-500">Chọn một lớp để đăng ký. Các lớp đang học đã được ẩn.</p>
+                </div>
+                {suggestedClasses.length > 0 && <span className="shrink-0 rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-primary">{suggestedClasses.length} lớp</span>}
+              </div>
+              {classesLoading ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-5 text-center text-sm text-slate-500">Đang tải danh sách lớp...</div>
+              ) : classesError ? (
+                <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Không tải được danh sách lớp. Vui lòng đóng và thử lại.</div>
+              ) : suggestedClasses.length === 0 ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-5 text-center text-sm text-slate-500">{studentGrade ? `Không còn lớp phù hợp với khối ${studentGrade} để đăng ký.` : 'Không có lớp đang hoạt động để đăng ký.'}</div>
+              ) : (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">{suggestedClasses.map(renderClass)}</div>
+              )}
+              {!studentGrade && !classesLoading && !classesError && (
+                <p className="mt-3 text-xs text-slate-500">Học viên chưa có khối lớp. Bạn có thể bổ sung khối trong phần chỉnh sửa hồ sơ.</p>
+              )}
+              {otherClasses.length > 0 && !classesLoading && !classesError && (
+                <div className="mt-4">
+                  <button type="button" onClick={() => setShowOtherGrades(value => !value)} aria-expanded={showOtherGrades}
+                    className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                    <span className="material-symbols-outlined text-[18px]">{showOtherGrades ? 'expand_less' : 'expand_more'}</span>
+                    {showOtherGrades ? 'Ẩn lớp khối khác' : `Xem lớp khối khác (${otherClasses.length})`}
+                  </button>
+                  {showOtherGrades && <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">{otherClasses.map(renderClass)}</div>}
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-slate-100 pt-5">
+              <label htmlFor="enrollment-date" className="mb-1.5 block text-sm font-semibold text-on-surface">Ngày đăng ký</label>
+              <input id="enrollment-date" value={enrollmentDate} onChange={e => setEnrollmentDate(e.target.value)} type="date"
+                className="w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20" />
+            </div>
+          </div>
+
+          <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-100 bg-white px-5 py-4 sm:px-7">
+            <span className="hidden min-w-0 truncate text-xs text-slate-500 sm:block" title={selectedClass?.name}>{selectedClass ? `Đã chọn: ${selectedClass.name}` : 'Chưa chọn lớp học'}</span>
+            <div className="ml-auto flex gap-2">
+              <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">Hủy</button>
+              <button type="submit" disabled={saving || !classId} className="inline-flex min-w-[112px] items-center justify-center rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
+                {saving ? 'Đang lưu...' : 'Đăng ký'}
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
   )
 }
 
@@ -705,7 +789,8 @@ function InfoTab({
       )}
       {enrollModal && (
         <EnrollModal
-          studentId={student.id}
+          student={student}
+          enrollments={enrollments}
           onClose={() => setEnrollModal(false)}
           onSaved={() => { setEnrollModal(false); onRefresh() }}
         />
