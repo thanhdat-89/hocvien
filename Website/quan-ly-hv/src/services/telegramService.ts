@@ -1,5 +1,5 @@
 import { waitUntil } from '@vercel/functions'
-import type { MisaInvoiceRecord } from './misaInvoicePreview'
+import type { MisaInvoiceRecord, InvoiceSource } from './misaInvoicePreview'
 
 export function telegramConfigStatus() {
   const missing = ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID'].filter(key => !process.env[key]?.trim())
@@ -55,13 +55,59 @@ export function invoiceTelegramMessage(invoice: MisaInvoiceRecord) {
   ].join('\n')
 }
 
-export function notifyInvoiceCreated(invoice: MisaInvoiceRecord) {
-  if (invoice.status !== 'DRAFT_CREATED' || !telegramConfigStatus().configured) return
+function scheduleNotification(text: string | Promise<string>, refId?: string) {
+  if (!telegramConfigStatus().configured) return
   try {
-    const task = sendTelegramMessage(invoiceTelegramMessage(invoice)).then(result => {
-      if (!result.sent) console.warn('[Telegram] invoice notification failed', { refId: invoice.refId, code: result.errorCode })
+    const send = typeof text === 'string' ? sendTelegramMessage(text) : text.then(message => sendTelegramMessage(message))
+    const task = send.then(result => {
+      if (!result.sent) console.warn('[Telegram] invoice notification failed', { refId, code: result.errorCode })
     }).catch(() => { console.warn('[Telegram] invoice notification failed') })
     // Preserve background delivery on Vercel without delaying the API response.
     waitUntil(task)
   } catch { console.warn('[Telegram] could not schedule invoice notification') }
+}
+
+export function notifyInvoiceCreated(invoice: MisaInvoiceRecord) {
+  if (invoice.status !== 'DRAFT_CREATED' || !telegramConfigStatus().configured) return
+  try { scheduleNotification(invoiceTelegramMessage(invoice), invoice.refId) }
+  catch { console.warn('[Telegram] could not format invoice notification') }
+}
+
+type FailureSource = Pick<InvoiceSource, 'studentName' | 'className' | 'month' | 'year' | 'finalAmount'>
+export interface InvoiceCreationFailure {
+  recordIds: string[]
+  refId?: string
+  reason: string
+  outcomeUnknown?: boolean
+  sources?: FailureSource[]
+}
+
+export function invoiceFailureTelegramMessage(failure: InvoiceCreationFailure) {
+  let reason = failure.reason
+  for (const [key, value] of Object.entries(process.env)) {
+    if (/password|secret|token/i.test(key) && value && value.trim().length >= 4) {
+      reason = reason.split(value.trim()).join('[ẩn]')
+    }
+  }
+  reason = reason.replace(/[\x00-\x1f]/g, ' ').slice(0, 500)
+  return [
+    failure.outcomeUnknown ? '⚠️ CHƯA XÁC ĐỊNH KẾT QUẢ TẠO HÓA ĐƠN' : '❌ TẠO HÓA ĐƠN KHÔNG THÀNH CÔNG',
+    ...(failure.sources || []).slice(0, 20).map(s =>
+      `• ${s.studentName.slice(0, 80)} — ${s.className.slice(0, 80)} — kỳ ${s.month}/${s.year}: ${s.finalAmount.toLocaleString('vi-VN')} đ`),
+    `Lý do: ${reason}`,
+    `Mã phiếu: ${failure.recordIds.slice(0, 20).join(', ')}`,
+    ...(failure.refId ? [`RefID: ${failure.refId}`] : []),
+    ...(failure.outcomeUnknown ? ['Cần đối chiếu RefID trên MISA trước khi tạo lại để tránh trùng hóa đơn.'] : []),
+    'https://qlhv.cqt.vn/tuition/invoices',
+  ].join('\n').slice(0, 4000)
+}
+
+export function notifyInvoiceCreationFailed(failure: InvoiceCreationFailure, loadSources?: () => Promise<FailureSource[]>) {
+  if (!telegramConfigStatus().configured) return
+  try {
+    const text = loadSources
+      ? loadSources().catch(() => []).then(sources => invoiceFailureTelegramMessage({ ...failure, sources }))
+      : invoiceFailureTelegramMessage(failure)
+    scheduleNotification(text, failure.refId)
+  } catch { console.warn('[Telegram] could not format invoice failure notification') }
 }

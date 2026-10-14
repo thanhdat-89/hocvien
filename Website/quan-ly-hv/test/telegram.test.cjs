@@ -36,6 +36,22 @@ test('grouped invoice produces one message with total, periods and invoice refer
   assert.match(text, /RefID: ref-1/)
 })
 
+test('failure message explains the reason and protects secrets', () => {
+  const old = process.env.MEINVOICE_PASSWORD
+  process.env.MEINVOICE_PASSWORD = 'private-password'
+  try {
+    const text = service.invoiceFailureTelegramMessage({ recordIds: ['fee-1'], reason: 'Lỗi xác thực private-password',
+      sources: [{ studentName: 'Student', className: 'Math', month: 7, year: 2026, finalAmount: 100000 }] })
+    assert.match(text, /TẠO HÓA ĐƠN KHÔNG THÀNH CÔNG/)
+    assert.match(text, /Lý do: Lỗi xác thực \[ẩn\]/)
+    assert.match(text, /kỳ 7\/2026/)
+    assert.doesNotMatch(text, /private-password/)
+    const unknown = service.invoiceFailureTelegramMessage({ recordIds: ['fee-1'], refId: 'ref-1', reason: 'Mất kết nối', outcomeUnknown: true })
+    assert.match(unknown, /CHƯA XÁC ĐỊNH KẾT QUẢ/)
+    assert.match(unknown, /đối chiếu RefID/)
+  } finally { if (old === undefined) delete process.env.MEINVOICE_PASSWORD; else process.env.MEINVOICE_PASSWORD = old }
+})
+
 test('send failure returns a safe result without raw provider error or token', async () => config(async () => {
   const result = await service.sendTelegramMessage('test', async () => { throw Error('https://api.telegram.org/botfixture/sendMessage') })
   assert.equal(result.sent, false)

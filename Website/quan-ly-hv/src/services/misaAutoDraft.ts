@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { db, C, toDocs, toObj } from '../lib/firebase'
 import type { Payment, TuitionRecord } from '../types/models'
 import { InvoicePreviewError, invoiceSource, listInvoiceTemplates, validateDraftInput, InvoiceTemplate, MisaInvoiceRecord, createMisaDraft } from './misaInvoicePreview'
-import { notifyInvoiceCreated } from './telegramService'
+import { notifyInvoiceCreated, notifyInvoiceCreationFailed } from './telegramService'
 
 export function chooseDefaultInvoiceTemplate(templates: InvoiceTemplate[]) {
   const id = process.env.MEINVOICE_DEFAULT_TEMPLATE_ID?.trim()
@@ -13,6 +13,30 @@ export function chooseDefaultInvoiceTemplate(templates: InvoiceTemplate[]) {
 
 /** Shared by the invoice page and tuition actions; reserve all records before contacting MISA. */
 export async function createTuitionMisaInvoice(recordIds: string[], actorId: string, body?: any, request: typeof fetch = fetch) {
+  try {
+    const result = await createTuitionMisaInvoiceInternal(recordIds, actorId, body, request)
+    if (!result.alreadyExists && ['FAILED', 'OUTCOME_UNKNOWN'].includes(result.invoice.status)) {
+      const invoice = result.invoice as MisaInvoiceRecord
+      notifyInvoiceCreationFailed({ recordIds, refId: invoice.refId,
+        reason: invoice.lastErrorMessage || 'Chưa tạo được hóa đơn MISA.',
+        outcomeUnknown: invoice.status === 'OUTCOME_UNKNOWN', sources: invoice.sources || [invoice.source] })
+    }
+    return result
+  } catch (error) {
+    notifyInvoiceCreationFailed({ recordIds,
+      reason: error instanceof InvoicePreviewError ? error.message : 'Lỗi xử lý nội bộ hoặc kết nối dữ liệu khi tạo hóa đơn.' }, async () => {
+      const snapshots = await Promise.all(recordIds.slice(0, 20).map(id => db.collection(C.TUITION_RECORDS).doc(id).get()))
+      return snapshots.filter(doc => doc.exists).map(doc => {
+        const data = doc.data()!
+        return { studentName: String(data.studentName || 'Chưa xác định học viên'), className: String(data.className || 'Chưa xác định lớp'),
+          month: data.billingMonth || 0, year: data.billingYear || 0, finalAmount: Number(data.finalAmount) || 0 }
+      })
+    })
+    throw error
+  }
+}
+
+async function createTuitionMisaInvoiceInternal(recordIds: string[], actorId: string, body?: any, request: typeof fetch = fetch) {
   if (!recordIds.length || recordIds.length > 20 || new Set(recordIds).size !== recordIds.length) throw new InvoicePreviewError(400, 'Danh sách phiếu không hợp lệ hoặc bị trùng.')
   const suppliedInput = body ? validateDraftInput(body) : undefined
   const refs = recordIds.map(id => ({ fee: db.collection(C.TUITION_RECORDS).doc(id),

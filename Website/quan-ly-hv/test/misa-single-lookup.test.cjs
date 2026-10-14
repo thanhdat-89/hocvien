@@ -6,6 +6,9 @@ test('tuition invoice validates templates once and reserves before sending to MI
   const service = require('../dist/services/misaInvoicePreview')
   const telegram = require('../dist/services/telegramService')
   const oldNotify = telegram.notifyInvoiceCreated
+  const oldFailure = telegram.notifyInvoiceCreationFailed
+  const failures = []
+  telegram.notifyInvoiceCreationFailed = (failure, loadSources) => { failures.push({ failure, loadSources }) }
   const oldList = service.listInvoiceTemplates, oldCreate = service.createMisaDraft
   const originalLoad = Module._load
   const values = new Map([
@@ -64,10 +67,36 @@ test('tuition invoice validates templates once and reserves before sending to MI
     const again = await workflow.createTuitionMisaInvoice(['fee-1'], 'admin-1')
     assert.equal(again.alreadyExists, true)
     assert.deepEqual(events, ['templates', 'reserve', 'create', 'notify'])
+    values.delete('misaInvoices/fee-1')
+    service.listInvoiceTemplates = async () => { throw new service.InvoicePreviewError(502, 'Không kết nối được MISA ở bước lấy mẫu hóa đơn.') }
+    const failedLookup = await workflow.tryCreateAutomaticMisaDraft('fee-1', 'admin-1')
+    assert.equal(failedLookup.status, 'FAILED')
+    assert.equal(failures.length, 1)
+    assert.match(failures[0].failure.reason, /lấy mẫu hóa đơn/)
+    assert.equal((await failures[0].loadSources())[0].studentName, 'Student')
+
+    service.listInvoiceTemplates = async () => [template]
+    service.createMisaDraft = async () => { throw new service.InvoicePreviewError(502, 'MISA từ chối: sai thông tin người mua.') }
+    const rejected = await workflow.createTuitionMisaInvoice(['fee-1'], 'admin-1')
+    assert.equal(rejected.invoice.status, 'FAILED')
+    assert.equal(failures.length, 2)
+    assert.match(failures[1].failure.reason, /sai thông tin người mua/)
+    assert.equal(failures[1].failure.sources[0].month, 7)
+
+    service.createMisaDraft = async () => { throw new service.InvoicePreviewError(502, 'MISA chưa trả kết quả; cần đối chiếu.', true) }
+    const unknown = await workflow.createTuitionMisaInvoice(['fee-1'], 'admin-1')
+    assert.equal(unknown.invoice.status, 'OUTCOME_UNKNOWN')
+    assert.equal(failures.length, 3)
+    assert.equal(failures[2].failure.outcomeUnknown, true)
+    assert.ok(failures[2].failure.refId)
+    const existing = await workflow.createTuitionMisaInvoice(['fee-1'], 'admin-1')
+    assert.equal(existing.alreadyExists, true)
+    assert.equal(failures.length, 3)
   } finally {
     Module._load = originalLoad
     service.listInvoiceTemplates = oldList; service.createMisaDraft = oldCreate
     telegram.notifyInvoiceCreated = oldNotify
+    telegram.notifyInvoiceCreationFailed = oldFailure
     if (oldModule) require.cache[modulePath] = oldModule; else delete require.cache[modulePath]
     keys.forEach((key, i) => env[i] === undefined ? delete process.env[key] : process.env[key] = env[i])
   }
