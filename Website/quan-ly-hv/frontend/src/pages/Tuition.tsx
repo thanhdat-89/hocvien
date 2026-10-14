@@ -103,6 +103,14 @@ export default function Tuition() {
     return true
   })
 
+  // Each student's merged cells stay inside their own row group, including after filtering.
+  const studentGroups = Array.from(filtered.reduce((groups, row) => {
+    const studentRows = groups.get(row.studentId) ?? []
+    studentRows.push(row)
+    groups.set(row.studentId, studentRows)
+    return groups
+  }, new Map<string, ScheduleRow[]>()).entries())
+
   const totalAmount = filtered.reduce((s, r) => s + r.finalAmount, 0)
   const totalSessions = filtered.reduce((s, r) => s + r.totalSessions, 0)
   const uniqueStudents = new Set(filtered.map(r => r.studentId)).size
@@ -438,21 +446,15 @@ export default function Tuition() {
                     {['STT', 'Học viên', 'Lớp học', 'Buổi học / Đơn giá', 'Thành tiền', 'Phiếu học phí', 'Thanh toán', 'Thao tác'].map((label, index) => <th key={label} scope="col" className={`py-3.5 text-xs font-semibold text-slate-500 whitespace-nowrap ${index === 0 || index >= 5 ? 'px-3' : 'px-4'} ${index === 3 || index === 4 ? 'text-right' : index >= 5 ? 'text-center' : 'text-left'}`}>{label}</th>)}
                   </tr>
                 </thead>
-                <tbody>
-                  {(() => {
-                    // Tính rowspan cho mỗi student
-                    const spanMap: Record<string, number> = {}
-                    filtered.forEach(r => { spanMap[r.studentId] = (spanMap[r.studentId] || 0) + 1 })
-                    const seen = new Set<string>()
-                    let sttCounter = 0
-
-                    return filtered.map((r) => {
-                      const isFirst = !seen.has(r.studentId)
-                      if (isFirst) { seen.add(r.studentId); sttCounter++ }
-                      const span = spanMap[r.studentId]
+                {studentGroups.map(([studentId, studentRows], studentIndex) => (
+                  <tbody key={studentId}>
+                    {studentRows.map((r, rowIndex) => {
+                      const isFirst = rowIndex === 0
+                      const sttCounter = studentIndex + 1
+                      const span = studentRows.length
 
                       return (
-                        <tr key={`${r.studentId}-${r.classId}`} className={`hover:bg-slate-50/70 transition-colors ${isFirst && sttCounter > 1 ? 'border-t border-slate-200/80' : !isFirst ? 'border-t border-dashed border-slate-100' : ''}`}>
+                        <tr key={`${r.classId}-${rowIndex}`} className={`hover:bg-slate-50/70 transition-colors ${isFirst && sttCounter > 1 ? 'border-t border-slate-200/80' : !isFirst ? 'border-t border-dashed border-slate-100' : ''}`}>
                           {isFirst && <td className="px-3 py-5 text-xs text-slate-400 align-top tabular-nums" rowSpan={span}>{sttCounter}</td>}
                           {isFirst && <td className="px-4 py-5 align-top" rowSpan={span}>
                             <p className="font-semibold text-on-surface text-[15px] leading-5 break-words">{r.studentName}</p>
@@ -578,19 +580,19 @@ export default function Tuition() {
                           )}
                         </tr>
                       )
-                    })
-                  })()}
-                  {filtered.length === 0 && (
-                    <tr>
+                    })}
+                  </tbody>
+                ))}
+                {filtered.length === 0 && (
+                  <tbody><tr>
                       <td colSpan={8} className="py-16 text-center text-outline">
                         <span className="material-symbols-outlined text-5xl block mb-3 opacity-30">payments</span>
                         {classFilter || gradeFilter != null
                           ? `Không có dữ liệu cho bộ lọc đang chọn`
                           : `Không có dữ liệu học phí tháng ${month}/${year}`}
                       </td>
-                    </tr>
-                  )}
-                </tbody>
+                  </tr></tbody>
+                )}
                 {filtered.length > 0 && (
                   <tfoot className="bg-slate-50/80 border-t border-slate-200">
                     <tr>
