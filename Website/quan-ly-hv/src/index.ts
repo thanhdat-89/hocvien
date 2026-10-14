@@ -26,6 +26,7 @@ import sepayWebhookRoutes from './routes/webhooks'
 import znsRoutes from './routes/zns'
 import holidayRoutes from './routes/holidays'
 import reportRoutes from './routes/reports'
+import telegramRoutes from './routes/telegram'
 
 import { errorHandler, notFound } from './middleware/errorHandler'
 import { activityLogMiddleware } from './middleware/activityLog'
@@ -80,6 +81,7 @@ app.use('/api/webhooks',       sepayWebhookRoutes)
 app.use('/api/zns',            znsRoutes)
 app.use('/api/holidays',       holidayRoutes)
 app.use('/api/reports',        reportRoutes)
+app.use('/api/telegram',       telegramRoutes)
 
 // ─── Error handlers ───────────────────────────────────────────
 app.use(notFound)

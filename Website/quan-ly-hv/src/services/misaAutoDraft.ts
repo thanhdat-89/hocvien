@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { db, C, toDocs, toObj } from '../lib/firebase'
 import type { Payment, TuitionRecord } from '../types/models'
 import { InvoicePreviewError, invoiceSource, listInvoiceTemplates, validateDraftInput, InvoiceTemplate, MisaInvoiceRecord, createMisaDraft } from './misaInvoicePreview'
+import { notifyInvoiceCreated } from './telegramService'
 
 export function chooseDefaultInvoiceTemplate(templates: InvoiceTemplate[]) {
   const id = process.env.MEINVOICE_DEFAULT_TEMPLATE_ID?.trim()
@@ -60,6 +61,7 @@ export async function createTuitionMisaInvoice(recordIds: string[], actorId: str
     const created = await createMisaDraft(reserved.invoice, request)
     const invoice = { ...reserved.invoice, invoiceNumber: created.invoiceNumber, invoiceCode: '', transactionId: created.transactionId || reserved.invoice.refId, status: 'DRAFT_CREATED' as const, updatedAt: new Date().toISOString() }
     await Promise.all(refs.map(r => r.invoice.set(invoice)))
+    notifyInvoiceCreated(invoice)
     return { invoice, alreadyExists: false }
   } catch (error) {
     const known = error instanceof InvoicePreviewError && !error.ambiguous

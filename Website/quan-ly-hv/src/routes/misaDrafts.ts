@@ -5,6 +5,7 @@ import type { AuthRequest } from '../types'
 import type { Payment, TuitionRecord } from '../types/models'
 import { InvoicePreviewError, invoiceSource, listInvoiceTemplates, readMisaInvoiceStatus } from '../services/misaInvoicePreview'
 import { chooseDefaultInvoiceTemplate, createTuitionMisaInvoice } from '../services/misaAutoDraft'
+import { notifyInvoiceCreated } from '../services/telegramService'
 
 const router = Router()
 router.use(requireRole('ADMIN'))
@@ -100,6 +101,9 @@ router.post('/invoices/:recordId/refresh-status', async (req, res, next) => {
       return
     }
     await Promise.all(ids.map(recordId => db.collection(draftsCollection).doc(recordId).set(updated)))
+    if (['CREATING', 'OUTCOME_UNKNOWN'].includes(current.data()!.status) && updated.status === 'DRAFT_CREATED') {
+      notifyInvoiceCreated(updated)
+    }
     res.json({ invoice: updated })
   } catch (error) { next(error) }
 })

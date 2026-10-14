@@ -4,6 +4,8 @@ const Module = require('node:module')
 
 test('tuition invoice validates templates once and reserves before sending to MISA', async () => {
   const service = require('../dist/services/misaInvoicePreview')
+  const telegram = require('../dist/services/telegramService')
+  const oldNotify = telegram.notifyInvoiceCreated
   const oldList = service.listInvoiceTemplates, oldCreate = service.createMisaDraft
   const originalLoad = Module._load
   const values = new Map([
@@ -13,6 +15,11 @@ test('tuition invoice validates templates once and reserves before sending to MI
     ['students/s1', { fullName: 'Student' }],
   ])
   const events = []
+  telegram.notifyInvoiceCreated = invoice => {
+    events.push('notify')
+    assert.equal(invoice.status, 'DRAFT_CREATED')
+    assert.equal(values.get('misaInvoices/fee-1').status, 'DRAFT_CREATED')
+  }
   const db = {
     collection(collection) {
       return {
@@ -53,13 +60,14 @@ test('tuition invoice validates templates once and reserves before sending to MI
     const workflow = require(modulePath)
     const result = await workflow.createTuitionMisaInvoice(['fee-1'], 'admin-1')
     assert.equal(result.invoice.status, 'DRAFT_CREATED')
-    assert.deepEqual(events, ['templates', 'reserve', 'create'])
+    assert.deepEqual(events, ['templates', 'reserve', 'create', 'notify'])
     const again = await workflow.createTuitionMisaInvoice(['fee-1'], 'admin-1')
     assert.equal(again.alreadyExists, true)
-    assert.deepEqual(events, ['templates', 'reserve', 'create'])
+    assert.deepEqual(events, ['templates', 'reserve', 'create', 'notify'])
   } finally {
     Module._load = originalLoad
     service.listInvoiceTemplates = oldList; service.createMisaDraft = oldCreate
+    telegram.notifyInvoiceCreated = oldNotify
     if (oldModule) require.cache[modulePath] = oldModule; else delete require.cache[modulePath]
     keys.forEach((key, i) => env[i] === undefined ? delete process.env[key] : process.env[key] = env[i])
   }
