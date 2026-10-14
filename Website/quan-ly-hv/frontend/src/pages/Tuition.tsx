@@ -416,28 +416,26 @@ export default function Tuition() {
         </div>
 
         {/* Table */}
-        <div className="bg-surface-container-lowest rounded-3xl overflow-hidden shadow-sm border border-outline-variant/10">
+        <div className="bg-white rounded-2xl overflow-hidden shadow-sm border border-slate-200/80">
+          <div className="px-5 sm:px-6 py-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 id="tuition-table-title" className="text-base font-semibold text-on-surface">Danh sách học phí</h3>
+              <p className="mt-1 text-xs text-slate-500">Kỳ học phí {String(month).padStart(2, '0')}/{year}</p>
+            </div>
+            <p className="text-xs text-slate-500"><span className="font-semibold text-slate-700">{uniqueStudents}</span> học viên <span className="mx-2 text-slate-300">·</span><span className="font-semibold text-slate-700">{filtered.length}</span> khoản học phí</p>
+          </div>
           {loading ? (
-            <div className="py-16 text-center text-outline">
+            <div role="status" className="py-16 text-center text-slate-500">
               <span className="material-symbols-outlined text-5xl block mb-3 opacity-30 animate-pulse">sync</span>
               Đang tải...
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-surface-container-low/50">
-                    <th className="table-header w-12">STT</th>
-                    <th className="table-header">Họ tên</th>
-                    <th className="table-header text-center">Khối lớp</th>
-                    <th className="table-header">Lớp học</th>
-                    <th className="table-header text-right">Số buổi</th>
-                    <th className="table-header text-right">Học phí/buổi</th>
-                    <th className="table-header text-right">Khuyến mại</th>
-                    <th className="table-header text-right">Thành tiền</th>
-                    <th className="table-header text-center">Phiếu</th>
-                    <th className="table-header text-center">Thanh toán</th>
-                    <th className="table-header text-center">Thao tác</th>
+              <table aria-labelledby="tuition-table-title" className="w-full min-w-[1020px] table-fixed text-left border-collapse text-sm text-slate-700">
+                <colgroup><col style={{ width: '4%' }} /><col style={{ width: '18%' }} /><col style={{ width: '15%' }} /><col style={{ width: '14%' }} /><col style={{ width: '16%' }} /><col style={{ width: '11%' }} /><col style={{ width: '12%' }} /><col style={{ width: '10%' }} /></colgroup>
+                <thead className="bg-slate-50/80 border-b border-slate-200/70">
+                  <tr>
+                    {['STT', 'Học viên', 'Lớp học', 'Buổi học / Đơn giá', 'Thành tiền', 'Phiếu học phí', 'Thanh toán', 'Thao tác'].map((label, index) => <th key={label} scope="col" className={`py-3.5 text-xs font-semibold text-slate-500 whitespace-nowrap ${index === 0 || index >= 5 ? 'px-3' : 'px-4'} ${index === 3 || index === 4 ? 'text-right' : index >= 5 ? 'text-center' : 'text-left'}`}>{label}</th>)}
                   </tr>
                 </thead>
                 <tbody>
@@ -454,34 +452,31 @@ export default function Tuition() {
                       const span = spanMap[r.studentId]
 
                       return (
-                        <tr key={`${r.studentId}-${r.classId}`} className={`hover:bg-surface-container-low/30 transition-colors ${isFirst && sttCounter > 1 ? 'border-t border-outline-variant/10' : !isFirst ? 'border-t border-dashed border-outline-variant/10' : ''}`}>
-                          {isFirst && <td className="table-cell text-sm text-outline align-top" rowSpan={span}>{sttCounter}</td>}
-                          {isFirst && <td className="table-cell font-semibold text-on-surface align-top" rowSpan={span}>{r.studentName}</td>}
-                          <td className="table-cell text-sm text-center">
-                            {r.gradeLevel != null
-                              ? <span className="inline-block px-2.5 py-0.5 rounded-full bg-primary/8 text-primary text-xs font-bold whitespace-nowrap">Lớp {r.gradeLevel}</span>
-                              : <span className="text-outline">—</span>}
+                        <tr key={`${r.studentId}-${r.classId}`} className={`hover:bg-slate-50/70 transition-colors ${isFirst && sttCounter > 1 ? 'border-t border-slate-200/80' : !isFirst ? 'border-t border-dashed border-slate-100' : ''}`}>
+                          {isFirst && <td className="px-3 py-5 text-xs text-slate-400 align-top tabular-nums" rowSpan={span}>{sttCounter}</td>}
+                          {isFirst && <td className="px-4 py-5 align-top" rowSpan={span}>
+                            <p className="font-semibold text-on-surface text-[15px] leading-5 break-words">{r.studentName}</p>
+                            <p className="mt-1.5 text-xs text-slate-500">{r.gradeLevel != null ? `Khối ${r.gradeLevel}` : 'Chưa có khối lớp'}</p>
+                          </td>}
+                          <td className="px-4 py-5 align-middle text-sm text-slate-600 leading-5 break-words">{r.className}</td>
+                          <td className="px-4 py-5 align-middle text-right tabular-nums">
+                            <p className="font-medium text-slate-700 whitespace-nowrap">{r.totalSessions} <span className="text-xs font-normal text-slate-500">buổi</span></p>
+                            <p className="mt-1.5 text-xs text-slate-500 whitespace-nowrap">{r.ratePerSession > 0 ? `${r.ratePerSession.toLocaleString('vi-VN')}đ / buổi` : '—'}</p>
                           </td>
-                          <td className="table-cell text-sm text-on-surface-variant">{r.className}</td>
-                          <td className="table-cell text-sm text-right">{r.totalSessions}</td>
-                          <td className="table-cell text-sm text-right">
-                            {r.ratePerSession > 0 ? r.ratePerSession.toLocaleString('vi-VN') + 'đ' : '—'}
+                          <td className="px-4 py-5 align-middle text-right tabular-nums">
+                            <p className="font-semibold text-on-surface whitespace-nowrap">{r.finalAmount.toLocaleString('vi-VN')}đ</p>
+                            {r.discountAmount > 0 && <p className="mt-1.5 text-xs text-emerald-700 whitespace-nowrap" title="Khuyến mãi đã áp dụng">Giảm {r.discountAmount.toLocaleString('vi-VN')}đ</p>}
                           </td>
-                          <td className="table-cell text-sm text-right text-secondary">
-                            {r.discountAmount > 0 ? '-' + r.discountAmount.toLocaleString('vi-VN') + 'đ' : '—'}
-                          </td>
-                          <td className="table-cell text-sm text-right font-bold text-on-surface">
-                            {r.finalAmount.toLocaleString('vi-VN')}đ
-                          </td>
-                          <td className="table-cell text-center">
+                          <td className="px-3 py-5 align-middle text-center">
                             {r.tuitionRecord ? (
-                              <div className="inline-flex items-center gap-1">
-                                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 text-xs font-bold">Đã tạo</span>
+                              <div className="inline-flex items-center gap-1 whitespace-nowrap">
+                                <span className="px-2 py-1 rounded-md bg-emerald-50 text-emerald-700 text-xs font-semibold whitespace-nowrap">Đã tạo</span>
                                 <button
                                   onClick={() => sendZnsNotice(r.tuitionRecord!.id, r.studentName)}
                                   disabled={sendingZnsId === r.tuitionRecord.id}
-                                  className="p-1 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded transition-all disabled:opacity-40"
+                                  className="p-1 text-primary hover:bg-blue-50 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary transition-colors disabled:opacity-40"
                                   title="Gửi thông báo Zalo cho phụ huynh"
+                                  aria-label={`Gửi thông báo Zalo cho phụ huynh ${r.studentName} (${r.className})`}
                                 >
                                   <span className="material-symbols-outlined text-[18px]">
                                     {sendingZnsId === r.tuitionRecord.id ? 'hourglass_top' : 'campaign'}
@@ -492,13 +487,13 @@ export default function Tuition() {
                               <button
                                 onClick={() => createRecordForRow(r)}
                                 disabled={creatingRow === `${r.studentId}-${r.classId}`}
-                                className="px-2.5 py-1 rounded-lg bg-primary/10 text-primary text-xs font-bold hover:bg-primary/20 transition-all disabled:opacity-40"
+                                className="px-2.5 py-2 rounded-lg border border-blue-100 bg-blue-50/60 text-primary text-xs font-semibold whitespace-nowrap hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary transition-colors disabled:opacity-40"
                               >
-                                {creatingRow === `${r.studentId}-${r.classId}` ? '...' : 'Tạo phiếu'}
+                                {creatingRow === `${r.studentId}-${r.classId}` ? 'Đang tạo…' : 'Tạo phiếu'}
                               </button>
                             )}
                           </td>
-                          <td className="table-cell text-center text-xs">
+                          <td className="px-3 py-5 align-middle text-center text-xs">
                             {(() => {
                               const isOriginalPaid = !!(
                                 r.tuitionRecord &&
@@ -516,19 +511,22 @@ export default function Tuition() {
                                     e.stopPropagation()
                                     handleTogglePaid(r, isOriginalPaid)
                                   }}
-                                  className={`inline-flex items-center gap-1.5 cursor-pointer select-none group focus:outline-none transition-all ${isChanged ? 'opacity-80 scale-105' : ''}`}
+                                  aria-label={`Thanh toán học phí ${r.studentName} (${r.className})`}
+                                  aria-pressed={isPaid}
+                                  title={isChanged ? 'Thay đổi thanh toán chưa lưu' : 'Thay đổi trạng thái thanh toán'}
+                                  className={`inline-flex items-center gap-1.5 rounded-lg px-1 py-1.5 cursor-pointer select-none group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary transition-colors whitespace-nowrap ${isChanged ? 'bg-amber-50 ring-1 ring-amber-200' : ''}`}
                                 >
                                   <div className={`w-4 h-4 rounded flex items-center justify-center transition-all ${
                                     isPaid
                                       ? (isChanged ? 'bg-primary border border-primary text-on-primary' : 'bg-emerald-600 border border-emerald-600 text-white')
-                                      : 'border border-outline-variant bg-surface group-hover:border-primary'
+                                      : 'border border-slate-300 bg-white group-hover:border-primary'
                                   }`}>
                                     {isPaid && (
                                       <span className="material-symbols-outlined text-[13px] font-black leading-none">check</span>
                                     )}
                                   </div>
                                   <span className={`text-xs font-bold transition-colors ${
-                                    isPaid ? (isChanged ? 'text-primary' : 'text-emerald-600') : 'text-outline group-hover:text-on-surface'
+                                    isPaid ? (isChanged ? 'text-primary' : 'text-emerald-600') : 'text-slate-500 group-hover:text-on-surface'
                                   }`}>
                                     {isPaid ? 'Đã đóng' : 'Chưa đóng'}
                                   </span>
@@ -537,23 +535,25 @@ export default function Tuition() {
                             })()}
                           </td>
                           {isFirst && (
-                            <td className="table-cell text-center align-top" rowSpan={span}>
-                              <div className="inline-flex items-center gap-1">
+                            <td className="px-2 py-5 text-center align-top" rowSpan={span}>
+                              <div className="inline-flex items-center justify-center gap-1">
                                 <Link
                                   to={`/students/${r.studentId}`}
-                                  className="p-2 text-outline hover:text-primary hover:bg-primary/10 rounded-lg transition-all"
+                                  className="p-1.5 text-slate-400 hover:text-primary hover:bg-blue-50 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary transition-colors"
                                   title={`Xem hồ sơ học viên ${r.studentName}`}
+                                  aria-label={`Xem hồ sơ học viên ${r.studentName}`}
                                 >
-                                  <span className="material-symbols-outlined text-[20px]">visibility</span>
+                                  <span className="material-symbols-outlined text-[18px]">visibility</span>
                                 </Link>
                                 <button
                                   onClick={() => copyShareLink(r.studentId)}
-                                  className={`p-2 rounded-lg transition-all ${copiedId === r.studentId
+                                  className={`p-1.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary transition-colors ${copiedId === r.studentId
                                     ? 'text-secondary bg-secondary-container/15'
-                                    : 'text-outline hover:text-secondary hover:bg-secondary-container/10'}`}
+                                    : 'text-slate-400 hover:text-primary hover:bg-blue-50'}`}
                                   title={copiedId === r.studentId ? 'Đã sao chép link' : 'Sao chép link chia sẻ phụ huynh'}
+                                  aria-label={`Chia sẻ học phí ${r.studentName} với phụ huynh`}
                                 >
-                                  <span className="material-symbols-outlined text-[20px]">
+                                  <span className="material-symbols-outlined text-[18px]">
                                     {copiedId === r.studentId ? 'check' : 'share'}
                                   </span>
                                 </button>
@@ -565,10 +565,11 @@ export default function Tuition() {
                                       href={zaloUrl}
                                       target="_blank"
                                       rel="noopener noreferrer"
-                                      className="p-2 text-outline hover:text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all"
+                                      className="p-1.5 text-slate-400 hover:text-primary hover:bg-blue-50 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary transition-colors"
                                       title={`Nhắn tin Zalo cho ${phone}`}
+                                      aria-label={`Nhắn tin Zalo cho phụ huynh ${r.studentName}`}
                                     >
-                                      <span className="material-symbols-outlined text-[20px]">chat</span>
+                                      <span className="material-symbols-outlined text-[18px]">chat</span>
                                     </a>
                                   ) : null
                                 })()}
@@ -581,7 +582,7 @@ export default function Tuition() {
                   })()}
                   {filtered.length === 0 && (
                     <tr>
-                      <td colSpan={11} className="py-16 text-center text-outline">
+                      <td colSpan={8} className="py-16 text-center text-outline">
                         <span className="material-symbols-outlined text-5xl block mb-3 opacity-30">payments</span>
                         {classFilter || gradeFilter != null
                           ? `Không có dữ liệu cho bộ lọc đang chọn`
@@ -591,26 +592,17 @@ export default function Tuition() {
                   )}
                 </tbody>
                 {filtered.length > 0 && (
-                  <tfoot>
-                    <tr className="bg-surface-container-low/50 border-t-2 border-outline-variant/20">
-                      <td colSpan={4} className="table-cell font-bold text-on-surface">Tổng cộng</td>
-                      <td className="table-cell text-right font-bold">{totalSessions}</td>
-                      <td className="table-cell" />
-                      <td className="table-cell text-right font-bold text-secondary">
-                        {filtered.reduce((s, r) => s + r.discountAmount, 0) > 0
-                          ? '-' + filtered.reduce((s, r) => s + r.discountAmount, 0).toLocaleString('vi-VN') + 'đ'
-                          : '—'}
+                  <tfoot className="bg-slate-50/80 border-t border-slate-200">
+                    <tr>
+                      <td colSpan={3} className="px-4 py-5 font-semibold text-on-surface">Tổng cộng <span className="ml-2 text-xs font-normal text-slate-500">{uniqueStudents} học viên</span></td>
+                      <td className="px-4 py-5 text-right tabular-nums font-semibold whitespace-nowrap">{totalSessions} <span className="text-xs font-normal text-slate-500">buổi</span></td>
+                      <td className="px-4 py-5 text-right tabular-nums">
+                        <p className="font-bold text-primary whitespace-nowrap">{totalAmount.toLocaleString('vi-VN')}đ</p>
+                        {filtered.reduce((s, r) => s + r.discountAmount, 0) > 0 && <p className="mt-1.5 text-xs text-emerald-700 whitespace-nowrap">Giảm {filtered.reduce((s, r) => s + r.discountAmount, 0).toLocaleString('vi-VN')}đ</p>}
                       </td>
-                      <td className="table-cell text-right font-black text-primary text-base">
-                        {totalAmount.toLocaleString('vi-VN')}đ
-                      </td>
-                      <td className="table-cell text-center text-xs text-outline">
-                        {filtered.filter(r => r.tuitionRecord).length}/{filtered.length}
-                      </td>
-                      <td className="table-cell text-center text-xs font-bold text-emerald-600">
-                        {filtered.filter(r => r.tuitionRecord && (r.tuitionRecord.status === 'PAID' || r.tuitionRecord.remainingAmount === 0)).length}/{filtered.length} đã đóng
-                      </td>
-                      <td className="table-cell" />
+                      <td className="px-3 py-5 text-center text-xs text-slate-500">{filtered.filter(r => r.tuitionRecord).length}/{filtered.length} phiếu</td>
+                      <td className="px-3 py-5 text-center text-xs font-semibold text-emerald-700">{filtered.filter(r => r.tuitionRecord && (r.tuitionRecord.status === 'PAID' || r.tuitionRecord.remainingAmount === 0)).length}/{filtered.length} đã đóng</td>
+                      <td />
                     </tr>
                   </tfoot>
                 )}
