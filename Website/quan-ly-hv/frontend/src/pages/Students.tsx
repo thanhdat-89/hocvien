@@ -13,19 +13,19 @@ import * as XLSX from 'xlsx'
 function StatusBadge({ status }: { status: string }) {
   if (status === 'ACTIVE')
     return (
-      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-secondary-container/30 text-secondary text-[11px] font-bold uppercase tracking-wider">
-        <span className="w-1.5 h-1.5 rounded-full bg-secondary"></span>Đang học
+      <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>Đang học
       </span>
     )
   if (status === 'INACTIVE')
     return (
-      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-error-container/10 text-error text-[11px] font-bold uppercase tracking-wider">
-        <span className="w-1.5 h-1.5 rounded-full bg-error"></span>Đã nghỉ
+      <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700">
+        <span className="h-1.5 w-1.5 rounded-full bg-rose-500"></span>Đã nghỉ
       </span>
     )
   return (
-    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high text-outline text-[11px] font-bold uppercase tracking-wider">
-      <span className="w-1.5 h-1.5 rounded-full bg-outline"></span>Bảo lưu
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700">
+      <span className="h-1.5 w-1.5 rounded-full bg-amber-500"></span>Bảo lưu
     </span>
   )
 }
@@ -35,7 +35,7 @@ function Avatar({ name }: { name: string }) {
   const colors = ['bg-blue-100 text-primary', 'bg-pink-100 text-tertiary', 'bg-green-100 text-secondary', 'bg-purple-100 text-tertiary']
   const color = colors[name.charCodeAt(0) % colors.length]
   return (
-    <div className={`w-10 h-10 rounded-full ${color} flex items-center justify-center font-bold text-sm flex-shrink-0`}>
+    <div className={`w-9 h-9 rounded-full ${color} flex items-center justify-center font-semibold text-xs flex-shrink-0`}>
       {initials}
     </div>
   )
@@ -572,59 +572,72 @@ export default function Students() {
         </div>
 
         {/* Table */}
-        <div className="bg-surface-container-lowest rounded-3xl overflow-hidden shadow-sm border border-outline-variant/10">
+        <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-5 py-4 sm:px-6">
+            <div>
+              <h3 className="text-base font-semibold text-on-surface">
+                Danh sách học viên
+                <span className="ml-2 rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{total}</span>
+              </h3>
+              <p className="mt-0.5 text-xs text-slate-500">{gradeLevel ? `Khối ${gradeLevel}` : 'Tất cả khối lớp'}{debouncedSearch ? ` · Tìm kiếm: ${debouncedSearch}` : ''}</p>
+            </div>
+            <span className="text-xs text-slate-500">{totalPages > 1 ? `Trang ${page}/${totalPages}` : `${total} học viên`}</span>
+          </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+            <table className="w-full min-w-[860px] table-fixed border-collapse text-left text-sm" aria-label="Danh sách học viên">
+              <colgroup>
+                <col style={{ width: '5%' }} />
+                <col style={{ width: '24%' }} />
+                <col style={{ width: '22%' }} />
+                <col style={{ width: '12%' }} />
+                <col style={{ width: '13%' }} />
+                <col style={{ width: '24%' }} />
+              </colgroup>
               <thead>
-                <tr className="bg-surface-container-low/50">
-                  <th className="table-header w-12 text-center">STT</th>
-                  <th className="table-header">Học viên</th>
-                  <th className="table-header">Khối lớp</th>
-                  <th className="table-header">Lớp học</th>
-                  <th className="table-header">Khuyến mại</th>
-                  <th className="table-header">Trạng thái</th>
-                  <th className="table-header text-right">Thao tác</th>
+                <tr className="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold text-slate-500">
+                  <th scope="col" className="py-3.5 pl-5 pr-2 font-semibold sm:pl-6">STT</th>
+                  <th scope="col" className="px-3 py-3.5 font-semibold">Học viên</th>
+                  <th scope="col" className="px-3 py-3.5 font-semibold">Lớp học</th>
+                  <th scope="col" className="px-3 py-3.5 font-semibold">Khuyến mại</th>
+                  <th scope="col" className="px-3 py-3.5 font-semibold">Trạng thái</th>
+                  <th scope="col" className="py-3.5 pl-3 pr-5 text-right font-semibold sm:pr-6">Thao tác</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-outline-variant/10">
+              <tbody className="divide-y divide-slate-100">
                 {students.map((student, index) => (
-                  <tr key={student.id} className="hover:bg-surface-container-low/30 transition-colors group">
-                    <td className="table-cell text-center text-sm text-outline font-medium">
+                  <tr key={student.id} className="align-middle hover:bg-slate-50/70 focus-within:bg-slate-50/70">
+                    <td className="py-4 pl-5 pr-2 text-xs tabular-nums text-slate-400 sm:pl-6">
                       {(page - 1) * PAGE_SIZE + index + 1}
                     </td>
-                    <td className="table-cell">
-                      <div className="flex items-center gap-3">
+                    <td className="px-3 py-4">
+                      <div className="flex min-w-0 items-center gap-3">
                         <Avatar name={student.fullName} />
-                        <p className="font-semibold text-on-surface">{student.fullName}</p>
+                        <div className="min-w-0">
+                          <div className="break-words font-semibold leading-5 text-on-surface">{student.fullName}</div>
+                          {student.gradeLevel && <div className="mt-0.5 text-xs text-slate-500">Khối {student.gradeLevel}</div>}
+                        </div>
                       </div>
                     </td>
-                    <td className="table-cell">
-                      {student.gradeLevel ? (
-                        <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-surface-container-high text-xs font-bold text-primary">
-                          Lớp {student.gradeLevel}
-                        </span>
-                      ) : <span className="text-outline text-sm">—</span>}
-                    </td>
-                    <td className="table-cell">
+                    <td className="px-3 py-4">
                       {student.enrollments && student.enrollments.length > 0 ? (
-                        <div className="flex flex-wrap gap-1">
+                        <div className="flex flex-wrap gap-1.5">
                           {student.enrollments.map((e) => (
-                            <span key={e.id} className="inline-flex items-center px-2 py-0.5 rounded-md bg-primary-container/20 text-primary text-xs font-medium">
+                            <span key={e.id} className="inline-flex max-w-full items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium leading-4 text-primary" title={e.className}>
                               {e.className}
                             </span>
                           ))}
                         </div>
                       ) : (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-tertiary/10 text-tertiary text-xs font-medium">
+                        <span className="text-sm text-slate-600">
                           Học riêng
                         </span>
                       )}
                     </td>
-                    <td className="table-cell">
+                    <td className="px-3 py-4">
                       {student.promotions && student.promotions.length > 0 ? (
-                        <div className="flex flex-wrap gap-1">
+                        <div className="flex flex-wrap gap-1.5">
                           {student.promotions.map((p, i) => (
-                            <span key={i} className="inline-flex items-center px-2 py-0.5 rounded-md bg-tertiary/10 text-tertiary text-xs font-bold">
+                            <span key={p.id || i} title={p.promotionName} className="inline-flex items-center rounded-md bg-violet-50 px-2 py-1 text-xs font-medium leading-4 text-violet-700">
                               {p.promotionType === 'PERCENTAGE'
                                 ? `${p.promotionValue}%`
                                 : p.promotionType === 'FIXED_AMOUNT'
@@ -633,28 +646,30 @@ export default function Students() {
                             </span>
                           ))}
                         </div>
-                      ) : <span className="text-outline text-sm">—</span>}
+                      ) : <span className="text-slate-400">—</span>}
                     </td>
-                    <td className="table-cell">
+                    <td className="px-3 py-4">
                       <StatusBadge status={student.status} />
                     </td>
-                    <td className="table-cell text-right">
-                      <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <td className="py-4 pl-3 pr-5 text-right sm:pr-6">
+                      <div className="flex items-center justify-end gap-1">
                         <button
                           onClick={() => navigate(`/students/${student.id}`)}
-                          className="p-2 text-outline hover:text-primary hover:bg-primary-container/10 rounded-lg transition-all"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-blue-50 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                           title="Xem hồ sơ"
+                          aria-label={`Xem hồ sơ ${student.fullName}`}
                         >
-                          <span className="material-symbols-outlined text-[20px]">visibility</span>
+                          <span className="material-symbols-outlined text-[19px]">visibility</span>
                         </button>
                         <button
                           onClick={() => copyShareLink(student)}
-                          className={`p-2 rounded-lg transition-all ${copiedId === student.id
-                            ? 'text-secondary bg-secondary-container/15'
-                            : 'text-outline hover:text-secondary hover:bg-secondary-container/10'}`}
+                          className={`inline-flex h-8 w-8 items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${copiedId === student.id
+                            ? 'bg-emerald-50 text-emerald-700'
+                            : 'text-slate-500 hover:bg-blue-50 hover:text-primary'}`}
                           title={copiedId === student.id ? 'Đã sao chép link' : 'Sao chép link chia sẻ phụ huynh'}
+                          aria-label={`Sao chép link chia sẻ phụ huynh của ${student.fullName}`}
                         >
-                          <span className="material-symbols-outlined text-[20px]">
+                          <span className="material-symbols-outlined text-[19px]">
                             {copiedId === student.id ? 'check' : 'share'}
                           </span>
                         </button>
@@ -666,27 +681,30 @@ export default function Students() {
                               href={zaloUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="p-2 text-outline hover:text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all"
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-blue-50 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                               title={`Nhắn tin Zalo cho ${phone}`}
+                              aria-label={`Nhắn tin Zalo với phụ huynh ${student.fullName}`}
                             >
-                              <span className="material-symbols-outlined text-[20px]">chat</span>
+                              <span className="material-symbols-outlined text-[19px]">chat</span>
                             </a>
                           ) : null
                         })()}
                         <button
                           onClick={() => setPrivateModalStudent(student)}
-                          className="p-2 text-outline hover:text-tertiary hover:bg-tertiary-container/10 rounded-lg transition-all"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-blue-50 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                           title="Thêm lịch học riêng"
+                          aria-label={`Thêm lịch học riêng cho ${student.fullName}`}
                         >
-                          <span className="material-symbols-outlined text-[20px]">calendar_month</span>
+                          <span className="material-symbols-outlined text-[19px]">calendar_month</span>
                         </button>
                         {canManageStudents && (
                           <button
                             onClick={() => handleDelete(student)}
-                            className="p-2 text-outline hover:text-error hover:bg-error-container/10 rounded-lg transition-all"
-                            title="Xóa"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-rose-50 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+                            title={student.status === 'INACTIVE' ? 'Xóa vĩnh viễn' : 'Chuyển sang nghỉ học'}
+                            aria-label={`${student.status === 'INACTIVE' ? 'Xóa vĩnh viễn' : 'Chuyển sang nghỉ học'}: ${student.fullName}`}
                           >
-                            <span className="material-symbols-outlined text-[20px]">delete</span>
+                            <span className="material-symbols-outlined text-[19px]">delete</span>
                           </button>
                         )}
                       </div>
@@ -695,9 +713,9 @@ export default function Students() {
                 ))}
                 {students.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="py-16 text-center text-outline">
-                      <span className="material-symbols-outlined text-5xl block mb-3 opacity-30">search_off</span>
-                      Không tìm thấy học viên nào
+                    <td colSpan={6} className="px-6 py-16 text-center text-sm text-slate-500">
+                      <span className="material-symbols-outlined mb-2 block text-4xl text-slate-300">search_off</span>
+                      {studentsQuery.isError ? 'Không tải được danh sách học viên. Vui lòng thử lại.' : 'Không tìm thấy học viên nào.'}
                     </td>
                   </tr>
                 )}
@@ -707,7 +725,7 @@ export default function Students() {
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="flex items-center justify-between px-6 py-5 bg-surface-container-low/20">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-4 sm:px-6">
               <p className="text-xs font-medium text-outline">
                 Hiển thị {(page - 1) * PAGE_SIZE + 1} - {Math.min(page * PAGE_SIZE, total)} của {total} học viên
               </p>
