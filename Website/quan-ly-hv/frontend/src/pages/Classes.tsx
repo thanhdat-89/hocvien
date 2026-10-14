@@ -5,6 +5,7 @@ import { useConfirm, useAlert } from '../components/ConfirmDialog'
 import api from '../services/api'
 import { Session, Class } from '../types'
 import { useAuth } from '../hooks/useAuth'
+import { gradeOfClass } from '../lib/classGrade'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -31,6 +32,11 @@ function toISO(date: Date) {
 }
 
 const DAY_LABELS = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN']
+const SCHEDULE_DAY_ORDER = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']
+const SCHEDULE_DAY_LABELS: Record<string, string> = {
+  MONDAY: 'T2', TUESDAY: 'T3', WEDNESDAY: 'T4', THURSDAY: 'T5',
+  FRIDAY: 'T6', SATURDAY: 'T7', SUNDAY: 'CN',
+}
 const CLASS_COLORS = [
   { bg: 'bg-blue-50', border: 'border-blue-500', text: 'text-blue-900', badge: 'text-blue-600' },
   { bg: 'bg-secondary-container/20', border: 'border-secondary', text: 'text-on-secondary-container', badge: 'text-secondary' },
@@ -822,6 +828,9 @@ export default function Classes() {
   const [weekStart, setWeekStart] = useState(() => getWeekStart(new Date()))
   const [sessions, setSessions] = useState<Session[]>([])
   const [classes, setClasses] = useState<Class[]>([])
+  const [classSearch, setClassSearch] = useState('')
+  const [classStatus, setClassStatus] = useState<'ALL' | 'ACTIVE' | 'CLOSED'>('ALL')
+  const [classGrade, setClassGrade] = useState('ALL')
   const [schedulesByClass, setSchedulesByClass] = useState<Record<string, string[]>>({})
   const [selectedSession, setSelectedSession] = useState<Session | null>(null)
   const [showClassModal, setShowClassModal] = useState(false)
@@ -897,6 +906,18 @@ export default function Classes() {
     cancelled: sessions.filter((s) => s.status === 'CANCELLED').length,
   }
 
+  const classGrades = [...new Set(classes.map(gradeOfClass).filter((grade): grade is number => grade !== null))].sort((a, b) => a - b)
+  const visibleClasses = classes
+    .filter((cls) => {
+      const matchesSearch = `${cls.name} ${cls.teacherName ?? ''}`.toLocaleLowerCase('vi-VN').includes(classSearch.trim().toLocaleLowerCase('vi-VN'))
+      return matchesSearch && (classStatus === 'ALL' || cls.status === classStatus)
+        && (classGrade === 'ALL' || gradeOfClass(cls) === Number(classGrade))
+    })
+    .sort((a, b) => {
+      if (a.status !== b.status) return a.status === 'ACTIVE' ? -1 : 1
+      return (gradeOfClass(a) ?? 99) - (gradeOfClass(b) ?? 99) || a.name.localeCompare(b.name, 'vi')
+    })
+
   const handleDeleteClass = (cls: Class) => setDeletingClass(cls)
 
   const [generatingAll, setGeneratingAll] = useState(false)
@@ -921,7 +942,7 @@ export default function Classes() {
   return (
     <div>
       <TopBar title="Lịch & Lớp học" />
-      <div className="px-8 py-8 space-y-6">
+      <div className="px-4 sm:px-6 lg:px-8 py-6 lg:py-8 space-y-6">
 
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
@@ -1078,154 +1099,105 @@ export default function Classes() {
 
         {/* ── Tab: Danh sách lớp học ── */}
         {tab === 'classes' && (
-          <div className="space-y-6">
-            {/* Stats row */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="bg-primary text-on-primary p-5 rounded-2xl relative overflow-hidden group">
-                <div className="relative z-10">
-                  <p className="text-[10px] font-bold uppercase tracking-widest opacity-80 mb-1">Đang hoạt động</p>
-                  <h4 className="text-4xl font-headline font-black">{classes.filter((c) => c.status === 'ACTIVE').length}</h4>
-                  <p className="text-xs opacity-70 mt-1">lớp học</p>
-                </div>
-                <span className="material-symbols-outlined absolute -right-2 -bottom-2 text-8xl opacity-10">school</span>
-              </div>
-              <div className="bg-surface-container-lowest p-5 rounded-2xl shadow-sm border border-outline-variant/10">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-outline mb-1">Tổng lớp</p>
-                <h4 className="text-4xl font-headline font-black text-on-surface">{classes.length}</h4>
-                <p className="text-xs text-outline mt-1">tất cả</p>
-              </div>
-              <div className="bg-surface-container-lowest p-5 rounded-2xl shadow-sm border border-outline-variant/10">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-outline mb-1">Đã đóng</p>
-                <h4 className="text-4xl font-headline font-black text-on-surface">{classes.filter((c) => c.status !== 'ACTIVE').length}</h4>
-                <p className="text-xs text-outline mt-1">lớp học</p>
-              </div>
-              {canManageClasses && (
-                <button
-                  onClick={() => setShowClassModal(true)}
-                  className="bg-surface-container-lowest p-5 rounded-2xl shadow-sm border-2 border-dashed border-outline-variant/30 hover:border-primary/50 hover:bg-primary/5 transition-all flex flex-col items-center justify-center gap-2 text-outline hover:text-primary group"
-                >
-                  <span className="material-symbols-outlined text-3xl">add_circle</span>
-                  <span className="text-xs font-bold">Thêm lớp mới</span>
-                </button>
-              )}
+          <div className="space-y-5">
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl border border-outline-variant/15 bg-surface-container-lowest px-5 py-3.5 text-sm">
+              <span className="font-semibold text-on-surface">{classes.length} lớp học</span>
+              <span className="hidden sm:block h-4 w-px bg-outline-variant/30" />
+              <span className="flex items-center gap-2 text-on-surface-variant"><span className="h-2 w-2 rounded-full bg-secondary" />{classes.filter(c => c.status === 'ACTIVE').length} đang hoạt động</span>
+              <span className="flex items-center gap-2 text-on-surface-variant"><span className="h-2 w-2 rounded-full bg-outline" />{classes.filter(c => c.status !== 'ACTIVE').length} đã đóng</span>
             </div>
 
-            {/* Class cards grid */}
-            {classes.length === 0 ? (
-              <div className="py-20 text-center text-outline bg-surface-container-lowest rounded-2xl border border-outline-variant/10">
-                <span className="material-symbols-outlined text-5xl block mb-3 opacity-20">school</span>
-                <p className="text-sm font-medium">Chưa có lớp học nào</p>
-                {canManageClasses && (
-                  <button onClick={() => setShowClassModal(true)} className="btn-primary mt-4 mx-auto">
-                    <span className="material-symbols-outlined">add</span>Tạo lớp học đầu tiên
-                  </button>
-                )}
+            <section className="overflow-hidden rounded-2xl border border-outline-variant/15 bg-surface-container-lowest shadow-sm" aria-label="Danh sách lớp học">
+              <div className="flex flex-col gap-4 border-b border-outline-variant/15 px-5 py-5 xl:flex-row xl:items-center xl:justify-between">
+                <div>
+                  <h3 className="font-headline text-lg font-bold text-on-surface">Danh sách lớp học</h3>
+                  <p className="mt-0.5 text-sm text-on-surface-variant">{visibleClasses.length} lớp phù hợp</p>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                  <label className="relative min-w-0 sm:w-60">
+                    <span className="sr-only">Tìm lớp hoặc giáo viên</span>
+                    <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-lg text-outline">search</span>
+                    <input value={classSearch} onChange={e => setClassSearch(e.target.value)} placeholder="Tìm lớp, giáo viên..." className="h-10 w-full rounded-xl border border-outline-variant/25 bg-white pl-10 pr-3 text-sm text-on-surface outline-none placeholder:text-outline focus:border-primary focus:ring-2 focus:ring-primary/10" />
+                  </label>
+                  <label>
+                    <span className="sr-only">Lọc theo khối</span>
+                    <select value={classGrade} onChange={e => setClassGrade(e.target.value)} className="h-10 w-full rounded-xl border border-outline-variant/25 bg-white px-3 text-sm text-on-surface focus:border-primary focus:outline-none sm:w-auto">
+                      <option value="ALL">Tất cả khối</option>
+                      {classGrades.map(grade => <option key={grade} value={grade}>Khối {grade}</option>)}
+                    </select>
+                  </label>
+                  <label>
+                    <span className="sr-only">Lọc theo trạng thái</span>
+                    <select value={classStatus} onChange={e => setClassStatus(e.target.value as 'ALL' | 'ACTIVE' | 'CLOSED')} className="h-10 w-full rounded-xl border border-outline-variant/25 bg-white px-3 text-sm text-on-surface focus:border-primary focus:outline-none sm:w-auto">
+                      <option value="ALL">Mọi trạng thái</option>
+                      <option value="ACTIVE">Đang hoạt động</option>
+                      <option value="CLOSED">Đã đóng</option>
+                    </select>
+                  </label>
+                </div>
               </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-                {[...classes].sort((a, b) => {
-                  const numA = a.gradeLevel ?? Number(a.name.match(/\d+/)?.[0] ?? 999)
-                  const numB = b.gradeLevel ?? Number(b.name.match(/\d+/)?.[0] ?? 999)
-                  return numA - numB || a.name.localeCompare(b.name)
-                }).map((cls, i) => {
-                  const color = CLASS_COLORS[i % CLASS_COLORS.length]
-                  return (
-                    <div key={cls.id} className="bg-surface-container-lowest p-6 rounded-2xl shadow-sm border border-outline-variant/10 hover:border-primary/30 hover:shadow-md transition-all group">
-                      {/* Card header */}
-                      <div className="flex items-start justify-between mb-4">
-                        <div className={`w-12 h-12 rounded-2xl ${color.bg} ${color.badge} flex items-center justify-center`}>
-                          <span className="material-symbols-outlined text-xl">class</span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${cls.status === 'ACTIVE' ? 'text-secondary bg-secondary-container/30' : 'text-outline bg-surface-container-high'}`}>
-                            {cls.status === 'ACTIVE' ? 'Đang học' : 'Đóng'}
-                          </span>
-                          {canManageClasses && (
-                            <>
-                              <button
-                                onClick={() => setEditingClass(cls)}
-                                className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-primary/10 text-outline hover:text-primary transition-all"
-                                title="Chỉnh sửa"
-                              >
-                                <span className="material-symbols-outlined text-[16px]">edit</span>
-                              </button>
-                              <button
-                                onClick={() => handleDeleteClass(cls)}
-                                className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-error/10 text-outline hover:text-error transition-all"
-                                title="Xoá lớp"
-                              >
-                                <span className="material-symbols-outlined text-[16px]">delete</span>
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </div>
 
-                      {/* Class name */}
-                      <h3 className="text-base font-bold text-on-surface mb-1 leading-tight">{cls.name}</h3>
-
-                      {/* Teacher */}
-                      <p className="text-sm text-outline mb-4 flex items-center gap-1.5">
-                        <span className="material-symbols-outlined text-[14px]">person</span>
-                        {cls.teacherName}
-                      </p>
-
-                      {/* Info chips */}
-                      <div className="flex flex-wrap gap-2 mb-4">
-                        {(() => {
-                          const days = schedulesByClass[cls.id]
-                          if (!days || days.length === 0) return null
-                          const order = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']
-                          const labels: Record<string, string> = { MONDAY: 'T2', TUESDAY: 'T3', WEDNESDAY: 'T4', THURSDAY: 'T5', FRIDAY: 'T6', SATURDAY: 'T7', SUNDAY: 'CN' }
-                          const sorted = [...days].sort((a, b) => order.indexOf(a) - order.indexOf(b)).map(d => labels[d] ?? d).join(', ')
-                          return (
-                            <span className="flex items-center gap-1 text-[11px] font-semibold text-primary bg-primary/5 px-2.5 py-1 rounded-lg">
-                              <span className="material-symbols-outlined text-[13px]">calendar_today</span>
-                              {sorted}
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[850px] table-fixed text-left text-sm">
+                  <colgroup>
+                    <col className="w-[25%]" /><col className="w-[17%]" /><col className="w-[17%]" />
+                    <col className="w-[17%]" /><col className="w-[13%]" /><col className="w-[11%]" />
+                  </colgroup>
+                  <thead className="bg-surface-container-low/50 text-xs font-semibold text-on-surface-variant">
+                    <tr>
+                      <th scope="col" className="px-5 py-3.5">Lớp học</th>
+                      <th scope="col" className="px-4 py-3.5">Giáo viên</th>
+                      <th scope="col" className="px-4 py-3.5">Lịch học</th>
+                      <th scope="col" className="px-4 py-3.5">Học phí / buổi</th>
+                      <th scope="col" className="px-4 py-3.5">Trạng thái</th>
+                      <th scope="col" className="px-4 py-3.5 text-right">Thao tác</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-outline-variant/15">
+                    {visibleClasses.map(cls => {
+                      const days = [...(schedulesByClass[cls.id] ?? [])].sort((a, b) => SCHEDULE_DAY_ORDER.indexOf(a) - SCHEDULE_DAY_ORDER.indexOf(b))
+                      const grade = gradeOfClass(cls)
+                      return (
+                        <tr key={cls.id} className="transition-colors hover:bg-primary/[0.035]">
+                          <td className="px-5 py-4 align-middle">
+                            <div className="font-semibold leading-5 text-on-surface">{cls.name}</div>
+                            <div className="mt-1 text-xs text-outline">{grade ? `Khối ${grade}` : 'Chưa có khối'}{cls.room ? ` · Phòng ${cls.room}` : ''}</div>
+                          </td>
+                          <td className="px-4 py-4 align-middle text-on-surface-variant">{cls.teacherName || <span className="text-outline">Chưa phân công</span>}</td>
+                          <td className="px-4 py-4 align-middle">
+                            <span className={days.length ? 'font-medium text-primary' : 'text-outline'}>{days.length ? days.map(day => SCHEDULE_DAY_LABELS[day] ?? day).join(', ') : 'Chưa có lịch'}</span>
+                            {!!cls.sessionsPerMonth && <div className="mt-1 text-xs text-outline">{cls.sessionsPerMonth} buổi/tháng</div>}
+                          </td>
+                          <td className="px-4 py-4 align-middle font-semibold tabular-nums text-on-surface">{(cls.tuitionRate ?? 0).toLocaleString('vi-VN')}đ</td>
+                          <td className="px-4 py-4 align-middle">
+                            <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${cls.status === 'ACTIVE' ? 'bg-secondary-container/25 text-secondary' : 'bg-surface-container-low text-on-surface-variant'}`}>
+                              <span className={`h-1.5 w-1.5 rounded-full ${cls.status === 'ACTIVE' ? 'bg-secondary' : 'bg-outline'}`} />
+                              {cls.status === 'ACTIVE' ? 'Đang học' : 'Đã đóng'}
                             </span>
-                          )
-                        })()}
-                        <span className="flex items-center gap-1 text-[11px] font-semibold text-on-surface-variant bg-surface-container-low px-2.5 py-1 rounded-lg">
-                          <span className="material-symbols-outlined text-[13px]">payments</span>
-                          {(cls.tuitionRate ?? 0).toLocaleString('vi-VN')}đ/buổi
-                        </span>
-                        {cls.sessionsPerMonth && (
-                          <span className="flex items-center gap-1 text-[11px] font-semibold text-on-surface-variant bg-surface-container-low px-2.5 py-1 rounded-lg">
-                            <span className="material-symbols-outlined text-[13px]">event_repeat</span>
-                            {cls.sessionsPerMonth} buổi/tháng
-                          </span>
-                        )}
-                        {cls.room && (
-                          <span className="flex items-center gap-1 text-[11px] font-semibold text-primary bg-primary/5 px-2.5 py-1 rounded-lg">
-                            <span className="material-symbols-outlined text-[13px]">door_open</span>
-                            Phòng {cls.room}
-                          </span>
-                        )}
-                        {cls.gradeLevel && (
-                          <span className="flex items-center gap-1 text-[11px] font-semibold text-on-surface-variant bg-surface-container-low px-2.5 py-1 rounded-lg">
-                            <span className="material-symbols-outlined text-[13px]">grade</span>
-                            Lớp {cls.gradeLevel}
-                          </span>
-                        )}
-                      </div>
-
-                    </div>
-                  )
-                })}
+                          </td>
+                          <td className="px-4 py-4 align-middle text-right">
+                            {canManageClasses && <div className="flex justify-end gap-1">
+                              <button type="button" onClick={() => setEditingClass(cls)} className="rounded-lg p-2 text-outline transition-colors hover:bg-primary/10 hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" title={`Chỉnh sửa ${cls.name}`} aria-label={`Chỉnh sửa ${cls.name}`}><span className="material-symbols-outlined text-xl">edit</span></button>
+                              <button type="button" onClick={() => handleDeleteClass(cls)} className="rounded-lg p-2 text-outline transition-colors hover:bg-error/10 hover:text-error focus-visible:outline focus-visible:outline-2 focus-visible:outline-error" title={`Kết thúc hoặc xóa ${cls.name}`} aria-label={`Kết thúc hoặc xóa ${cls.name}`}><span className="material-symbols-outlined text-xl">more_horiz</span></button>
+                            </div>}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                    {visibleClasses.length === 0 && <tr><td colSpan={6} className="px-5 py-14 text-center">
+                      <span className="material-symbols-outlined text-3xl text-outline/60">{classes.length ? 'search_off' : 'school'}</span>
+                      <p className="mt-2 font-medium text-on-surface">{classes.length ? 'Không tìm thấy lớp phù hợp' : 'Chưa có lớp học nào'}</p>
+                      <p className="mt-1 text-sm text-outline">{classes.length ? 'Thử đổi từ khóa hoặc bộ lọc.' : 'Tạo lớp đầu tiên để bắt đầu quản lý lịch học.'}</p>
+                      {classes.length === 0 && canManageClasses && <button type="button" onClick={() => setShowClassModal(true)} className="btn-primary mx-auto mt-4">Tạo lớp học</button>}
+                    </td></tr>}
+                  </tbody>
+                </table>
               </div>
-            )}
+              <div className="border-t border-outline-variant/10 px-5 py-3 text-xs text-outline sm:hidden">Vuốt ngang để xem đầy đủ bảng và thao tác.</div>
+            </section>
           </div>
         )}
       </div>
-
-      {/* FAB */}
-      <button
-        onClick={() => setShowClassModal(true)}
-        className="fixed bottom-8 right-8 w-14 h-14 bg-primary text-on-primary rounded-2xl shadow-2xl flex items-center justify-center hover:scale-110 active:scale-95 transition-all z-40 group"
-      >
-        <span className="material-symbols-outlined text-2xl">edit_calendar</span>
-        <span className="absolute right-full mr-4 bg-on-surface text-white px-3 py-1.5 rounded-lg text-xs font-bold opacity-0 group-hover:opacity-100 whitespace-nowrap transition-opacity">Tạo lớp mới</span>
-      </button>
 
       {/* Modals */}
       {selectedSession && (
