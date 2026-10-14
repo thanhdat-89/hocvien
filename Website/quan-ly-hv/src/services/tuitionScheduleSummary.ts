@@ -23,15 +23,25 @@ export async function getTuitionScheduleSummary(month: number, year: number, sou
   const classIds = [...new Set(relevantEnrollments.map((e: any) => e.classId as string))]
   const studentIds = [...new Set(relevantEnrollments.map((e: any) => e.studentId as string))]
 
+  // BatchGet keeps the number of document reads while avoiding one RPC per class/student.
+  const getDocuments = async (collection: string, ids: string[]) => {
+    const refs = ids.map(id => sourceDb.collection(collection).doc(id))
+    if (refs.length === 0) return []
+    const firestore = sourceDb as FirebaseFirestore.Firestore
+    return typeof firestore.getAll === 'function'
+      ? firestore.getAll(...refs)
+      : Promise.all(refs.map(ref => ref.get()))
+  }
+
   // 3. Fetch classes
-  const classDocs = await Promise.all(classIds.map(id => sourceDb.collection(C.CLASSES).doc(id).get()))
+  const classDocs = await getDocuments(C.CLASSES, classIds)
   const classMap: Record<string, any> = {}
   for (const doc of classDocs) {
     if (doc.exists) classMap[doc.id] = { id: doc.id, ...doc.data() }
   }
 
   // 4. Fetch students
-  const studentDocs = await Promise.all(studentIds.map(id => sourceDb.collection(C.STUDENTS).doc(id).get()))
+  const studentDocs = await getDocuments(C.STUDENTS, studentIds)
   const studentMap: Record<string, any> = {}
   for (const doc of studentDocs) {
     if (doc.exists) studentMap[doc.id] = { id: doc.id, ...doc.data() }
@@ -49,22 +59,15 @@ export async function getTuitionScheduleSummary(month: number, year: number, sou
     sessionsByClass[classId] = toDocs<any>(snap)
   }))
 
-  // 6. Fetch promotions per unique (studentId, classId) — song song thay vì tuần tự
-  const uniquePairs = new Map<string, { studentId: string; classId: string }>()
-  for (const e of relevantEnrollments) {
-    const key = `${e.studentId}-${e.classId}`
-    if (!uniquePairs.has(key)) uniquePairs.set(key, { studentId: e.studentId, classId: e.classId })
-  }
+  // Promotions are a small collection; one query is much faster than one query per enrollment.
   const promotionMap: Record<string, any[]> = {}
-  await Promise.all(Array.from(uniquePairs.entries()).map(async ([key, { studentId, classId }]) => {
-    const snap = await sourceDb.collection(C.STUDENT_PROMOTIONS)
-      .where('studentId', '==', studentId)
-      .where('classId', '==', classId)
-      .get()
-    promotionMap[key] = toDocs<any>(snap).filter((p: any) =>
-      (!p.appliedFrom || p.appliedFrom <= toDate) && (!p.appliedTo || p.appliedTo >= fromDate)
-    )
-  }))
+  const promotionSnap = await sourceDb.collection(C.STUDENT_PROMOTIONS).get()
+  for (const p of toDocs<any>(promotionSnap)) {
+    if ((p.appliedFrom && p.appliedFrom > toDate) || (p.appliedTo && p.appliedTo < fromDate)) continue
+    const key = `${p.studentId}-${p.classId}`
+    if (!promotionMap[key]) promotionMap[key] = []
+    promotionMap[key].push(p)
+  }
 
   // 7. Tính từng enrollment
   const rows: any[] = []
@@ -137,24 +140,11 @@ export async function getTuitionScheduleSummary(month: number, year: number, sou
   // Thêm rows học riêng — cần studentName
   const privateStudentIds = Object.keys(privateByStudent).filter(sid => !studentMap[sid])
   if (privateStudentIds.length > 0) {
-    const extraDocs = await Promise.all(privateStudentIds.map(id => sourceDb.collection(C.STUDENTS).doc(id).get()))
+    const extraDocs = await getDocuments(C.STUDENTS, privateStudentIds)
     for (const doc of extraDocs) {
       if (doc.exists) studentMap[doc.id] = { id: doc.id, ...doc.data() }
     }
   }
-
-  // Fetch promotions cho học riêng (classId === 'private') của các students liên quan
-  const privatePromoMap: Record<string, any[]> = {}
-  const allPrivateStudentIds = Object.keys(privateByStudent)
-  await Promise.all(allPrivateStudentIds.map(async (sid) => {
-    const snap = await sourceDb.collection(C.STUDENT_PROMOTIONS)
-      .where('studentId', '==', sid)
-      .where('classId', '==', 'private')
-      .get()
-    privatePromoMap[sid] = toDocs<any>(snap).filter((p: any) =>
-      (!p.appliedFrom || p.appliedFrom <= toDate) && (!p.appliedTo || p.appliedTo >= fromDate)
-    )
-  }))
 
   for (const [sid, sessions] of Object.entries(privateByStudent)) {
     const student = studentMap[sid]
@@ -164,7 +154,7 @@ export async function getTuitionScheduleSummary(month: number, year: number, sou
     const avgRate = totalSessions > 0 ? Math.round(totalAmount / totalSessions) : 0
 
     let discountAmount = 0
-    for (const p of (privatePromoMap[sid] ?? [])) {
+    for (const p of (promotionMap[`${sid}-private`] ?? [])) {
       if (p.promotionType === 'PERCENTAGE') discountAmount += (totalAmount * p.promotionValue) / 100
       else if (p.promotionType === 'FIXED_AMOUNT') discountAmount += p.promotionValue
     }
@@ -198,16 +188,15 @@ export async function getTuitionScheduleSummary(month: number, year: number, sou
 
   const recordIds = Array.from(recordsByKey.values()).map(r => r.id)
   const paidByRecord = new Map<string, number>()
-  for (let i = 0; i < recordIds.length; i += 10) {
-    const chunk = recordIds.slice(i, i + 10)
-    if (chunk.length === 0) continue
-    const paySnap = await sourceDb.collection(C.PAYMENTS)
-      .where('tuitionRecordId', 'in', chunk).get()
+  const paymentChunks: string[][] = []
+  for (let i = 0; i < recordIds.length; i += 10) paymentChunks.push(recordIds.slice(i, i + 10))
+  await Promise.all(paymentChunks.map(async chunk => {
+    const paySnap = await sourceDb.collection(C.PAYMENTS).where('tuitionRecordId', 'in', chunk).get()
     paySnap.forEach(p => {
       const data = p.data() as Payment
       paidByRecord.set(data.tuitionRecordId, (paidByRecord.get(data.tuitionRecordId) || 0) + (data.amount || 0))
     })
-  }
+  }))
 
   rows.forEach(row => {
     const rec = recordsByKey.get(`${row.studentId}-${row.classId}`)
