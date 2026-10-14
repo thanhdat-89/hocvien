@@ -46,9 +46,7 @@ File thử nghiệm đã kiểm tra:
 
 Tác vụ nền sử dụng quyền của tài khoản Google đã cấp cho Apps Script. Kết nối Google Drive trong cuộc trò chuyện không cung cấp token cho tác vụ nền của website.
 
-API báo cáo ưu tiên đọc bản sao Supabase và chỉ quay về Firestore nếu Supabase lỗi (trừ khi `REPORTS_FIREBASE_FALLBACK=false`). Backend vẫn đọc Firebase cho các API nghiệp vụ thông thường. Khi `SUPABASE_DUAL_WRITE=true`, các thao tác ghi qua backend được phản chiếu sang Supabase; Firebase vẫn là nguồn chuẩn. Nếu lần phản chiếu lỗi, backend giữ thao tác trong hàng đợi Firestore và thử đồng bộ lại trước khi tạo báo cáo. Báo cáo có thể trễ đến lần đồng bộ lại tiếp theo nếu cả hai dịch vụ lỗi cùng lúc.
-
-Thiết lập backend: giữ `SUPABASE_DB_PASSWORD` trong biến môi trường server; đặt `SUPABASE_DUAL_WRITE=true` sau khi xác minh kết nối; `REPORTS_READ_SOURCE` mặc định là `supabase`, còn API học viên mặc định đọc Firebase. Không đưa thông tin kết nối vào frontend hoặc Git. Project Supabase Free vẫn có thể tạm dừng khi ít hoạt động; lịch báo cáo tuần/tháng không đảm bảo đủ hoạt động mỗi tuần để tránh pause.
+API báo cáo và xuất học phí chỉ đọc Firebase Firestore. Các API nghiệp vụ cũng chỉ đọc/ghi Firebase; backend không đồng bộ, đọc dự phòng hoặc xử lý hàng đợi Supabase. Các biến cấu hình Supabase cũ không còn ảnh hưởng đến ứng dụng.
 
 Chi phí: không cần nâng gói để viết mã/thiết lập trigger, nhưng vẫn chịu hạn mức Apps Script, Drive, Firestore và hosting. Không có thao tác xuất toàn bộ dữ liệu mỗi phút.
 
@@ -63,7 +61,7 @@ Sau khi cập nhật Code.gs trên Apps Script, chạy lại setupReports để 
 - Lưu Google Sheets `hoa-don-thang-{month}-{year}` vào thư mục Drive `qlhv.cqt.vn`, ID `1QdxyRceswELZAHUUCWgqbi3ORwTOsEB5`.
 - Giống nút Xuất Excel với bộ lọc Tất cả: tab Hóa đơn bán hàng, 7 dòng hướng dẫn, dòng 8 có 9 tiêu đề; dữ liệu từ dòng 9. Giữ số thứ tự dạng text và tiền dạng số.
 - Tính toàn bộ buổi đã xếp trong tháng, kể cả buổi sau ngày 25 và học viên chưa có phiếu; bỏ buổi CANCELLED, áp dụng ngày ghi danh/nghỉ và khuyến mãi giống website. Không tự tạo phiếu hoặc ghi nhận thanh toán.
-- Backend `GET /api/reports/tuition-export?month=10&year=2026` dùng REPORTS_SECRET hiện có. Mặc định ưu tiên Supabase, thử đồng bộ queue trước khi đọc; fallback Firebase nếu lỗi, hoặc chặn fallback bằng REPORTS_FIREBASE_FALLBACK=false. Trả source và generatedAt để kiểm tra nguồn.
+- Backend `GET /api/reports/tuition-export?month=10&year=2026` dùng REPORTS_SECRET hiện có và chỉ đọc Firebase Firestore. Trả source=firebase và generatedAt để kiểm tra nguồn và thời điểm xuất.
 - Cập nhật Code.gs trên project Apps Script hiện có rồi chạy setupTuitionReports; hàm giữ trigger tuần/tháng. Chạy previewTuitionReport để kiểm tra file thử nghiệm, không chiếm kỳ chính thức.
 - Một file mỗi tháng; chỉ đánh dấu thành công sau khi ghi xong. Nếu chạy lại cùng kỳ, tìm file đúng tên thay vì tạo bản sao. Thay đổi dữ liệu sau thời điểm xuất chưa được phản ánh.
 

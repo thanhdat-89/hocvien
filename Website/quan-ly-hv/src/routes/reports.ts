@@ -1,9 +1,7 @@
 import { buildTuitionExport } from '../services/tuitionExport'
 import { Router, Request, Response, NextFunction } from 'express'
 import { timingSafeEqual } from 'crypto'
-import { db, rawDb, C, toDocs } from '../lib/firebase'
-import { getSupabasePool } from '../lib/supabase'
-import { flushSupabaseSyncQueue } from '../lib/firestoreMirror'
+import { db, C, toDocs } from '../lib/firebase'
 
 const router = Router()
 interface Row { id: string; [key: string]: any }
@@ -44,39 +42,7 @@ router.get('/snapshot', async (req: Request, res: Response, next: NextFunction) 
     return monday.toISOString().slice(0, 10)
   })()
   try {
-    let students: Row[], classes: Row[], enrollments: Row[], tuition: Row[]
-    const preferSupabase = process.env.REPORTS_READ_SOURCE !== 'firebase'
-    if (preferSupabase) {
-      try {
-        try {
-          await flushSupabaseSyncQueue(rawDb)
-        } catch (error: any) {
-          // Do not make Supabase reporting depend on Firestore availability or quota.
-          console.warn('[Reports] could not flush Firebase mirror queue', error?.code ?? error?.name ?? 'unknown')
-        }
-        const paths = [C.STUDENTS, C.CLASSES, C.ENROLLMENTS, ...(kind === 'month' ? [C.TUITION_RECORDS] : [])]
-        const { rows } = await getSupabasePool().query<{ collection_path: string; document_id: string; data: Row }>(
-          `SELECT collection_path, document_id, data FROM qlhv_migration.documents WHERE collection_path = ANY($1::text[])`,
-          [paths],
-        )
-        const documents = (path: string): Row[] => rows.filter(row => row.collection_path === path).map(row => {
-          const data = { ...row.data }
-          return { ...data, id: row.document_id }
-        })
-        students = documents(C.STUDENTS)
-        classes = documents(C.CLASSES)
-        enrollments = documents(C.ENROLLMENTS).filter(e => e.status === 'ACTIVE')
-        tuition = kind === 'month'
-          ? documents(C.TUITION_RECORDS).filter(t => t.billingYear === year && t.billingMonth === month)
-          : []
-      } catch (error) {
-        if (process.env.REPORTS_FIREBASE_FALLBACK === 'false') throw error
-        console.warn('[Reports] Supabase unavailable; using Firebase snapshot')
-        ;({ students, classes, enrollments, tuition } = await loadReportDataFromFirebase(kind, year, month))
-      }
-    } else {
-      ;({ students, classes, enrollments, tuition } = await loadReportDataFromFirebase(kind, year, month))
-    }
+    const { students, classes, enrollments, tuition } = await loadReportDataFromFirebase(kind, year, month)
     const ids = new Set(students.map(s => s.id))
     const activeIds = new Set(students.filter(s => s.status === 'ACTIVE').map(s => s.id))
     const classIds = new Set(classes.map(c => c.id))

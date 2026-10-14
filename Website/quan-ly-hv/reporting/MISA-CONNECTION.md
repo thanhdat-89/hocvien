@@ -39,7 +39,7 @@ Dùng mã số thuế và tài khoản đơn vị được MISA cấp quyền; �
 
 1. Kiểm tra quyền gateway và tài khoản TEST, mẫu đúng loại hóa đơn và năm.
 2. Thực hiện đăng nhập/OTP eSign, chọn chứng thư hoạt động và xác minh luồng XML hóa đơn của meInvoice tương thích eSign.
-3. Lưu snapshot người mua/tiền học và RefID cố định cho mỗi yêu cầu, có kiểm tra hóa đơn lập thủ công và phản chiếu Supabase.
+3. Lưu snapshot người mua/tiền học và RefID cố định cho mỗi yêu cầu, có kiểm tra hóa đơn lập thủ công.
 4. Thêm xem trước, duyệt và ký thử; đối soát theo RefID khi timeout trước khi thử lại.
 5. Kiểm thử phát hành TEST, trạng thái thuế, tải XML/PDF, gửi email và lỗi từng bước.
 6. Chốt nghiệp vụ với người phụ trách hóa đơn rồi bật LIVE bằng cấu hình riêng. Mốc 01/11/2026 không tự mở phát hành.

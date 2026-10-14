@@ -5,49 +5,66 @@ import type { Payment, TuitionRecord } from '../types/models'
 // Handles MISA template lookup and draft creation. It has no signing/publishing operation.
 const BASE = 'https://developer.misa.vn/apis/itg/meinvoice/invoice'
 export class InvoicePreviewError extends Error {
-  constructor(public status: number, message: string) { super(message) }
+  constructor(public status: number, message: string, public ambiguous = false) { super(message) }
 }
 export interface InvoiceTemplate {
   id: string; name: string; series: string; templateNo: string; isInvoiceSummary: boolean; invoiceType?: number
 }
 export interface InvoiceBuyer {
-  fullName: string; legalName: string; citizenIdNumber: string; address: string; email: string; phone: string
+  fullName: string; legalName: string; citizenIdNumber?: string; taxCode?: string; address: string; email: string; phone: string
+}
+
+// Kept for old worker modules still present in the source tree. New invoice flow uses MisaInvoiceRecord.
+export interface InvoiceDraft {
+  id: string; refId: string; status: string; revision: number
+  source: InvoiceSource; template: InvoiceTemplate; buyer: InvoiceBuyer
+  invoiceDate: string; createdAt: string; updatedAt: string; createdBy: string; updatedBy?: string
+  provider?: 'meinvoice'; providerInvoiceNo?: string; providerInvoiceId?: string
+  syncAttempts?: number; lastSyncAt?: string; lastErrorCode?: string; lastErrorMessage?: string
 }
 export interface InvoiceSource {
   recordId: string; studentId: string; studentName: string; className: string
   month: number; year: number; baseAmount: number; discountAmount: number; finalAmount: number
   paidAmount: number; paymentMethodName: string; fingerprint: string
 }
-export type MisaInvoiceStatus = 'NOT_CREATED' | 'DRAFT_CREATED' | 'ISSUED' | 'SENT_TO_TAX' | 'REMOVED_FROM_MISA'
+export type MisaInvoiceStatus = 'NOT_CREATED' | 'CREATING' | 'OUTCOME_UNKNOWN' | 'FAILED' | 'DRAFT_CREATED' | 'ISSUED' | 'SENT_TO_TAX' | 'REMOVED_FROM_MISA'
 export interface MisaInvoiceRecord {
-  id: string; refId: string; status: MisaInvoiceStatus; source: InvoiceSource; template: InvoiceTemplate
+  id: string; refId: string; status: MisaInvoiceStatus; revision: number; source: InvoiceSource; template: InvoiceTemplate
   buyer: InvoiceBuyer; invoiceDate: string; createdAt: string; updatedAt: string
-  invoiceNumber?: string; transactionId?: string
+  recordIds: string[]; sources?: InvoiceSource[]; createdBy: string
+  invoiceNumber?: string; transactionId?: string; lastErrorMessage?: string
 }
 
 const decode = (value: any) => {
   if (typeof value !== 'string') return value
   try { return JSON.parse(value) } catch { return value }
 }
-async function invoiceApi(request: typeof fetch = fetch) {
+export async function invoiceApi(request: typeof fetch = fetch) {
   const { fields, missing } = misaConnectionConfig('meinvoice')
   if (missing.length) throw new InvoicePreviewError(503, 'Chưa đủ cấu hình meInvoice trên backend.')
   const headers = { 'Content-Type': 'application/json', ClientID: fields.MEINVOICE_CLIENT_ID!, ClientSecret: fields.MEINVOICE_CLIENT_SECRET! }
   const deadline = Date.now() + 20000
-  const call = async (path: '/token' | `/templates?${string}`, init: RequestInit) => {
+  const call = async (path: string, init: RequestInit) => {
     try {
       const response = await request(BASE + path, { ...init, redirect: 'error', signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())) })
-      if (!response.ok) throw new Error('PROVIDER_HTTP')
-      const result = await response.json() as any
+      let result: any
+      try {
+        result = typeof (response as any).text === 'function'
+          ? JSON.parse(await response.text())
+          : await response.json()
+      } catch {
+        throw new InvoicePreviewError(502, `MISA trả phản hồi không đọc được ở bước ${path === '/token' ? 'xác thực' : 'lấy mẫu hóa đơn'}.`)
+      }
+      if (!response.ok) throw new InvoicePreviewError(502, `MISA trả lỗi HTTP ${response.status} ở bước ${path === '/token' ? 'xác thực' : 'lấy mẫu hóa đơn'}.`)
       if ((result?.Success ?? result?.success) !== true) {
         const code = result?.ErrorCode ?? result?.errorCode
         const safeCode = typeof code === 'string' && /^[A-Z0-9_-]{1,60}$/i.test(code) ? ` (${code})` : ''
-        throw new InvoicePreviewError(502, `MISA chưa xử lý được yêu cầu${safeCode}.`)
+        throw new InvoicePreviewError(502, `MISA chưa xử lý được yêu cầu ở bước ${path === '/token' ? 'xác thực' : 'lấy mẫu hóa đơn'}${safeCode}.`)
       }
       return decode(result.Data ?? result.data)
     } catch (error) {
       if (error instanceof InvoicePreviewError) throw error
-      throw new InvoicePreviewError(502, 'Không nhận được kết quả từ MISA. Vui lòng thử lại sau.')
+      throw new InvoicePreviewError(502, `Không kết nối được MISA ở bước ${path === '/token' ? 'xác thực' : 'lấy mẫu hóa đơn'}.`)
     }
   }
   const token = await call('/token', { method: 'POST', headers, body: JSON.stringify({
@@ -74,18 +91,48 @@ function legacyConfig() {
   return fields
 }
 
-async function legacyCall(url: string, init: RequestInit, request: typeof fetch) {
+function providerFailureMessage(value: any) {
+  const validation = Array.isArray(value?.ValidateResult) ? value.ValidateResult.find((item: any) => item?.ErrorMessage) : null
+  const code = value?.ErrorCode ?? value?.errorCode ?? validation?.ErrorCode
+  const message = value?.ErrorMessage ?? value?.errorMessage ?? value?.message ?? value?.Message ?? value?.content ?? validation?.ErrorMessage
+  const suffix = typeof code === 'string' && /^[A-Z0-9_.-]{1,80}$/i.test(code) ? ` (${code})` : ''
+  if (typeof message !== 'string') return `MISA từ chối tạo hóa đơn nháp${suffix}. Kiểm tra mẫu và thông tin người mua.`
+  const secrets = Object.values(misaConnectionConfig('meinvoice').fields).filter((v): v is string => !!v && v.length >= 4)
+  const redacted = secrets.reduce((text, secret) => text.split(secret).join('[ẩn]'), message)
+  return redacted.replace(/[\x00-\x1f]/g, ' ').slice(0, 300) + suffix
+}
+const providerRejected = (value: any) => value?.success === false || value?.Success === false
+  || value?.IsValid === false || !!value?.error || !!value?.ErrorMessage || !!value?.ErrorCode?.length
+
+async function legacyCall(url: string, init: RequestInit, request: typeof fetch, writesInvoice = false) {
   try {
     const response = await request(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(20000) })
-    if (!response.ok) throw new Error('PROVIDER_HTTP')
-    const body: any = await response.json()
-    if (body?.success === false || body?.Success === false || body?.error) {
-      throw new InvoicePreviewError(502, 'MISA từ chối tạo hóa đơn nháp. Chưa phát hành hóa đơn.')
+    let body: any = null
+    try {
+      if (typeof (response as any).text === 'function') {
+        const text = await response.text()
+        body = text ? JSON.parse(text) : null
+      } else {
+        body = await response.json()
+      }
+    } catch {
+      if (!response.ok) throw new InvoicePreviewError(502, `MISA trả lỗi HTTP ${response.status}; cần đối chiếu kết quả trước khi gửi lại.`, writesInvoice)
+      throw new InvoicePreviewError(502, 'MISA trả phản hồi không đọc được; cần đối chiếu RefID trước khi gửi lại.', writesInvoice)
     }
+    if (providerRejected(body)) throw new InvoicePreviewError(502, providerFailureMessage(body))
+    if (!response.ok) throw new InvoicePreviewError(502, `MISA trả lỗi HTTP ${response.status}; cần đối chiếu kết quả trước khi gửi lại.`, writesInvoice)
+    if (body == null) throw new InvoicePreviewError(502, 'MISA không trả nội dung xác nhận; cần đối chiếu RefID trước khi gửi lại.', writesInvoice)
     return body
   } catch (error) {
     if (error instanceof InvoicePreviewError) throw error
-    throw new InvoicePreviewError(502, 'Không nhận được kết quả từ MISA. Kiểm tra danh sách hóa đơn trước khi thử lại.')
+    throw new InvoicePreviewError(502, 'Không nhận được kết quả từ MISA. Kiểm tra danh sách hóa đơn trước khi thử lại.', writesInvoice)
+  }
+}
+
+function legacyHeaders(token: string, taxCode: string, organizationUnitId: string | number, databaseId: string | number) {
+  return {
+    Authorization: `Bearer ${token}`, TaxCode: taxCode, OrganizationUnitID: String(organizationUnitId),
+    ...(databaseId ? { DatabaseID: String(databaseId) } : {}), 'Content-Type': 'application/json',
   }
 }
 
@@ -95,40 +142,53 @@ async function legacyToken(request: typeof fetch) {
     method: 'POST', headers: { taxcode: fields.MEINVOICE_TAXCODE!, 'Content-Type': 'text/plain' },
     body: new URLSearchParams({ grant_type: 'password', username: fields.MEINVOICE_USERNAME!, password: fields.MEINVOICE_PASSWORD! }).toString(),
   }, request)
-  if (typeof auth.access_token !== 'string' || !auth.access_token) throw new InvoicePreviewError(502, 'Không xác thực được tài khoản meInvoice.')
-  return { fields, token: auth.access_token }
+  const authData = decode(auth.Data ?? auth.data)
+  const token = typeof auth.access_token === 'string' ? auth.access_token
+    : typeof auth.accessToken === 'string' ? auth.accessToken
+      : typeof authData?.access_token === 'string' ? authData.access_token
+        : typeof authData?.accessToken === 'string' ? authData.accessToken : ''
+  if (!token) throw new InvoicePreviewError(502, 'Không xác thực được tài khoản meInvoice.')
+  const organizationUnitId = [auth.OrganizationUnitID, auth.organizationUnitId, auth.organization_unit_id, authData?.OrganizationUnitID, authData?.organizationUnitId, authData?.organization_unit_id]
+    .find(value => (typeof value === 'string' && value.trim()) || typeof value === 'number') || ''
+  const databaseId = [auth.DatabaseID, auth.databaseId, auth.database_id, authData?.DatabaseID, authData?.databaseId, authData?.database_id]
+    .find(value => (typeof value === 'string' && value.trim()) || typeof value === 'number') || ''
+  const companyId = auth.CompanyID ?? auth.companyId ?? auth.company_id ?? authData?.CompanyID ?? authData?.companyId ?? authData?.company_id
+  const userId = auth.UserID ?? auth.userId ?? auth.user_id ?? authData?.UserID ?? authData?.userId ?? authData?.user_id
+  if (!organizationUnitId || companyId == null || !userId) throw new InvoicePreviewError(502, 'MISA chưa trả thông tin đơn vị, công ty hoặc người dùng; chưa gửi hóa đơn.')
+  return { fields, token, organizationUnitId, databaseId, companyId, userId }
 }
 
 export async function readMisaInvoiceStatus(refId: string, request: typeof fetch = fetch) {
-  const { fields, token } = await legacyToken(request)
+  const { fields, token, organizationUnitId, databaseId, companyId, userId } = await legacyToken(request)
   let response: Response
   try {
-    response = await request(`https://app.meinvoice.vn/api/v2/v3sainvoice/code/${encodeURIComponent(refId)}`, {
-      method: 'GET', headers: { Authorization: `Bearer ${token}`, TaxCode: fields.MEINVOICE_TAXCODE!, 'Content-Type': 'application/json' },
+    response = await request(`https://app.meinvoice.vn/api/v2/v3sainvoice/code/?refID=${encodeURIComponent(refId)}`, {
+      method: 'GET', headers: legacyHeaders(token, fields.MEINVOICE_TAXCODE!, organizationUnitId, databaseId),
       redirect: 'error', signal: AbortSignal.timeout(20000),
     })
   } catch { throw new InvoicePreviewError(502, 'Không nhận được trạng thái từ MISA. Vui lòng thử lại sau.') }
   let result: any = null
   try { result = await response.json() } catch { /* A 404 may have an empty response body. */ }
-  if (response.status === 404) return { status: 'REMOVED_FROM_MISA' } as const
+  if (response.status === 404) throw new InvoicePreviewError(502, 'MISA chưa xác minh được hóa đơn theo RefID. Website giữ nguyên trạng thái để tránh tạo trùng.', true)
   if (!response.ok) throw new InvoicePreviewError(502, 'MISA chưa trả được trạng thái hóa đơn. Website giữ nguyên trạng thái hiện tại.')
   const errorText = [result?.error, result?.Error, result?.message, result?.Message, result?.content, result?.ErrorMessage,
     ...(Array.isArray(result?.errorCode) ? result.errorCode : []), ...(Array.isArray(result?.ErrorCode) ? result.ErrorCode : [])]
     .filter(value => typeof value === 'string').join(' ')
   if ((result?.success ?? result?.Success) === false) {
-    if (/not found|không tìm thấy|không tồn tại/i.test(errorText)) return { status: 'REMOVED_FROM_MISA' } as const
+    if (/not found|không tìm thấy|không tồn tại/i.test(errorText)) throw new InvoicePreviewError(502, 'MISA chưa tìm thấy RefID; giữ nguyên trạng thái để đối chiếu.', true)
     throw new InvoicePreviewError(502, 'MISA chưa xác nhận được trạng thái hóa đơn. Website giữ nguyên trạng thái hiện tại.')
   }
   let invoice: any = decode(result.data ?? result.Data)
   if (typeof invoice === 'string') invoice = decode(invoice)
   if (Array.isArray(invoice)) {
-    if (invoice.length === 0) return { status: 'REMOVED_FROM_MISA' } as const
+    if (invoice.length === 0) throw new InvoicePreviewError(502, 'MISA chưa trả hóa đơn theo RefID. Website giữ nguyên trạng thái để tránh tạo trùng.', true)
     invoice = invoice[0]
   }
   if (invoice?.Data && typeof invoice.Data === 'string') invoice = decode(invoice.Data)
   if (invoice?.IsInvoiceDeleted === true || invoice?.IsInvoiceDeleted === 1) return { status: 'REMOVED_FROM_MISA' } as const
-  if (!invoice && Number(result?.recordsFiltered) === 0) return { status: 'REMOVED_FROM_MISA' } as const
+  if (!invoice && Number(result?.recordsFiltered) === 0) throw new InvoicePreviewError(502, 'MISA chưa trả hóa đơn theo RefID. Website giữ nguyên trạng thái để tránh tạo trùng.', true)
   if (!invoice || invoice.RefID !== refId) throw new InvoicePreviewError(502, 'MISA chưa trả về trạng thái hóa đơn khớp mã tham chiếu.')
+  if (!Object.prototype.hasOwnProperty.call(invoice, 'PublishStatus')) throw new InvoicePreviewError(502, 'MISA chưa trả trạng thái phát hành theo RefID.', true)
   const published = Number(invoice.PublishStatus) > 0
   const sentToTax = [1, 2].includes(Number(invoice.SendToTaxStatus))
   const transactionId = typeof invoice.TransactionID === 'string' ? invoice.TransactionID : undefined
@@ -161,7 +221,7 @@ export async function createMisaDraft(input: { refId: string; source: InvoiceSou
   const total = (field: 'baseAmount' | 'discountAmount' | 'finalAmount') => sources.reduce((sum, item) => sum + item[field], 0)
   const baseAmount = total('baseAmount'), discountAmount = total('discountAmount'), finalAmount = total('finalAmount')
   if (![baseAmount, discountAmount, finalAmount].every(Number.isSafeInteger)) throw new InvoicePreviewError(400, 'Tổng tiền hóa đơn vượt quá giới hạn an toàn.')
-  const { fields, token } = await legacyToken(request)
+  const { fields, token, organizationUnitId, databaseId, companyId, userId } = await legacyToken(request)
   const details = sources.map((item, index) => ({
     RefDetailID: randomUUID(), RefID: input.refId, Description: `Học phí ${item.className}`,
     UnitName: 'Tháng', Quantity: 1, UnitPrice: item.baseAmount, AmountOC: item.baseAmount, Amount: item.baseAmount,
@@ -172,7 +232,7 @@ export async function createMisaDraft(input: { refId: string; source: InvoiceSou
   }))
   const payload = [{
     EntityState: 1, MISAEntityState: 1, RefID: input.refId,
-    ...(process.env.MEINVOICE_ORGANIZATION_UNIT_ID ? { OrganizationUnitID: process.env.MEINVOICE_ORGANIZATION_UNIT_ID } : {}),
+    OrganizationUnitID: organizationUnitId, CompanyID: Number(companyId), UserID: userId,
     // Legacy v2 Web API uses InvoiceType=10 for the cash-register (MTT) invoice.
     SourceType: 0, InvTemplateNo: t.templateNo, InvoiceType: 10, InvSeries: t.series,
     InvDate: `${input.invoiceDate}T00:00:00+07:00`, InvNo: '', PublishStatus: 0,
@@ -188,24 +248,25 @@ export async function createMisaDraft(input: { refId: string; source: InvoiceSou
     InvoiceDetails: details, IsInvoiceDeleted: false, IsInvoiceSummary: t.isInvoiceSummary,
   }]
   const result = await legacyCall('https://app.meinvoice.vn/api/v2/v3sainvoice/Code', {
-    method: 'POST', headers: { Authorization: `Bearer ${token}`, TaxCode: fields.MEINVOICE_TAXCODE!, 'Content-Type': 'application/json' },
+    method: 'POST', headers: legacyHeaders(token, fields.MEINVOICE_TAXCODE!, organizationUnitId, databaseId),
     body: JSON.stringify(payload),
-  }, request)
+  }, request, true)
   const rows = decode(result.data ?? result.Data)
-  let item: any = Array.isArray(rows) ? rows[0] : rows?.[input.refId] ?? rows
+  let item: any = Array.isArray(rows) ? rows.find((entry: any) => entry?.RefID === input.refId) : rows?.[input.refId] ?? rows
   if (typeof item === 'string') item = decode(item)
   if (typeof item?.Data === 'string') item = decode(item.Data)
-  if (!item || typeof item !== 'object' || item?.Success === false || item?.ErrorMessage || item?.ErrorCode?.length
-    || Number(item?.PublishStatus) !== 0) {
-    throw new InvoicePreviewError(502, 'MISA không tạo được hóa đơn nháp. Chưa phát hành hóa đơn.')
+  if (providerRejected(item)) throw new InvoicePreviewError(502, providerFailureMessage(item))
+  if (!item || typeof item !== 'object' || item.RefID !== input.refId
+    || (item.PublishStatus != null && Number(item.PublishStatus) !== 0)
+    || (item.PublishStatus == null && item.IsValid !== true)) {
+    throw new InvoicePreviewError(502, 'Chưa xác minh được phản hồi tạo nháp MISA; cần đối chiếu RefID.', true)
   }
-  if (item?.RefID && item.RefID !== input.refId) throw new InvoicePreviewError(502, 'MISA trả mã hóa đơn không khớp. Hãy kiểm tra MISA trước khi thao tác lại.')
-  return { invoiceNumber: typeof item?.InvNo === 'string' ? item.InvNo : 'Chưa cấp số', transactionId: item?.TransactionID }
+  return { invoiceNumber: typeof item?.InvNo === 'string' ? item.InvNo : '', transactionId: typeof item?.TransactionID === 'string' ? item.TransactionID : '' }
 }
 
 export function invoiceSource(record: TuitionRecord, payments: Payment[]): InvoiceSource {
   const amounts = [record.baseAmount, record.discountAmount, record.finalAmount]
-  if (amounts.some(n => !Number.isSafeInteger(n) || n < 0) || record.finalAmount <= 0
+  if (amounts.some(n => !Number.isSafeInteger(n) || n < 0)
     || record.baseAmount - record.discountAmount !== record.finalAmount
     || !Number.isInteger(record.billingMonth) || record.billingMonth < 1 || record.billingMonth > 12
     || !Number.isInteger(record.billingYear) || record.billingYear < 2000 || record.billingYear > 2100
@@ -216,8 +277,8 @@ export function invoiceSource(record: TuitionRecord, payments: Payment[]): Invoi
     throw new InvoicePreviewError(409, 'Dữ liệu thanh toán không hợp lệ.')
   }
   const paidAmount = payments.reduce((sum, payment) => sum + payment.amount, 0)
-  if (!Number.isSafeInteger(paidAmount) || paidAmount < record.finalAmount) {
-    throw new InvoicePreviewError(409, 'Phiếu chưa được thanh toán đủ theo các giao dịch đã lưu.')
+  if (!Number.isSafeInteger(paidAmount) || paidAmount < 0) {
+    throw new InvoicePreviewError(409, 'Tổng thanh toán của phiếu không hợp lệ.')
   }
   // Keep the invoice's payment label generic, as requested, regardless of payment split.
   const paymentMethodName = 'TM/Chuyển khoản'

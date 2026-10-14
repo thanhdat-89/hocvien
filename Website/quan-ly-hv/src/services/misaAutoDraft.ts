@@ -1,74 +1,81 @@
 import { randomUUID } from 'node:crypto'
 import { db, C, toDocs, toObj } from '../lib/firebase'
 import type { Payment, TuitionRecord } from '../types/models'
-import { InvoicePreviewError, invoiceSource, listInvoiceTemplates, createMisaDraft } from './misaInvoicePreview'
+import { InvoicePreviewError, invoiceSource, listInvoiceTemplates, validateDraftInput, InvoiceTemplate, MisaInvoiceRecord } from './misaInvoicePreview'
+import { prepareUnsignedInvoice } from './misaDraftGateway'
 
-const invoices = 'misaInvoices'
-const now = () => new Date().toISOString()
-
-function invoiceDateInVietnam(date = new Date()): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date)
+export function chooseDefaultInvoiceTemplate(templates: InvoiceTemplate[]) {
+  const id = process.env.MEINVOICE_DEFAULT_TEMPLATE_ID?.trim()
+  const series = process.env.MEINVOICE_DEFAULT_SERIES?.trim()
+  const matches = templates.filter(t => t.templateNo === '2' && (!id || t.id === id) && (!series || t.series === series))
+  return matches.length === 1 ? matches[0] : null
 }
 
-/** Create one unpublished MISA draft after a tuition record is fully paid. */
-export async function createAutomaticMisaDraft(recordId: string, actorId: string, request: typeof fetch = fetch) {
-  const recordRef = db.collection(C.TUITION_RECORDS).doc(recordId)
-  const paymentQuery = db.collection(C.PAYMENTS).where('tuitionRecordId', '==', recordId)
-  const draftRef = db.collection(invoices).doc(recordId)
-  const [recordSnapshot, paymentSnapshot, currentDraft] = await Promise.all([
-    recordRef.get(), paymentQuery.get(), draftRef.get(),
-  ])
-  if (!recordSnapshot.exists) throw new InvoicePreviewError(404, 'Không tìm thấy phiếu học phí để lập hóa đơn.')
-  const record = toObj<TuitionRecord>(recordSnapshot)
-  const payments = toDocs<Payment>(paymentSnapshot)
-  const source = invoiceSource(record, payments)
-  if (currentDraft.exists && currentDraft.data()?.status !== 'REMOVED_FROM_MISA') {
-    return { status: currentDraft.data()?.status || 'UNKNOWN', alreadyExists: true }
+/** Shared by the invoice page and tuition actions; reserve all records before contacting MISA. */
+export async function createTuitionMisaInvoice(recordIds: string[], actorId: string, body?: any, request: typeof fetch = fetch) {
+  if (!recordIds.length || recordIds.length > 20 || new Set(recordIds).size !== recordIds.length) throw new InvoicePreviewError(400, 'Danh sách phiếu không hợp lệ hoặc bị trùng.')
+  const suppliedInput = body ? validateDraftInput(body) : undefined
+  const refs = recordIds.map(id => ({ fee: db.collection(C.TUITION_RECORDS).doc(id),
+    payments: db.collection(C.PAYMENTS).where('tuitionRecordId', '==', id), invoice: db.collection('misaInvoices').doc(id) }))
+  const current = await Promise.all(refs.map(r => r.invoice.get()))
+  if (recordIds.length === 1 && current[0].exists && !['REMOVED_FROM_MISA', 'FAILED'].includes(current[0].data()?.status)) {
+    return { invoice: current[0].data()!, alreadyExists: true }
   }
-
-  const year = Number(invoiceDateInVietnam().slice(0, 4))
-  const templates = await listInvoiceTemplates(year, request)
-  const template = templates.find(item => item.templateNo === '2')
-  if (!template) throw new InvoicePreviewError(409, 'MISA không có mẫu hóa đơn bán hàng đang hoạt động để tạo nháp.')
-
-  const studentSnapshot = await db.collection(C.STUDENTS).doc(source.studentId).get()
-  const student = studentSnapshot.data()
-  const buyer = {
-    fullName: student?.fullName || source.studentName, legalName: '',
-    citizenIdNumber: student?.idCard || '', address: student?.address || '',
-    email: student?.studentEmail || '', phone: student?.studentPhone || '',
+  const legacy = await Promise.all(recordIds.map(id => db.collection('invoiceDrafts').doc(id).get()))
+  if (legacy.some(doc => doc.exists && ['MISA_DRAFT_CREATED', 'MISA_XML_PREPARED', 'CREATING_MISA', 'OUTCOME_UNKNOWN'].includes(doc.data()?.status) && doc.data()?.lastErrorCode !== 'PROVIDER_REJECTED')) {
+    throw new InvoicePreviewError(409, 'Phiếu có yêu cầu MISA từ luồng cũ chưa được đối chiếu. Cần kiểm tra RefID cũ trước khi tạo lại để tránh trùng hóa đơn.')
   }
-
-  const reservation = await db.runTransaction(async tx => {
-    const [latestRecord, latestPayments, latestDraft] = await Promise.all([
-      tx.get(recordRef), tx.get(paymentQuery), tx.get(draftRef),
-    ])
-    if (!latestRecord.exists) throw new InvoicePreviewError(404, 'Không tìm thấy phiếu học phí để lập hóa đơn.')
-    const latestSource = invoiceSource(toObj<TuitionRecord>(latestRecord), toDocs<Payment>(latestPayments))
-    if (latestDraft.exists && latestDraft.data()?.status !== 'REMOVED_FROM_MISA') {
-      throw new InvoicePreviewError(409, 'Phiếu này đã có hóa đơn MISA hoặc đang được xử lý.')
+  const invoiceDate = suppliedInput?.invoiceDate ?? new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date())
+  const templates = await listInvoiceTemplates(Number(invoiceDate.slice(0, 4)), request)
+  const template = body ? templates.find(t => t.id === body.templateId && t.templateNo === '2') : chooseDefaultInvoiceTemplate(templates)
+  if (!template) throw new InvoicePreviewError(409, 'Chưa xác định được mẫu MISA mặc định. Chọn mẫu trong Hóa đơn điện tử hoặc cấu hình mẫu mặc định.')
+  const firstFee = await refs[0].fee.get()
+  if (!firstFee.exists) throw new InvoicePreviewError(404, 'Không tìm thấy phiếu học phí.')
+  const student = (await db.collection(C.STUDENTS).doc(firstFee.data()!.studentId).get()).data()
+  const input = suppliedInput ?? validateDraftInput( { invoiceDate, templateId: template.id, revision: 0, buyer: {
+    fullName: student?.fullName || firstFee.data()!.studentName, legalName: '', citizenIdNumber: student?.idCard || '',
+    address: student?.address || '', email: student?.studentEmail || '', phone: student?.studentPhone || '',
+  } })
+  const reserved = await db.runTransaction(async tx => {
+    const snapshots = await Promise.all(refs.map(async r => ({ fee: await tx.get(r.fee), payments: await tx.get(r.payments), invoice: await tx.get(r.invoice) })))
+    const existing = snapshots.find(s => s.invoice.exists && !['REMOVED_FROM_MISA', 'FAILED'].includes(s.invoice.data()?.status))
+    if (existing) {
+      if (recordIds.length === 1) return { invoice: existing.invoice.data()!, alreadyExists: true }
+      throw new InvoicePreviewError(409, 'Có phiếu đã có hóa đơn hoặc đang chờ đối chiếu MISA.')
     }
-    const at = now()
-    const invoice = { id: recordId, recordIds: [recordId], refId: randomUUID(), status: 'CREATING',
-      source: latestSource, template, buyer, invoiceDate: invoiceDateInVietnam(), createdAt: at,
-      updatedAt: at, createdBy: actorId }
-    tx.set(draftRef, invoice)
-    return invoice
+    const sources = snapshots.map(s => {
+      if (!s.fee.exists) throw new InvoicePreviewError(404, 'Không tìm thấy phiếu học phí.')
+      return invoiceSource(toObj<TuitionRecord>(s.fee), toDocs<Payment>(s.payments))
+    })
+    if (sources.some(s => s.studentId !== sources[0].studentId)) throw new InvoicePreviewError(400, 'Chỉ gộp các phiếu của cùng một học viên.')
+    const at = new Date().toISOString()
+    const invoice: MisaInvoiceRecord = { id: recordIds[0], recordIds, refId: randomUUID(), status: 'CREATING',
+      source: sources[0], sources, template, buyer: input.buyer, invoiceDate: input.invoiceDate, revision: 0, createdAt: at, updatedAt: at, createdBy: actorId }
+    refs.forEach(r => tx.set(r.invoice, invoice))
+    return { invoice, alreadyExists: false }
   })
-
-  // MISA API used here only creates a draft. It has no sign, issue, or tax-authority action.
-  const created = await createMisaDraft(reservation, request)
-  const invoice = { ...reservation, ...created, status: 'DRAFT_CREATED', updatedAt: now() }
-  await draftRef.set(invoice)
-  return { status: 'DRAFT_CREATED', alreadyExists: false, invoice }
+  if (reserved.alreadyExists) return reserved
+  try {
+    const created = await prepareUnsignedInvoice(reserved.invoice as any, request)
+    const invoice = { ...reserved.invoice, invoiceNumber: created.invoiceNo, invoiceCode: created.invoiceCode, transactionId: created.transactionId, status: 'DRAFT_CREATED' as const, updatedAt: new Date().toISOString() }
+    await Promise.all(refs.map(r => r.invoice.set(invoice)))
+    return { invoice, alreadyExists: false }
+  } catch (error) {
+    const known = error instanceof InvoicePreviewError && !error.ambiguous
+    const invoice = { ...reserved.invoice, status: known ? 'FAILED' as const : 'OUTCOME_UNKNOWN' as const,
+      lastErrorMessage: error instanceof InvoicePreviewError ? error.message : 'Chưa xác định được kết quả MISA; cần đối chiếu RefID.', updatedAt: new Date().toISOString() }
+    await Promise.all(refs.map(r => r.invoice.set(invoice)))
+    return { invoice, alreadyExists: false }
+  }
 }
 
 export async function tryCreateAutomaticMisaDraft(recordId: string, actorId: string) {
   try {
-    return await createAutomaticMisaDraft(recordId, actorId)
-  } catch (error: any) {
-    const message = error instanceof InvoicePreviewError ? error.message : 'Không tạo được hóa đơn nháp trên MISA.'
-    console.error('[misa-auto-draft] Failed for tuition record:', recordId, message)
-    return { status: 'FAILED', alreadyExists: false, message }
+    const result = await createTuitionMisaInvoice([recordId], actorId)
+    const invoice = result.invoice as MisaInvoiceRecord
+    return { enabled: true, status: invoice.status, alreadyExists: result.alreadyExists, invoice,
+      refId: invoice.refId || '', transactionId: invoice.transactionId || '', message: invoice.lastErrorMessage || '' }
+  } catch (error) {
+    return { enabled: true, status: 'FAILED', message: error instanceof InvoicePreviewError ? error.message : 'Phiếu đã lưu nhưng chưa tạo được hóa đơn nháp MISA.' }
   }
 }

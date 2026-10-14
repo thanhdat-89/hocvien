@@ -56,9 +56,6 @@ export interface Student {
   school?: string
   gradeLevel?: number
   address?: string
-  idCard?: string | null
-  studentPhone?: string | null
-  studentEmail?: string | null
   enrollmentDate: string
   status: StudentStatus
   avatarUrl?: string

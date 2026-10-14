@@ -1,6 +1,5 @@
 import { Router, Response, NextFunction } from 'express'
 import { db, C, toDocs } from '../lib/firebase'
-import { getSupabasePool } from '../lib/supabase'
 import { getTuitionScheduleSummary } from '../services/tuitionScheduleSummary'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
@@ -84,54 +83,6 @@ async function computeDashboard() {
     console.warn('[Dashboard] Firebase monthly metrics unavailable', error?.code ?? error?.name ?? 'unknown')
   }
 
-  // Firebase is canonical; use the mirror only when the source read fails.
-  if (totalPrivateStudents === null) {
-    try {
-      const { rows } = await getSupabasePool().query<{
-        total_private_students: number
-        unscheduled_private_students: number
-      }>(
-        `SELECT
-           (SELECT COUNT(*)::int
-            FROM qlhv_migration.documents s
-            WHERE s.collection_path = $3
-              AND s.data->>'status' = 'ACTIVE'
-              AND NOT EXISTS (
-                SELECT 1 FROM qlhv_migration.documents e
-                WHERE e.collection_path = $4
-                  AND e.data->>'studentId' = s.document_id
-                  AND e.data->>'status' = 'ACTIVE'
-              )
-           ) AS total_private_students,
-           (SELECT COUNT(*)::int
-            FROM qlhv_migration.documents s
-            WHERE s.collection_path = $3
-              AND s.data->>'status' = 'ACTIVE'
-              AND NOT EXISTS (
-                SELECT 1 FROM qlhv_migration.documents e
-                WHERE e.collection_path = $4
-                  AND e.data->>'studentId' = s.document_id
-                  AND e.data->>'status' = 'ACTIVE'
-              )
-              AND NOT EXISTS (
-                SELECT 1 FROM qlhv_migration.documents p
-                WHERE p.collection_path = $5
-                  AND p.data->>'studentId' = s.document_id
-                  AND p.data->>'sessionDate' >= $1
-                  AND p.data->>'sessionDate' < $2
-              )
-           ) AS unscheduled_private_students`,
-        [
-          `${thisMonth}-01`, nextMonth, C.STUDENTS, C.ENROLLMENTS, C.PRIVATE_SCHEDULES,
-        ],
-      )
-      totalPrivateStudents = Number(rows[0]?.total_private_students ?? 0)
-      unscheduledPrivateStudentsThisMonth = Number(rows[0]?.unscheduled_private_students ?? 0)
-    } catch (error: any) {
-      console.warn('[Dashboard] Supabase monthly metrics unavailable', error?.code ?? error?.name ?? 'unknown')
-    }
-  }
-
   // Use the same schedule rows and outstanding amounts as the tuition page.
   try {
     const rows = await getTuitionScheduleSummary(Number(thisMonth.slice(5)), Number(thisMonth.slice(0, 4)))
@@ -157,7 +108,7 @@ async function computeDashboard() {
     sessionsToday,
     recentPayments,
     metricsMonth: thisMonth,
-    metricsVersion: 4,
+    metricsVersion: 5,
     cachedAt: Date.now(),
   }
 }
@@ -170,7 +121,7 @@ router.get('/', async (_req: AuthRequest, res: Response, next: NextFunction) => 
 
     if (aggSnap.exists) {
       const cached = aggSnap.data() as { cachedAt?: number; metricsMonth?: string; metricsVersion?: number; stats?: Record<string, unknown> }
-      const hasMonthlyMetrics = cached.metricsVersion === 4 && cached.metricsMonth === dateInVietnam().slice(0, 7)
+      const hasMonthlyMetrics = cached.metricsVersion === 5 && cached.metricsMonth === dateInVietnam().slice(0, 7)
         && ['unscheduledPrivateStudentsThisMonth', 'totalPrivateStudents', 'unpaidStudentsThisMonth']
           .every(key => typeof cached.stats?.[key] === 'number' && Number.isFinite(cached.stats[key]))
       if (cached.cachedAt && Date.now() - cached.cachedAt < DASHBOARD_TTL_MS && hasMonthlyMetrics) {

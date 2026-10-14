@@ -13,9 +13,6 @@ export interface Student {
   school?: string | null
   gradeLevel?: number | null
   address?: string | null
-  idCard?: string | null
-  studentPhone?: string | null
-  studentEmail?: string | null
   enrollmentDate: string
   status: 'ACTIVE' | 'INACTIVE' | 'RESERVED'
   notes?: string | null

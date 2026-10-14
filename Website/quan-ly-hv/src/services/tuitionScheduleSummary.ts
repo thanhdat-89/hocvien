@@ -18,25 +18,6 @@ export async function getTuitionScheduleSummary(month: number, year: number, sou
     return false
   })
 
-  // A student can have multiple enrollment documents for the same class (for example,
-  // after re-registering). Use the most recent active enrollment, matching the current
-  // schedule shown in the student profile; never let unspecified database ordering pick it.
-  const enrollmentsByStudentClass = new Map<string, any[]>()
-  for (const enrollment of relevantEnrollments) {
-    const key = `${enrollment.studentId}-${enrollment.classId}`
-    const candidates = enrollmentsByStudentClass.get(key) ?? []
-    candidates.push(enrollment)
-    enrollmentsByStudentClass.set(key, candidates)
-  }
-  const billableEnrollments = Array.from(enrollmentsByStudentClass.values(), candidates =>
-    candidates.sort((a, b) => {
-      const activeFirst = Number(b.status === 'ACTIVE') - Number(a.status === 'ACTIVE')
-      return activeFirst || String(b.enrollmentDate ?? '').localeCompare(String(a.enrollmentDate ?? ''))
-        || String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))
-        || String(a.id ?? '').localeCompare(String(b.id ?? ''))
-    })[0]
-  )
-
 
   // 2. Unique classIds, studentIds
   const classIds = [...new Set(relevantEnrollments.map((e: any) => e.classId as string))]
@@ -70,7 +51,7 @@ export async function getTuitionScheduleSummary(month: number, year: number, sou
 
   // 6. Fetch promotions per unique (studentId, classId) — song song thay vì tuần tự
   const uniquePairs = new Map<string, { studentId: string; classId: string }>()
-  for (const e of billableEnrollments) {
+  for (const e of relevantEnrollments) {
     const key = `${e.studentId}-${e.classId}`
     if (!uniquePairs.has(key)) uniquePairs.set(key, { studentId: e.studentId, classId: e.classId })
   }
@@ -95,7 +76,7 @@ export async function getTuitionScheduleSummary(month: number, year: number, sou
       }
     : null
 
-  for (const enrollment of billableEnrollments) {
+  for (const enrollment of relevantEnrollments) {
     const cls = classMap[enrollment.classId]
     const student = studentMap[enrollment.studentId]
     if (!cls || !student) continue

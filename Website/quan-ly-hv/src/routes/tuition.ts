@@ -1,8 +1,8 @@
-import { getTuitionScheduleWithFallback } from '../services/tuitionScheduleRead'
+import { getTuitionScheduleSummary } from '../services/tuitionScheduleSummary'
 import { misaConnectionStatus, checkMisaConnection } from '../services/misaConnection'
 import misaDrafts from './misaDrafts'
-import { activityContext } from '../middleware/activityContext'
 import { tryCreateAutomaticMisaDraft } from '../services/misaAutoDraft'
+import { activityContext } from '../middleware/activityContext'
 import { Router, Response, NextFunction } from 'express'
 import { db, C, s, toDocs, toObj, paginate } from '../lib/firebase'
 import { authenticate, requireRole } from '../middleware/auth'
@@ -78,9 +78,7 @@ router.get('/schedule-summary', async (req: AuthRequest, res: Response, next: Ne
     if (!Number.isInteger(month) || month < 1 || month > 12 || !Number.isInteger(year) || year < 2000 || year > 2100) {
       res.status(400).json({ message: 'Month/year không hợp lệ' }); return
     }
-    const result = await getTuitionScheduleWithFallback(month, year)
-    res.setHeader('X-Tuition-Data-Source', result.source)
-    res.json(result.rows)
+    res.json(await getTuitionScheduleSummary(month, year))
   } catch (err) { next(err) }
 })
 
@@ -221,17 +219,19 @@ router.post('/calculate-bulk', requireRole('ADMIN', 'STAFF'), async (req: AuthRe
     }
 
     let created = 0, updated = 0, failed = 0
+    const invoiceDrafts: any[] = []
     for (const classId of classIds) {
       try {
         const r = await calculateTuitionForClass(classId, Number(month), Number(year))
         created += r.created
         updated += r.updated
+        for (const recordId of r.newRecordIds) invoiceDrafts.push(await tryCreateAutomaticMisaDraft(recordId, req.user!.userId))
       } catch (e) {
         failed++
         console.error('[bulk-create] failed for class', classId, e)
       }
     }
-    res.json({ created, updated, failed, classCount: classIds.length })
+    res.json({ created, updated, failed, classCount: classIds.length, invoiceDrafts })
   } catch (err) { next(err) }
 })
 
@@ -258,11 +258,13 @@ router.post('/toggle-paid', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req
     }
 
     let record: TuitionRecord & { id: string }
+    let recordExistedBefore = false
 
     // 1. Ưu tiên dùng tuitionRecordId nếu frontend gửi lên
     if (tuitionRecordId) {
       const doc = await db.collection(C.TUITION_RECORDS).doc(tuitionRecordId).get()
       if (doc.exists) {
+        recordExistedBefore = true
         record = { id: doc.id, ...doc.data() } as TuitionRecord & { id: string }
       } else {
         res.status(404).json({ message: 'Không tìm thấy phiếu học phí' })
@@ -279,6 +281,7 @@ router.post('/toggle-paid', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req
         .get()
 
       if (!existingSnap.empty) {
+        recordExistedBefore = true
         record = toObj<TuitionRecord>(existingSnap.docs[0])
       } else {
         // 3. Cuối cùng mới thử tạo mới qua calculateTuitionForStudent
@@ -320,10 +323,13 @@ router.post('/toggle-paid', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req
     }
 
     const finalStatus = await getPaymentStatus(record.id)
-    const invoiceDraft = paid && finalStatus.remaining <= 0
-      ? await tryCreateAutomaticMisaDraft(record.id, req.user!.userId)
-      : undefined
-    res.json({ recordId: record.id, paid, finalStatus, invoiceDraft })
+    let invoiceDraft = recordExistedBefore
+      ? { enabled: true, status: 'SKIPPED_EXISTING_RECORD', message: 'Phiếu đã tồn tại; chỉ cập nhật thanh toán, không tạo lại hóa đơn nháp MISA.' }
+      : await tryCreateAutomaticMisaDraft(record.id, req.user!.userId)
+    if (!recordExistedBefore && ['FAILED', 'OUTCOME_UNKNOWN'].includes(invoiceDraft.status)) {
+      invoiceDraft = { ...invoiceDraft, message: `Phiếu mới đã được tạo. ${invoiceDraft.message || 'Chưa hoàn tất xử lý hóa đơn MISA.'}` }
+    }
+    res.json({ recordId: record.id, paid, finalStatus, recordCreated: !recordExistedBefore, invoiceDraft })
   } catch (err: any) {
     console.error('[toggle-paid] ERROR:', err?.message || err)
     next(err)
@@ -337,7 +343,7 @@ router.post('/calculate', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: 
     if (!classId || !month || !year) { res.status(400).json({ message: 'Cần classId, month, year' }); return }
 
     if (studentId) {
-      const { tuitionRecord } = await calculateTuitionForStudent(studentId, classId, Number(month), Number(year))
+      const { tuitionRecord, isNew } = await calculateTuitionForStudent(studentId, classId, Number(month), Number(year))
 
       if (typeof paid === 'boolean') {
         if (paid) {
@@ -369,14 +375,16 @@ router.post('/calculate', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: 
           tuitionRecord.status = 'PENDING'
         }
       }
-      const paymentStatus = await getPaymentStatus(tuitionRecord.id)
-      const invoiceDraft = paid === true && paymentStatus.remaining <= 0
+
+      const invoiceDraft = isNew
         ? await tryCreateAutomaticMisaDraft(tuitionRecord.id, req.user!.userId)
-        : undefined
-      res.json({ ...tuitionRecord, invoiceDraft })
+        : { enabled: true, status: 'SKIPPED_EXISTING_RECORD', message: 'Phiếu đã tồn tại; không tạo lại hóa đơn nháp MISA.' }
+      res.json({ ...tuitionRecord, invoiceDraft, isNew })
     } else {
       const result = await calculateTuitionForClass(classId, Number(month), Number(year))
-      res.json({ message: `Tạo ${result.created} phiếu mới, cập nhật ${result.updated} phiếu`, ...result })
+      const invoiceDrafts = []
+      for (const recordId of result.newRecordIds) invoiceDrafts.push(await tryCreateAutomaticMisaDraft(recordId, req.user!.userId))
+      res.json({ message: `Tạo ${result.created} phiếu mới, cập nhật ${result.updated} phiếu`, ...result, invoiceDrafts })
     }
   } catch (err) { next(err) }
 })

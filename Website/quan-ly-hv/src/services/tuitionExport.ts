@@ -1,7 +1,3 @@
-import { C, rawDb } from '../lib/firebase'
-import { getSupabasePool } from '../lib/supabase'
-import { flushSupabaseSyncQueue } from '../lib/firestoreMirror'
-import { firestoreSnapshotStore } from '../lib/firestoreSnapshot'
 import { getTuitionScheduleSummary } from './tuitionScheduleSummary'
 
 export const invoiceHeaderRows = [
@@ -16,26 +12,8 @@ export const invoiceHeaderRows = [
 ].map(row => [...row, ...Array(9 - row.length).fill('')])
 
 export async function buildTuitionExport(month: number, year: number) {
-  let source = 'firebase'
-  let rows: any[]
-  if (process.env.REPORTS_READ_SOURCE !== 'firebase') {
-    try {
-      try { await flushSupabaseSyncQueue(rawDb) } catch (error: any) {
-        console.warn('[Tuition export] mirror queue flush unavailable', error?.code ?? error?.name ?? 'unknown')
-      }
-      const paths = [C.STUDENTS, C.CLASSES, C.ENROLLMENTS, C.SESSIONS, C.PRIVATE_SCHEDULES, C.STUDENT_PROMOTIONS, C.TUITION_RECORDS, C.PAYMENTS]
-      const result = await getSupabasePool().query(
-        'SELECT collection_path, document_id, data FROM qlhv_migration.documents WHERE collection_path = ANY($1::text[])', [paths],
-      )
-      if (!result.rows.some(row => row.collection_path === C.STUDENTS)) throw new Error('Supabase student snapshot is empty')
-      rows = await getTuitionScheduleSummary(month, year, firestoreSnapshotStore(result.rows))
-      source = 'supabase'
-    } catch (error) {
-      if (process.env.REPORTS_FIREBASE_FALLBACK === 'false') throw error
-      console.warn('[Tuition export] Supabase unavailable; using Firebase')
-      rows = await getTuitionScheduleSummary(month, year)
-    }
-  } else rows = await getTuitionScheduleSummary(month, year)
+  const source = 'firebase'
+  const rows = await getTuitionScheduleSummary(month, year)
   if (rows.some(row => ![row.totalSessions, row.ratePerSession, row.discountAmount, row.finalAmount].every(Number.isFinite))) {
     throw new Error('Invalid tuition export amounts')
   }

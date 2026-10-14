@@ -3,7 +3,6 @@ import { admin, db, C, s, toObj, toDocs, paginate } from '../lib/firebase'
 import { syncPrimaryParentToStudent } from '../lib/studentSync'
 import { recountClassActiveStudents } from '../lib/classSync'
 import { computeTuitionSummary } from '../lib/tuition'
-import { getSupabasePool } from '../lib/supabase'
 import { requireRole } from '../middleware/auth'
 import { authenticate } from '../middleware/auth'
 import { activityContext } from '../middleware/activityContext'
@@ -18,88 +17,7 @@ const now = () => new Date().toISOString()
 const STUDENT_COUNT_TTL_MS = 60 * 1000
 const IN_QUERY_LIMIT = 30
 
-function isFirestoreQuotaError(error: any): boolean {
-  const code = String(error?.code ?? '').toLowerCase()
-  return code === '8' || code === 'resource-exhausted' || code === 'resource_exhausted'
-}
-
 let studentCountsCache: { at: number; totalAll: number; totalActive: number } | null = null
-
-async function listStudentsFromSupabase(options: {
-  page: number
-  limit: number
-  search?: string
-  status?: string
-  classId?: string
-  gradeLevel?: string
-}) {
-  const { rows } = await getSupabasePool().query<{ collection_path: string; document_id: string; data: Record<string, any> }>(
-    `SELECT collection_path, document_id, data
-       FROM qlhv_migration.documents
-      WHERE collection_path = ANY($1::text[])`,
-    [['students', C.ENROLLMENTS, C.STUDENT_PROMOTIONS]],
-  )
-  const students = rows
-    .filter(row => row.collection_path === C.STUDENTS)
-    .map(row => ({ id: row.document_id, ...row.data })) as (Student & { id: string })[]
-  const enrollments = rows
-    .filter(row => row.collection_path === C.ENROLLMENTS && row.data.status === 'ACTIVE')
-    .map(row => ({ id: row.document_id, ...row.data })) as (ClassEnrollment & { id: string })[]
-  const promotions: any[] = rows
-    .filter(row => row.collection_path === C.STUDENT_PROMOTIONS)
-    .map(row => ({ id: row.document_id, ...row.data }))
-
-  const activeEnrollmentsByStudent = new Map<string, ClassEnrollment[]>()
-  for (const enrollment of enrollments) {
-    const list = activeEnrollmentsByStudent.get(enrollment.studentId) ?? []
-    list.push(enrollment)
-    activeEnrollmentsByStudent.set(enrollment.studentId, list)
-  }
-  const today = new Date().toISOString().slice(0, 10)
-  const promotionsByStudent = new Map<string, any[]>()
-  for (const promotion of promotions) {
-    if (promotion.appliedFrom && promotion.appliedFrom > today) continue
-    if (promotion.appliedTo && promotion.appliedTo < today) continue
-    const list = promotionsByStudent.get(promotion.studentId) ?? []
-    list.push(promotion)
-    promotionsByStudent.set(promotion.studentId, list)
-  }
-
-  const { page, limit, search, status, classId, gradeLevel } = options
-  const grade = gradeLevel ? Number(gradeLevel) : undefined
-  const classStudentIds = classId
-    ? new Set(enrollments.filter(e => e.classId === classId).map(e => e.studentId))
-    : undefined
-  const matched = students.filter(student =>
-    (!status || student.status === status)
-    && (!grade || student.gradeLevel === grade)
-    && (!classStudentIds || classStudentIds.has(student.id))
-    && (!search || String(student.fullName ?? '').toLocaleLowerCase().includes(search))
-  ).sort((a, b) => String(a.fullName ?? '').localeCompare(String(b.fullName ?? ''), 'vi'))
-
-  const total = matched.length
-  const result = matched.slice((page - 1) * limit, page * limit).map(student => {
-    const primaryParent = student.primaryParentName
-      ? { fullName: student.primaryParentName, phone: student.primaryParentPhone ?? null, zalo: student.primaryParentZalo ?? null }
-      : null
-    return {
-      ...student,
-      primaryParent,
-      enrollments: activeEnrollmentsByStudent.get(student.id) ?? [],
-      promotions: promotionsByStudent.get(student.id) ?? [],
-    }
-  })
-
-  return {
-    data: result,
-    total,
-    page,
-    limit,
-    totalPages: Math.ceil(total / limit),
-    totalAll: students.length,
-    totalActive: students.filter(student => student.status === 'ACTIVE').length,
-  }
-}
 
 async function getCount(query: FirebaseFirestore.Query): Promise<number> {
   const snap = await query.count().get()
@@ -197,18 +115,6 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
     const offset = (pageNum - 1) * limitNum
     const trimmedSearch = search?.trim().toLowerCase()
 
-    if (process.env.STUDENTS_READ_SOURCE === 'supabase') {
-      res.json(await listStudentsFromSupabase({
-        page: pageNum,
-        limit: limitNum,
-        search: trimmedSearch,
-        status,
-        classId,
-        gradeLevel,
-      }))
-      return
-    }
-
     const { totalAll, totalActive } = await getStudentCounts()
 
     let students: (Student & { id: string })[] = []
@@ -260,27 +166,6 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
 
     res.json({ data: result, total, page: pageNum, limit: limitNum, totalPages: Math.ceil(total / limitNum), totalAll, totalActive })
   } catch (err) {
-    if (isFirestoreQuotaError(err)) {
-      try {
-        const { page = '1', limit = '20', search, status, classId, gradeLevel } = req.query as Record<string, string>
-        const pageNum = Math.max(1, Number(page) || 1)
-        const limitNum = Math.min(500, Math.max(1, Number(limit) || 20))
-        const result = await listStudentsFromSupabase({
-          page: pageNum,
-          limit: limitNum,
-          search: search?.trim().toLowerCase(),
-          status,
-          classId,
-          gradeLevel,
-        })
-        res.setHeader('X-Data-Source', 'supabase-fallback')
-        res.json(result)
-        return
-      } catch (fallbackError) {
-        next(fallbackError)
-        return
-      }
-    }
     next(err)
   }
 })
@@ -410,23 +295,7 @@ router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) =
     const enrollSnap = await db.collection(C.ENROLLMENTS)
       .where('studentId', '==', student.id)
       .get()
-    const allEnrollments = toDocs<ClassEnrollment>(enrollSnap)
-    // Multiple historical enrollments can exist for one class. Display the latest
-    // active enrollment so the profile and tuition summary use the same schedule.
-    const enrollmentsByClass = new Map<string, ClassEnrollment[]>()
-    for (const enrollment of allEnrollments) {
-      const candidates = enrollmentsByClass.get(enrollment.classId) ?? []
-      candidates.push(enrollment)
-      enrollmentsByClass.set(enrollment.classId, candidates)
-    }
-    const enrollments = Array.from(enrollmentsByClass.values(), candidates =>
-      candidates.sort((a, b) => {
-        const activeFirst = Number(b.status === 'ACTIVE') - Number(a.status === 'ACTIVE')
-        return activeFirst || String(b.enrollmentDate ?? '').localeCompare(String(a.enrollmentDate ?? ''))
-          || String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))
-          || String(a.id ?? '').localeCompare(String(b.id ?? ''))
-      })[0]
-    )
+    const enrollments = toDocs<ClassEnrollment>(enrollSnap)
 
     // Tuition records (6 tháng gần nhất) — sort in memory to avoid composite index requirement
     const tuitionSnap = await db.collection(C.TUITION_RECORDS)
@@ -494,7 +363,7 @@ router.post('/', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthReque
 // PUT /api/students/:id
 router.put('/:id', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { fullName, dateOfBirth, gender, school, gradeLevel, address, idCard, studentPhone, studentEmail, enrollmentDate, status, notes, parentName, phone, parentId } = req.body
+    const { fullName, dateOfBirth, gender, school, gradeLevel, address, status, notes, parentName, phone, parentId } = req.body
     const studentId = s(req.params.id)
 
     const updates: Record<string, unknown> = { updatedAt: now() }
@@ -504,10 +373,6 @@ router.put('/:id', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: 
     if (school !== undefined) updates.school = school
     if (gradeLevel !== undefined) updates.gradeLevel = gradeLevel ? Number(gradeLevel) : null
     if (address !== undefined) updates.address = address
-    if (idCard !== undefined) updates.idCard = idCard
-    if (studentPhone !== undefined) updates.studentPhone = studentPhone
-    if (studentEmail !== undefined) updates.studentEmail = studentEmail
-    if (enrollmentDate !== undefined) updates.enrollmentDate = enrollmentDate
     if (status !== undefined) updates.status = status
     if (notes !== undefined) updates.notes = notes
 
@@ -770,26 +635,11 @@ router.get('/:id/schedule', async (req: AuthRequest, res: Response, next: NextFu
     const month = Number((req.query.month as string) || now.getMonth() + 1)
     const year  = Number((req.query.year  as string) || now.getFullYear())
 
-    // 1. Lấy lịch hiện tại theo lớp. Nếu có enrollment lịch sử trùng lớp,
-    // ưu tiên enrollment đang ACTIVE mới nhất để tránh tính buổi của đợt cũ.
+    // 1. Lấy tất cả enrollments của học viên (kể cả dropped để xem lịch cũ)
     const enrollSnap = await db.collection(C.ENROLLMENTS)
       .where('studentId', '==', studentId)
       .get()
-    const allEnrollments = toDocs<ClassEnrollment>(enrollSnap)
-    const enrollmentsByClass = new Map<string, ClassEnrollment[]>()
-    for (const enrollment of allEnrollments) {
-      const candidates = enrollmentsByClass.get(enrollment.classId) ?? []
-      candidates.push(enrollment)
-      enrollmentsByClass.set(enrollment.classId, candidates)
-    }
-    const enrollments = Array.from(enrollmentsByClass.values(), candidates =>
-      candidates.sort((a, b) => {
-        const activeFirst = Number(b.status === 'ACTIVE') - Number(a.status === 'ACTIVE')
-        return activeFirst || String(b.enrollmentDate ?? '').localeCompare(String(a.enrollmentDate ?? ''))
-          || String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))
-          || String(a.id ?? '').localeCompare(String(b.id ?? ''))
-      })[0]
-    )
+    const enrollments = toDocs<ClassEnrollment>(enrollSnap)
 
     // 2. Với mỗi lớp, lấy sessions của tháng đó (filter in memory tránh index)
     const monthStr = `${year}-${String(month).padStart(2, '0')}`

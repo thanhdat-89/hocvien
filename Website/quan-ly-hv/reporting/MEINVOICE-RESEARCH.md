@@ -89,7 +89,7 @@ Nguồn:
 ## Quy trình đề xuất và mốc 01/11/2026
 
 1. Chốt quy tắc thời điểm lập, người mua, số tiền và hóa đơn đã lập thủ công.
-2. Lưu snapshot và yêu cầu có khóa chống trùng từ nguồn dữ liệu chính; phản chiếu Supabase.
+2. Lưu snapshot và yêu cầu có khóa chống trùng từ nguồn dữ liệu chính trên Firebase.
 3. Lấy mẫu, xem trước, xác nhận ký theo tài khoản eSign được cấp.
 4. Gửi, đọc kết quả từng hóa đơn và theo dõi trạng thái thuế; timeout phải đối soát.
 5. Sau kết quả phù hợp, gửi email và lưu XML/PDF; lỗi email xử lý riêng.

@@ -54,11 +54,13 @@ function TuitionStatusBadge({ status }: { status: string }) {
 function EditStudentModal({ student, onClose, onSaved }: { student: Student; onClose: () => void; onSaved: (s: Student) => void }) {
   const [form, setForm] = useState({
     fullName: student.fullName ?? '',
+    dateOfBirth: student.dateOfBirth ?? '',
+    gender: student.gender ?? '',
+    school: student.school ?? '',
+    gradeLevel: student.gradeLevel?.toString() ?? '',
     address: student.address ?? '',
-    idCard: student.idCard ?? '',
-    studentPhone: student.studentPhone ?? '',
-    studentEmail: student.studentEmail ?? '',
-    enrollmentDate: student.enrollmentDate ?? '',
+    status: student.status ?? 'ACTIVE',
+    notes: student.notes ?? '',
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -73,11 +75,13 @@ function EditStudentModal({ student, onClose, onSaved }: { student: Student; onC
     try {
       const res = await api.put(`/students/${student.id}`, {
         fullName: form.fullName,
+        dateOfBirth: form.dateOfBirth || null,
+        gender: form.gender || null,
+        school: form.school || null,
+        gradeLevel: form.gradeLevel || null,
         address: form.address || null,
-        idCard: form.idCard || null,
-        studentPhone: form.studentPhone || null,
-        studentEmail: form.studentEmail || null,
-        enrollmentDate: form.enrollmentDate,
+        status: form.status,
+        notes: form.notes || null,
       })
       onSaved(res.data)
     } catch (err: any) {
@@ -97,23 +101,42 @@ function EditStudentModal({ student, onClose, onSaved }: { student: Student; onC
               <input value={form.fullName} onChange={set('fullName')} required className="input" placeholder="Nguyễn Văn A" />
             </Field>
           </div>
+          <Field label="Ngày sinh">
+            <input value={form.dateOfBirth} onChange={set('dateOfBirth')} type="date" className="input" />
+          </Field>
+          <Field label="Giới tính">
+            <select value={form.gender} onChange={set('gender')} className="input">
+              <option value="">Không rõ</option>
+              <option value="MALE">Nam</option>
+              <option value="FEMALE">Nữ</option>
+            </select>
+          </Field>
+          <Field label="Trường học">
+            <input value={form.school} onChange={set('school')} className="input" placeholder="THCS Nguyễn Du" />
+          </Field>
+          <Field label="Khối lớp">
+            <select value={form.gradeLevel} onChange={set('gradeLevel')} className="input">
+              <option value="">—</option>
+              {[1,2,3,4,5,6,7,8,9,10,11,12].map(g => <option key={g} value={g}>Lớp {g}</option>)}
+            </select>
+          </Field>
           <div className="col-span-2">
             <Field label="Địa chỉ">
               <input value={form.address} onChange={set('address')} className="input" placeholder="123 Đường ABC, Quận 1" />
             </Field>
           </div>
-          <Field label="CCCD">
-            <input value={form.idCard} onChange={set('idCard')} className="input" inputMode="numeric" autoComplete="off" />
+          <Field label="Trạng thái">
+            <select value={form.status} onChange={set('status')} className="input">
+              <option value="ACTIVE">Đang học</option>
+              <option value="INACTIVE">Đã nghỉ</option>
+              <option value="RESERVED">Bảo lưu</option>
+            </select>
           </Field>
-          <Field label="Số điện thoại">
-            <input value={form.studentPhone} onChange={set('studentPhone')} type="tel" className="input" placeholder="0901 234 567" />
-          </Field>
-          <Field label="Email">
-            <input value={form.studentEmail} onChange={set('studentEmail')} type="email" className="input" placeholder="email@example.com" />
-          </Field>
-          <Field label="Ngày nhập học">
-            <input value={form.enrollmentDate} onChange={set('enrollmentDate')} type="date" required className="input" />
-          </Field>
+          <div className="col-span-2">
+            <Field label="Ghi chú">
+              <textarea value={form.notes} onChange={set('notes')} className="input resize-none" rows={2} placeholder="Ghi chú thêm..." />
+            </Field>
+          </div>
         </div>
         <div className="flex gap-3 pt-2">
           <button type="button" onClick={onClose} className="flex-1 btn-secondary justify-center">Huỷ</button>
@@ -479,12 +502,12 @@ function InfoTab({
             )}
           </div>
           <div className="space-y-5">
-            <InfoRow label="Họ và tên" value={student.fullName} />
+            <InfoRow label="Ngày sinh" value={fmt(student.dateOfBirth)} />
+            <InfoRow label="Giới tính" value={student.gender === 'MALE' ? 'Nam' : student.gender === 'FEMALE' ? 'Nữ' : null} />
+            <InfoRow label="Trường học" value={student.school} />
             <InfoRow label="Địa chỉ" value={student.address} />
-            <InfoRow label="CCCD" value={student.idCard} />
-            <InfoRow label="Số điện thoại" value={student.studentPhone} />
-            <InfoRow label="Email" value={student.studentEmail} />
             <InfoRow label="Ngày nhập học" value={fmt(student.enrollmentDate)} />
+            {student.notes && <InfoRow label="Ghi chú" value={student.notes} />}
           </div>
 
           {/* Status actions */}

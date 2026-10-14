@@ -193,10 +193,7 @@ router.post('/sepay', async (req: Request, res: Response, next: NextFunction) =>
     const paymentRef = await db.collection(C.PAYMENTS).add(paymentData)
 
     await refreshTuitionStatus(target.id)
-    const paymentStatus = await getPaymentStatus(target.id)
-    const invoiceDraft = paymentStatus.remaining <= 0
-      ? await tryCreateAutomaticMisaDraft(target.id, 'sepay-webhook')
-      : undefined
+    const invoiceDraft = await tryCreateAutomaticMisaDraft(target.id, 'sepay-webhook')
 
     const record: BankTransaction = {
       id: docId, ...baseRecord, status: 'matched',

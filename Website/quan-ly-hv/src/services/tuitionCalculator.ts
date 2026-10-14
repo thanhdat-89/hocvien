@@ -117,7 +117,8 @@ export async function calculateTuitionForStudent(
 
   let recordId: string
   if (isNew) {
-    const ref = await db.collection(C.TUITION_RECORDS).add({ ...recordData, createdAt: now() })
+    const ref = db.collection(C.TUITION_RECORDS).doc()
+    await ref.set({ ...recordData, createdAt: now() })
     recordId = ref.id
   } else {
     recordId = existingSnap.docs[0].id
@@ -208,7 +209,8 @@ async function calculatePrivateTuition(
 
   let recordId: string
   if (isNew) {
-    const ref = await db.collection(C.TUITION_RECORDS).add({ ...recordData, createdAt: now() })
+    const ref = db.collection(C.TUITION_RECORDS).doc()
+    await ref.set({ ...recordData, createdAt: now() })
     recordId = ref.id
   } else {
     recordId = existingSnap.docs[0].id
@@ -228,7 +230,7 @@ async function calculatePrivateTuition(
  */
 export async function calculateTuitionForClass(
   classId: string, month: number, year: number
-): Promise<{ created: number; updated: number }> {
+): Promise<{ created: number; updated: number; recordIds: string[]; newRecordIds: string[] }> {
   let studentIds: string[]
 
   if (classId === 'private') {
@@ -254,15 +256,22 @@ export async function calculateTuitionForClass(
   }
 
   let created = 0, updated = 0
+  const recordIds: string[] = []
+  const newRecordIds: string[] = []
   for (const sid of studentIds) {
     try {
       const { isNew } = await calculateTuitionForStudent(sid, classId, month, year)
-      isNew ? created++ : updated++
+      if (isNew) { created++; newRecordIds.push((await db.collection(C.TUITION_RECORDS)
+        .where('studentId', '==', sid).where('classId', '==', classId)
+        .where('billingMonth', '==', month).where('billingYear', '==', year).limit(1).get()).docs[0]?.id) } else updated++
+      recordIds.push((await db.collection(C.TUITION_RECORDS)
+        .where('studentId', '==', sid).where('classId', '==', classId)
+        .where('billingMonth', '==', month).where('billingYear', '==', year).limit(1).get()).docs[0]?.id || '')
     } catch (e) {
       console.error('[calculateTuitionForClass] failed for student', sid, classId, e)
     }
   }
-  return { created, updated }
+  return { created, updated, recordIds: recordIds.filter(Boolean), newRecordIds: newRecordIds.filter(Boolean) }
 }
 
 /**

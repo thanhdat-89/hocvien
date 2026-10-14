@@ -1,3 +1,4 @@
+import InvoiceWorkflowResultDialog, { type InvoiceWorkflowResult } from '../components/InvoiceWorkflowResultDialog'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import TopBar from '../components/TopBar'
@@ -54,7 +55,6 @@ export default function Tuition() {
   const [rows, setRows] = useState<ScheduleRow[]>([])
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [dataSource, setDataSource] = useState<'firebase' | 'supabase-fallback' | null>(null)
   const latestRequest = useRef(0)
   const [classFilter, setClassFilter] = useState<string | null>(null)
   const [gradeFilter, setGradeFilter] = useState<number | null>(null)
@@ -64,8 +64,8 @@ export default function Tuition() {
     setLoading(true)
     setLoadError(null)
     api.get(`/tuition/schedule-summary?month=${month}&year=${year}`)
-      .then(r => { if (request === latestRequest.current) { setRows(r.data); setDataSource(r.headers['x-tuition-data-source'] || 'firebase') } })
-      .catch(() => { if (request === latestRequest.current) { setRows([]); setDataSource(null); setLoadError('Không tải được dữ liệu học phí.'); } })
+      .then(r => { if (request === latestRequest.current) setRows(r.data) })
+      .catch(() => { if (request === latestRequest.current) { setRows([]); setLoadError('Không tải được dữ liệu học phí.'); } })
       .finally(() => { if (request === latestRequest.current) setLoading(false) })
   }
 
@@ -101,23 +101,7 @@ export default function Tuition() {
     if (gradeFilter != null && r.gradeLevel !== gradeFilter) return false
     if (classFilter && r.className !== classFilter) return false
     return true
-  }).sort((a, b) =>
-    a.studentName.localeCompare(b.studentName, 'vi') ||
-    a.studentId.localeCompare(b.studentId) ||
-    a.className.localeCompare(b.className, 'vi') ||
-    a.classId.localeCompare(b.classId)
-  )
-
-  // Khi nhiều hồ sơ có cùng tên, hiện mã hồ sơ ngắn để tránh nhầm phiếu giữa các học viên.
-  const studentIdsByName = new Map<string, Set<string>>()
-  filtered.forEach(r => {
-    const nameKey = r.studentName.trim().replace(/\s+/g, ' ').toLocaleLowerCase('vi')
-    const ids = studentIdsByName.get(nameKey) ?? new Set<string>()
-    ids.add(r.studentId)
-    studentIdsByName.set(nameKey, ids)
   })
-  const hasDuplicateName = (row: ScheduleRow) =>
-    (studentIdsByName.get(row.studentName.trim().replace(/\s+/g, ' ').toLocaleLowerCase('vi'))?.size ?? 0) > 1
 
   const totalAmount = filtered.reduce((s, r) => s + r.finalAmount, 0)
   const totalSessions = filtered.reduce((s, r) => s + r.totalSessions, 0)
@@ -164,68 +148,57 @@ export default function Tuition() {
     })
   }
 
+  const [invoiceResults, setInvoiceResults] = useState<InvoiceWorkflowResult[] | null>(null)
+  const pendingResult = (row: ScheduleRow, key: string): InvoiceWorkflowResult => ({
+    key, studentName: row.studentName, className: row.className, month, year, phase: 'processing',
+  })
+  const updateInvoiceResult = (key: string, patch: Partial<InvoiceWorkflowResult>) => {
+    setInvoiceResults(previous => previous?.map(item => item.key === key ? { ...item, ...patch } : item) ?? null)
+  }
+  const responseWorkflow = (data: any): InvoiceWorkflowResult['workflow'] => data.invoiceWorkflow ?? data.invoiceDraft
+  const requestError = (error: any) => error?.response?.data?.message || 'Không nhận được phản hồi. Phiếu có thể đã lưu; kiểm tra trước khi thử lại.'
+
   const handleSaveToggles = async () => {
     const keys = Object.keys(pendingToggles)
     if (keys.length === 0) return
-
     setIsSavingToggles(true)
-    let hasError = false
+    setInvoiceResults(keys.map(key => {
+      const [studentId, classId] = key.split('___')
+      const row = rows.find(item => item.studentId === studentId && item.classId === classId)
+      return row ? pendingResult(row, key) : { key, studentName: 'Học viên', className: classId, month, year, phase: 'processing' }
+    }))
     try {
-      const results = await Promise.all(keys.map(async key => {
+      const settled = await Promise.allSettled(keys.map(async key => {
         const [studentId, classId] = key.split('___')
-        const data = pendingToggleData[key]
-        return api.post('/tuition/toggle-paid', {
-          studentId,
-          classId,
-          month,
-          year,
-          paid: pendingToggles[key],
-          tuitionRecordId: data?.tuitionRecordId || undefined,
-        })
-      }))
-      const draftFailures = results
-        .map(result => result.data?.invoiceDraft)
-        .filter((draft: any) => draft?.status === 'FAILED')
-      // Optimistic update để tránh lỗi stale index từ Firestore
-      setRows(prevRows => prevRows.map(r => {
-        const k = `${r.studentId}___${r.classId}`
-        if (pendingToggles[k] !== undefined) {
-          const newPaid = pendingToggles[k]
-          return {
-            ...r,
-            tuitionRecord: {
-              id: r.tuitionRecord?.id || 'temp',
-              finalAmount: r.finalAmount,
-              status: newPaid ? 'PAID' : 'PENDING',
-              paidAmount: newPaid ? r.finalAmount : 0,
-              remainingAmount: newPaid ? 0 : r.finalAmount,
-            }
-          }
+        try {
+          const { data } = await api.post('/tuition/toggle-paid', {
+            studentId, classId, month, year, paid: pendingToggles[key],
+            tuitionRecordId: pendingToggleData[key]?.tuitionRecordId || undefined,
+          })
+          updateInvoiceResult(key, { phase: 'complete', recordId: data.recordId, workflow: responseWorkflow(data) })
+          return { key, recordId: data.recordId }
+        } catch (error) {
+          updateInvoiceResult(key, { phase: 'request_failed', error: requestError(error) })
+          throw error
         }
-        return r
       }))
-      if (draftFailures.length) {
-        const detail = draftFailures[0]?.message || 'MISA không trả được kết quả.'
-        await showAlert({
-          title: 'Đã ghi nhận thanh toán',
-          message: `${draftFailures.length} phiếu đã thanh toán đủ nhưng chưa tạo được hóa đơn nháp trên MISA. ${detail} Hãy kiểm tra trạng thái trong trang Hóa đơn điện tử trước khi thử lại.`,
-        })
-      }
-    } catch (e: any) {
-      console.error('Lỗi khi lưu hàng loạt:', e)
-      const serverMsg = e?.response?.data?.message || e?.message || 'Lỗi không xác định'
-      showAlert({ title: 'Lỗi', message: `Chi tiết: ${serverMsg}` })
-      hasError = true
+      const completed = settled.flatMap(result => result.status === 'fulfilled' ? [result.value] : [])
+      setRows(previous => previous.map(row => {
+        const key = `${row.studentId}___${row.classId}`
+        const result = completed.find(item => item.key === key)
+        if (!result) return row
+        const paid = pendingToggles[key]
+        return { ...row, tuitionRecord: { id: result.recordId || row.tuitionRecord?.id || '',
+          finalAmount: row.finalAmount, status: paid ? 'PAID' : 'PENDING',
+          paidAmount: paid ? row.finalAmount : 0, remainingAmount: paid ? 0 : row.finalAmount } }
+      }))
+      // Preserve failed rows for review; do not replay successful payment requests.
+      const successful = new Set(completed.map(item => item.key))
+      setPendingToggles(previous => Object.fromEntries(Object.entries(previous).filter(([key]) => !successful.has(key))))
+      setPendingToggleData(previous => Object.fromEntries(Object.entries(previous).filter(([key]) => !successful.has(key))))
     } finally {
-      if (!hasError) {
-        setPendingToggles({})
-        setPendingToggleData({})
-      }
       setIsSavingToggles(false)
-      // Delay loadData để chờ Firestore index cập nhật xong
-      setTimeout(() => {
-        loadData()
-      }, 1500)
+      setTimeout(() => { loadData() }, 1500)
     }
   }
 
@@ -293,16 +266,15 @@ export default function Tuition() {
     }
     const key = `${row.studentId}-${row.classId}`
     setCreatingRow(key)
+    setInvoiceResults([pendingResult(row, key)])
     try {
-      await api.post('/tuition/calculate', {
+      const { data } = await api.post('/tuition/calculate', {
         studentId: row.studentId, classId: row.classId, month, year,
       })
+      updateInvoiceResult(key, { phase: 'complete', recordId: data.id, workflow: responseWorkflow(data) })
       loadData()
     } catch (e: any) {
-      await showAlert({
-        title: 'Lỗi',
-        message: e?.response?.data?.message || (isRecalc ? 'Tính lại phiếu thất bại' : 'Tạo phiếu thất bại'),
-      })
+      updateInvoiceResult(key, { phase: 'request_failed', error: requestError(e) })
     } finally {
       setCreatingRow(null)
     }
@@ -319,6 +291,7 @@ export default function Tuition() {
 
   return (
     <div>
+      {invoiceResults && <InvoiceWorkflowResultDialog results={invoiceResults} onClose={() => setInvoiceResults(null)} />}
       <TopBar title="Quản lý Học phí" />
       <div className="px-8 py-8 space-y-8">
 
@@ -352,7 +325,6 @@ export default function Tuition() {
 
         <div className="space-y-8">
         {loadError && <div role="alert" className="text-red-700">{loadError} <button className="underline" onClick={loadData}>Thử lại</button></div>}
-        {dataSource === 'supabase-fallback' && <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Firebase đang chạm hạn mức đọc; đang hiển thị dữ liệu dự phòng từ Supabase.</div>}
         {/* Stats */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="bg-surface-container-lowest p-6 rounded-2xl shadow-sm border border-outline-variant/10">
@@ -472,18 +444,15 @@ export default function Tuition() {
                     const seen = new Set<string>()
                     let sttCounter = 0
 
-                    return filtered.map((r, rowIndex) => {
+                    return filtered.map((r) => {
                       const isFirst = !seen.has(r.studentId)
                       if (isFirst) { seen.add(r.studentId); sttCounter++ }
                       const span = spanMap[r.studentId]
 
                       return (
-                        <tr key={`${r.studentId}-${r.classId}-${rowIndex}`} className={`hover:bg-surface-container-low/30 transition-colors ${isFirst && sttCounter > 1 ? 'border-t border-outline-variant/10' : !isFirst ? 'border-t border-dashed border-outline-variant/10' : ''}`}>
+                        <tr key={`${r.studentId}-${r.classId}`} className={`hover:bg-surface-container-low/30 transition-colors ${isFirst && sttCounter > 1 ? 'border-t border-outline-variant/10' : !isFirst ? 'border-t border-dashed border-outline-variant/10' : ''}`}>
                           {isFirst && <td className="table-cell text-sm text-outline align-top" rowSpan={span}>{sttCounter}</td>}
-                          {isFirst && <td className="table-cell font-semibold text-on-surface align-top" rowSpan={span}>
-                            <div>{r.studentName}</div>
-                            {hasDuplicateName(r) && <div className="mt-1 text-[10px] font-medium text-outline" title={`Mã hồ sơ đầy đủ: ${r.studentId}`}>Mã HV · {r.studentId.slice(-6)}</div>}
-                          </td>}
+                          {isFirst && <td className="table-cell font-semibold text-on-surface align-top" rowSpan={span}>{r.studentName}</td>}
                           <td className="table-cell text-sm text-center">
                             {r.gradeLevel != null
                               ? <span className="inline-block px-2.5 py-0.5 rounded-full bg-primary/8 text-primary text-xs font-bold whitespace-nowrap">Lớp {r.gradeLevel}</span>

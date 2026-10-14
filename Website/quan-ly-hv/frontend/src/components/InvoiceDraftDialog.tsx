@@ -5,7 +5,7 @@ import api from '../services/api'
 interface Buyer { fullName: string; legalName: string; citizenIdNumber: string; address: string; email: string; phone: string }
 interface Template { id: string; name: string; series: string; templateNo: string }
 interface Source { recordId: string; studentId: string; studentName: string; className: string; month: number; year: number; baseAmount: number; discountAmount: number; finalAmount: number; paidAmount: number }
-interface Invoice { refId: string; status: string; invoiceNumber?: string; recordIds?: string[] }
+interface Invoice { lastErrorMessage?: string; refId: string; status: string; invoiceNumber?: string; recordIds?: string[] }
 const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date())
 const money = (value: number) => value.toLocaleString('vi-VN') + 'đ'
 const failure = (error: unknown) => isAxiosError(error) && typeof error.response?.data?.message === 'string'
@@ -31,7 +31,7 @@ export default function InvoiceDraftDialog({ recordId, recordIds, onClose, onCre
     api.get(path).then(({ data }) => {
       if (!active) return
       setSources(data.sources || [data.source]); setBuyer(data.suggestedBuyer)
-      if (['CREATING', 'DRAFT_CREATED', 'ISSUED', 'SENT_TO_TAX'].includes(data.invoice?.status)) {
+      if (['CREATING', 'OUTCOME_UNKNOWN', 'DRAFT_CREATED', 'ISSUED', 'SENT_TO_TAX'].includes(data.invoice?.status)) {
         setInvoice(data.invoice)
       }
     }).catch(error => { if (active) setError(failure(error)) }).finally(() => { if (active) setLoading(false) })
@@ -39,10 +39,11 @@ export default function InvoiceDraftDialog({ recordId, recordIds, onClose, onCre
   }, [recordId, grouped, recordIds?.join(',')])
   useEffect(() => {
     let active = true
+    setTemplatesError(''); setTemplateId(''); setTemplates([])
     api.get('/tuition/misa/templates', { params: { year: Number(invoiceDate.slice(0, 4)) } }).then(({ data }) => {
       if (!active) return
-      const available: Template[] = data.templates.filter((template: Template) => template.templateNo === '2')
-      setTemplates(available); setTemplateId(available.length === 1 ? available[0].id : '')
+      const available: Template[] = (data.templates ?? []).filter((template: Template) => template.templateNo === '2')
+      setTemplates(available); setTemplateId(data.defaultTemplate?.id ?? (available.length === 1 ? available[0].id : ''))
       if (!available.length) setTemplatesError('Không có mẫu hóa đơn bán hàng đang hoạt động cho năm đã chọn.')
     }).catch(error => { if (active) setTemplatesError(failure(error)) })
     return () => { active = false }
@@ -52,7 +53,7 @@ export default function InvoiceDraftDialog({ recordId, recordIds, onClose, onCre
     try {
       const path = grouped ? '/tuition/misa/invoices/group' : `/tuition/misa/invoices/${encodeURIComponent(recordId!)}`
       const { data } = await api.post(path, { ...(grouped ? { recordIds } : {}), buyer, invoiceDate, templateId, revision: 0 })
-      setInvoice(data.invoice); onCreated(data.invoice)
+      onCreated(data.invoice); if (data.invoice.status === 'FAILED') setError(data.invoice.lastErrorMessage || 'MISA từ chối tạo nháp.'); else setInvoice(data.invoice)
     } catch (error) { setError(failure(error)) } finally { setBusy(false) }
   }
   const fields = [['fullName', 'Người mua (phụ huynh / học viên)'], ['legalName', 'Tên đơn vị (nếu lấy hóa đơn cho đơn vị)'], ['citizenIdNumber', 'CCCD'], ['address', 'Địa chỉ người mua'], ['email', 'Email người mua'], ['phone', 'Số điện thoại']] as const
@@ -62,7 +63,7 @@ export default function InvoiceDraftDialog({ recordId, recordIds, onClose, onCre
         <p className="text-sm text-outline mt-1">Website gửi hóa đơn trực tiếp sang MISA. Thao tác này chỉ tạo bản nháp, chưa ký hoặc phát hành.</p></div>
         <button type="button" disabled={busy} onClick={onClose} aria-label="Đóng" className="p-2 rounded-lg hover:bg-surface-container-low">✕</button></div>
       {loading ? <p role="status">Đang tải phiếu học phí...</p> : sources.length > 0 && <>
-        {invoice ? <div role="status" className="rounded-xl bg-green-50 border border-green-200 p-4 space-y-1"><p className="font-semibold text-green-800">{invoice.status === 'CREATING' ? 'Đang xác minh yêu cầu tạo hóa đơn trên MISA' : 'Đã tạo hóa đơn nháp trên MISA'}</p><p>Mã tham chiếu: {invoice.refId}</p><p>Số hóa đơn: {invoice.invoiceNumber || 'Chưa cấp số'}</p><p>Chưa ký hoặc phát hành.</p></div> : <>
+        {invoice ? <div role="status" className="rounded-xl bg-green-50 border border-green-200 p-4 space-y-1"><p className="font-semibold">{({ CREATING: 'Đang xác minh yêu cầu MISA', OUTCOME_UNKNOWN: 'Chưa rõ kết quả; cần cập nhật trạng thái MISA', DRAFT_CREATED: 'Đã tạo hóa đơn nháp trên MISA', ISSUED: 'Hóa đơn đã phát hành trên MISA', SENT_TO_TAX: 'Hóa đơn đã gửi CQT' } as Record<string, string>)[invoice.status] || invoice.status}</p><p>Mã tham chiếu: {invoice.refId}</p><p>Số hóa đơn: {invoice.invoiceNumber || 'Chưa cấp số'}</p>{invoice.status === 'DRAFT_CREATED' && <p>Chưa ký hoặc phát hành.</p>}{invoice.lastErrorMessage && <p>{invoice.lastErrorMessage}</p>}</div> : <>
           <div className="bg-surface-container-low rounded-xl p-4 text-sm space-y-1"><p className="font-semibold">{sources[0].studentName}{grouped ? ` · ${sources.length} phiếu được gộp` : ` · ${sources[0].className} · tháng ${sources[0].month}/${sources[0].year}`}</p>
             {sources.map(source => <p key={source.recordId || source.className}>{source.className}: phiếu {money(source.finalAmount)} · đã thanh toán {money(source.paidAmount)}</p>)}
             {grouped && <p className="pt-1">Tổng cộng: <strong>{money(sources.reduce((sum, source) => sum + source.finalAmount, 0))}</strong></p>}</div>
