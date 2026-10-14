@@ -187,36 +187,13 @@ async function seed() {
 
   // ─── 9. Sessions mẫu (tháng 3/2026) ─────────────────────
   const sessionDates = ['2026-03-02', '2026-03-04', '2026-03-06', '2026-03-09', '2026-03-11', '2026-03-13']
-  const sessionIds: string[] = []
   for (const date of sessionDates) {
-    const ref = await db.collection(C.SESSIONS).add({
+    await db.collection(C.SESSIONS).add({
       classId: 'class-9a', className: 'Toán 9A - Tối T2/T4/T6',
       teacherId: 'teacher-an', teacherName: 'Nguyễn Văn An',
       sessionDate: date, startTime: '19:00', endTime: '21:00',
       status: date <= '2026-03-09' ? 'COMPLETED' : 'SCHEDULED',
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-    })
-    sessionIds.push(ref.id)
-  }
-
-  // ─── 10. Attendance mẫu ──────────────────────────────────
-  const completedSessions = sessionDates.slice(0, 4) // 4 buổi đã hoàn thành
-  for (let i = 0; i < completedSessions.length; i++) {
-    const sessionDate = completedSessions[i]
-    const sessionId = sessionIds[i]
-    // Điểm danh HV
-    for (const [sid, sname] of [['student-khoa', 'Lê Minh Khoa'], ['student-lan', 'Phạm Thị Lan']]) {
-      await db.collection(C.STUDENT_ATTENDANCES).add({
-        sessionId, sessionDate, classId: 'class-9a', className: 'Toán 9A - Tối T2/T4/T6',
-        studentId: sid, studentName: sname, status: 'PRESENT',
-        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-      })
-    }
-    // Chấm công GV
-    await db.collection(C.TEACHER_ATTENDANCES).add({
-      sessionId, sessionDate, classId: 'class-9a', className: 'Toán 9A - Tối T2/T4/T6',
-      teacherId: 'teacher-an', teacherName: 'Nguyễn Văn An', status: 'PRESENT',
-      createdAt: new Date().toISOString(),
     })
   }
 

@@ -45,202 +45,120 @@ const CLASS_COLORS = [
   { bg: 'bg-pink-50', border: 'border-pink-400', text: 'text-pink-900', badge: 'text-pink-600' },
 ]
 
-// ─── Attendance Modal ────────────────────────────────────────────────────────
+// ─── Session details ───────────────────────────────────────────────────────
 
-const STATUS_CFG: Record<string, { cls: string; label: string; icon: string }> = {
-  PRESENT: { cls: 'bg-secondary-container/40 text-secondary border-secondary/20', label: 'Có mặt', icon: 'check_circle' },
-  ABSENT:  { cls: 'bg-error-container/20 text-error border-error/20',             label: 'Vắng',    icon: 'cancel' },
-}
-
-function AttendanceModal({ session, onClose, onDone, onSessionUpdate }: {
+function SessionModal({ session, onClose, onDone, onSessionUpdate }: {
   session: Session
   onClose: () => void
   onDone: () => void
   onSessionUpdate?: (patch: Partial<Session>) => void
 }) {
-  const [attendances, setAttendances] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
   const [sessionStatus, setSessionStatus] = useState(session.status)
   const [teachers, setTeachers] = useState<any[]>([])
   const [teacherId, setTeacherId] = useState(session.teacherId ?? '')
-  const [teacherName, setTeacherName] = useState(session.teacherName ?? '')
   const [savingTeacher, setSavingTeacher] = useState(false)
-  const [savedTeacher, setSavedTeacher] = useState(false)
-
-  // Ngày session (YYYY-MM-DD local)
-  const todayLocal = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` })()
+  const [savingStatus, setSavingStatus] = useState(false)
+  const [error, setError] = useState('')
+  const { canManageClasses } = useAuth()
+  const todayLocal = toISO(new Date())
   const isPast = session.sessionDate <= todayLocal
-
-  const loadAttendances = async () => {
-    const r = await api.get(`/sessions/${session.id}`)
-    setAttendances(r.data.studentAttendances ?? [])
-    return r.data.studentAttendances ?? []
-  }
+  const isCancelled = sessionStatus === 'CANCELLED'
 
   useEffect(() => {
-    api.get('/teachers').then(r => setTeachers(Array.isArray(r.data) ? r.data : (r.data?.data ?? [])))
+    api.get('/teachers')
+      .then(r => setTeachers(Array.isArray(r.data) ? r.data : (r.data?.data ?? [])))
+      .catch(() => setTeachers([]))
   }, [])
 
   const handleTeacherChange = async (newTeacherId: string) => {
-    const t = teachers.find(t => t.id === newTeacherId)
-    setTeacherId(newTeacherId)
-    setTeacherName(t?.fullName ?? '')
     setSavingTeacher(true)
-    setSavedTeacher(false)
+    setError('')
     try {
       await api.put(`/sessions/${session.id}`, { teacherId: newTeacherId || null })
-      setSavedTeacher(true)
-      setTimeout(() => setSavedTeacher(false), 3000)
-      onSessionUpdate?.({ teacherId: newTeacherId || undefined, teacherName: t?.fullName ?? '' })
+      const teacherName = teachers.find(t => t.id === newTeacherId)?.fullName ?? ''
+      setTeacherId(newTeacherId)
+      onSessionUpdate?.({ teacherId: newTeacherId || undefined, teacherName })
+    } catch {
+      setError('Không thể cập nhật giáo viên. Vui lòng thử lại.')
     } finally {
       setSavingTeacher(false)
     }
   }
 
-  useEffect(() => {
-    const init = async () => {
-      // Nếu đã đến ngày và còn SCHEDULED → tự động hoàn thành + khởi tạo điểm danh
-      if (sessionStatus === 'SCHEDULED' && isPast) {
-        try {
-          await api.put(`/sessions/${session.id}/complete`, {})
-          setSessionStatus('COMPLETED')
-        } catch { /* ignore nếu đã complete */ }
-      }
-      // Retry tối đa 3 lần để tránh gọi complete 2 lần khi Firestore chưa cập nhật ngay
-      for (let i = 0; i < 3; i++) {
-        const atts = await loadAttendances()
-        if (atts.length > 0 || !isPast) break
-        if (i < 2) await new Promise(r => setTimeout(r, 600))
-      }
-      setLoading(false)
+  const handleComplete = async () => {
+    setSavingStatus(true)
+    setError('')
+    try {
+      await api.put(`/sessions/${session.id}/complete`, {})
+      setSessionStatus('COMPLETED')
+      onSessionUpdate?.({ status: 'COMPLETED' })
+    } catch {
+      setError('Không thể hoàn thành buổi học. Vui lòng thử lại.')
+    } finally {
+      setSavingStatus(false)
     }
-    init()
-  }, [session.id])
-
-  const handleAttStatus = async (attId: string, newStatus: string) => {
-    // Optimistic update
-    setAttendances(prev => prev.map(a => a.id === attId ? { ...a, status: newStatus } : a))
-    await api.put(`/attendance/${attId}`, { status: newStatus }).catch(() => loadAttendances())
   }
 
   const handleCancel = async () => {
     const reason = prompt('Lý do huỷ buổi học:')
     if (reason === null) return
-    await api.put(`/sessions/${session.id}/cancel`, { cancelReason: reason })
-    onDone()
-    onClose()
+    setSavingStatus(true)
+    setError('')
+    try {
+      await api.put(`/sessions/${session.id}/cancel`, { cancelReason: reason })
+      onDone()
+    } catch {
+      setError('Không thể huỷ buổi học. Vui lòng thử lại.')
+      setSavingStatus(false)
+    }
   }
-
-  const isCancelled = sessionStatus === 'CANCELLED' || session.status === 'CANCELLED'
-  const presentCount = attendances.filter(a => a.status === 'PRESENT').length
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-inverse-surface/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-lg bg-surface-container-lowest rounded-2xl shadow-2xl z-10 overflow-hidden">
-
-        {/* Header */}
-        <div className="p-6 border-b border-outline-variant/10">
-          <div className="flex items-start justify-between">
+      <div role="dialog" aria-modal="true" aria-labelledby="session-modal-title" className="relative z-10 w-full max-w-lg overflow-hidden rounded-2xl bg-surface-container-lowest shadow-2xl">
+        <div className="border-b border-outline-variant/15 px-6 py-5">
+          <div className="flex items-start justify-between gap-4">
             <div>
-              <h3 className="text-lg font-headline font-bold text-on-surface">{session.className}</h3>
-              <p className="text-sm text-outline mt-0.5">
+              <h3 id="session-modal-title" className="font-headline text-lg font-bold text-on-surface">{session.className}</h3>
+              <p className="mt-1 text-sm text-outline">
                 {new Date(session.sessionDate + 'T12:00:00').toLocaleDateString('vi-VN', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })}
                 {' • '}{session.startTime} – {session.endTime}
               </p>
             </div>
-            <div className="flex items-center gap-2">
-              <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ${
-                isCancelled ? 'bg-error-container/10 text-error' :
-                sessionStatus === 'COMPLETED' ? 'bg-secondary-container/30 text-secondary' :
-                'bg-primary-container/20 text-primary'
-              }`}>
-                {isCancelled ? 'Đã huỷ' : sessionStatus === 'COMPLETED' ? 'Hoàn thành' : 'Dự kiến'}
-              </span>
-              <button onClick={onClose} className="p-1.5 hover:bg-surface-container-low rounded-lg">
-                <span className="material-symbols-outlined text-sm">close</span>
-              </button>
-            </div>
-          </div>
-          {/* Teacher picker */}
-          <div className="flex items-center gap-2 mt-3">
-            <span className="material-symbols-outlined text-sm text-outline">person</span>
-            <span className="text-sm text-outline whitespace-nowrap">Giáo viên</span>
-            <select
-              value={teacherId}
-              onChange={e => handleTeacherChange(e.target.value)}
-              disabled={savingTeacher || isCancelled}
-              className="flex-1 text-sm bg-surface-container-low border border-outline-variant/20 rounded-lg px-2.5 py-1.5 text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
-            >
-              <option value="">-- Chưa phân công giáo viên --</option>
-              {teachers.map(t => <option key={t.id} value={t.id}>{t.fullName}</option>)}
-            </select>
-            {savingTeacher && <span className="material-symbols-outlined text-sm text-primary animate-spin">sync</span>}
-            {savedTeacher && !savingTeacher && <span className="text-xs font-semibold text-error whitespace-nowrap">Đã lưu giáo viên</span>}
+            <button type="button" onClick={onClose} aria-label="Đóng chi tiết buổi học" className="rounded-lg p-1.5 text-outline hover:bg-surface-container-low">
+              <span className="material-symbols-outlined text-xl">close</span>
+            </button>
           </div>
         </div>
 
-        {/* Attendance list */}
-        <div className="p-6 max-h-[360px] overflow-y-auto">
-          {loading ? (
-            <div className="flex flex-col items-center justify-center py-10 gap-3">
-              <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full"></div>
-              <p className="text-xs text-outline">Đang khởi tạo điểm danh...</p>
-            </div>
-          ) : isCancelled ? (
-            <div className="text-center py-8 text-outline">
-              <span className="material-symbols-outlined text-4xl block mb-2 opacity-30">event_busy</span>
-              <p className="text-sm">Buổi học đã bị huỷ</p>
-              {session.cancelReason && <p className="text-xs mt-1 text-error/70">{session.cancelReason}</p>}
-            </div>
-          ) : !isPast ? (
-            <div className="text-center py-8 text-outline">
-              <span className="material-symbols-outlined text-4xl block mb-2 opacity-30">event_upcoming</span>
-              <p className="text-sm font-medium">Buổi học chưa diễn ra</p>
-              <p className="text-xs mt-1">Điểm danh sẽ được khởi tạo tự động khi đến ngày</p>
-            </div>
-          ) : attendances.length === 0 ? (
-            <div className="text-center py-8 text-outline">
-              <span className="material-symbols-outlined text-4xl block mb-2 opacity-30">group_off</span>
-              <p className="text-sm">Chưa có học viên trong lớp</p>
-            </div>
+        <div className="space-y-5 px-6 py-5">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm text-on-surface-variant">Trạng thái buổi học</span>
+            <span className={`rounded-full px-3 py-1 text-xs font-semibold ${isCancelled ? 'bg-error/10 text-error' : sessionStatus === 'COMPLETED' ? 'bg-secondary-container/30 text-secondary' : 'bg-primary/10 text-primary'}`}>
+              {isCancelled ? 'Đã huỷ' : sessionStatus === 'COMPLETED' ? 'Hoàn thành' : 'Dự kiến'}
+            </span>
+          </div>
+          {isCancelled ? (
+            <p className="rounded-xl bg-error/5 p-3 text-sm text-on-surface-variant">{session.cancelReason ? `Lý do huỷ: ${session.cancelReason}` : 'Buổi học đã bị huỷ và không tính học phí.'}</p>
           ) : (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-[10px] font-bold text-outline uppercase tracking-wider">Điểm danh học viên</p>
-                <p className="text-xs font-bold text-secondary">{presentCount}/{attendances.length} có mặt</p>
-              </div>
-              {attendances.map((a: any) => (
-                <div key={a.id} className="flex items-center justify-between p-3 bg-surface-container-low rounded-xl">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs flex-shrink-0">
-                      {a.studentName?.split(' ').slice(-1)[0]?.[0]?.toUpperCase() ?? '?'}
-                    </div>
-                    <span className="text-sm font-medium text-on-surface">{a.studentName}</span>
-                  </div>
-                  <div className="flex gap-1">
-                    {(['PRESENT', 'ABSENT'] as const).map((s) => (
-                      <button key={s} onClick={() => handleAttStatus(a.id, s)}
-                        className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-all ${
-                          a.status === s ? STATUS_CFG[s].cls : 'bg-transparent border-transparent text-outline hover:bg-surface-container'
-                        }`}>
-                        {STATUS_CFG[s].label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
+            <div>
+              <label htmlFor="session-teacher" className="mb-1.5 block text-sm font-medium text-on-surface">Giáo viên phụ trách</label>
+              <select id="session-teacher" value={teacherId} onChange={e => handleTeacherChange(e.target.value)} disabled={savingTeacher || savingStatus}
+                className="w-full rounded-xl border border-outline-variant/30 bg-surface-container-low px-3 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-60">
+                <option value="">Chưa phân công</option>
+                {teachers.map(t => <option key={t.id} value={t.id}>{t.fullName}</option>)}
+              </select>
+              {savingTeacher && <p className="mt-1 text-xs text-outline">Đang lưu giáo viên...</p>}
             </div>
           )}
+          {error && <p role="alert" className="text-sm text-error">{error}</p>}
         </div>
 
-        {/* Footer */}
         {!isCancelled && (
-          <div className="px-6 pb-6">
-            <button onClick={handleCancel}
-              className="w-full py-2.5 text-sm font-bold rounded-xl bg-error/8 text-error hover:bg-error/15 transition-all border border-error/10">
-              Huỷ buổi học
-            </button>
+          <div className="flex flex-wrap justify-end gap-2 border-t border-outline-variant/15 px-6 py-4">
+            {canManageClasses && <button type="button" onClick={handleCancel} disabled={savingStatus} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-error hover:bg-error/10 disabled:opacity-50">Huỷ buổi học</button>}
+            {sessionStatus === 'SCHEDULED' && isPast && <button type="button" onClick={handleComplete} disabled={savingStatus} className="btn-primary disabled:opacity-50">{savingStatus ? 'Đang lưu...' : 'Đánh dấu hoàn thành'}</button>}
           </div>
         )}
       </div>
@@ -788,23 +706,24 @@ function DeleteClassModal({ cls, onClose, onDone }: {
   )
 }
 
-// ─── Auto-init attendance button ─────────────────────────────────────────────
+// ─── Complete past sessions without attendance ───────────────────────────────
 
-function AutoInitAttendanceBtn() {
+function CompletePastSessionsBtn({ onDone }: { onDone: () => void }) {
   const confirm = useConfirm()
   const alert = useAlert()
   const [loading, setLoading] = useState(false)
 
   const run = async () => {
     const ok = await confirm({
-      title: 'Khởi tạo điểm danh tự động',
-      message: 'Tự động khởi tạo điểm danh (mặc định Có mặt) cho tất cả buổi học đã qua chưa điểm danh?',
-      confirmLabel: 'Khởi tạo',
+      title: 'Hoàn thành các buổi đã qua',
+      message: 'Đánh dấu hoàn thành tất cả buổi học đã qua còn ở trạng thái Dự kiến?',
+      confirmLabel: 'Hoàn thành',
     })
     if (!ok) return
     setLoading(true)
     try {
-      const res = await api.post('/sessions/auto-init-attendance')
+      const res = await api.post('/sessions/complete-past')
+      onDone()
       await alert(res.data.message)
     } catch {
       await alert('Có lỗi xảy ra')
@@ -816,7 +735,7 @@ function AutoInitAttendanceBtn() {
   return (
     <button onClick={run} disabled={loading} className="btn-secondary disabled:opacity-60 flex items-center gap-2">
       <span className="material-symbols-outlined text-base">{loading ? 'hourglass_empty' : 'auto_fix_high'}</span>
-      {loading ? 'Đang xử lý...' : 'Điểm danh tự động'}
+      {loading ? 'Đang xử lý...' : 'Hoàn thành buổi đã qua'}
     </button>
   )
 }
@@ -951,7 +870,7 @@ export default function Classes() {
             <h2 className="text-4xl font-black text-on-surface font-headline tracking-tight">Quản Lý Lịch & Lớp Học</h2>
           </div>
           <div className="flex gap-2">
-            {canManageClasses && <AutoInitAttendanceBtn />}
+            {canManageClasses && <CompletePastSessionsBtn onDone={() => loadSessions(weekStart)} />}
             {canManageClasses && (
               <button onClick={() => setShowClassModal(true)} className="btn-primary">
                 <span className="material-symbols-outlined">add</span>Tạo lớp mới
@@ -1196,7 +1115,7 @@ export default function Classes() {
 
       {/* Modals */}
       {selectedSession && (
-        <AttendanceModal
+        <SessionModal
           session={selectedSession}
           onClose={() => setSelectedSession(null)}
           onDone={() => { setSelectedSession(null); loadSessions(weekStart) }}

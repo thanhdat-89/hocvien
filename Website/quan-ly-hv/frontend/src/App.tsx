@@ -10,7 +10,6 @@ import StudentProfile from './pages/StudentProfile'
 import Classes from './pages/Classes'
 import Tuition from './pages/Tuition'
 import EInvoices from './pages/EInvoices'
-import Attendance from './pages/Attendance'
 import Notifications from './pages/Notifications'
 import Leads from './pages/Leads'
 import PrivateSchedule from './pages/PrivateSchedule'
@@ -43,7 +42,7 @@ export default function App() {
 
             <Route path="/tuition" element={<RequireRole roles={['ADMIN', 'STAFF']}><Tuition /></RequireRole>} />
             <Route path="/tuition/invoices" element={<RequireRole roles={['ADMIN', 'STAFF']}><EInvoices /></RequireRole>} />
-            <Route path="/attendance" element={<RequireRole roles={['ADMIN', 'STAFF']}><Attendance /></RequireRole>} />
+            <Route path="/attendance" element={<Navigate to="/classes" replace />} />
             <Route path="/notifications" element={<RequireRole roles={['ADMIN', 'STAFF']}><Notifications /></RequireRole>} />
             <Route path="/leads" element={<RequireRole roles={['ADMIN', 'STAFF']}><Leads /></RequireRole>} />
             <Route path="/activity" element={<RequireRole roles={['ADMIN', 'STAFF']}><Activity /></RequireRole>} />

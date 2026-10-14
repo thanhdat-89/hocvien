@@ -11,7 +11,6 @@ import subjectRoutes from './routes/subjects'
 import classRoutes from './routes/classes'
 import scheduleRoutes from './routes/schedules'
 import sessionRoutes from './routes/sessions'
-import attendanceRoutes from './routes/attendance'
 import tuitionRoutes from './routes/tuition'
 import teacherRoutes from './routes/teachers'
 import dashboardRoutes from './routes/dashboard'
@@ -68,7 +67,6 @@ app.use('/api/subjects',   subjectRoutes)
 app.use('/api/classes',    classRoutes)
 app.use('/api/schedules',  scheduleRoutes)
 app.use('/api/sessions',   sessionRoutes)
-app.use('/api/attendance', attendanceRoutes)
 app.use('/api/tuition',    tuitionRoutes)
 app.use('/api/teachers',       teacherRoutes)
 app.use('/api/notifications',  notificationRouter)

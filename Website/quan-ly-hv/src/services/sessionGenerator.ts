@@ -1,5 +1,5 @@
 import { db, C, toDocs } from '../lib/firebase'
-import type { Schedule, Session, ClassEnrollment } from '../types/models'
+import type { Schedule } from '../types/models'
 
 const DAY_OF_WEEK_MAP: Record<string, number> = {
   SUNDAY: 0, MONDAY: 1, TUESDAY: 2, WEDNESDAY: 3,
@@ -131,59 +131,4 @@ export async function generateSessionsForClassMonth(
     total += await generateSessionsFromSchedule(s.id, start, end)
   }
   return total
-}
-
-/**
- * Khi session COMPLETED: khởi tạo StudentAttendance + TeacherAttendance mặc định PRESENT
- */
-export async function initAttendanceForSession(sessionId: string): Promise<void> {
-  const sessionDoc = await db.collection(C.SESSIONS).doc(sessionId).get()
-  if (!sessionDoc.exists) throw new Error('Không tìm thấy buổi học')
-  const session = { id: sessionDoc.id, ...sessionDoc.data() } as Session
-
-  // Học viên active trong lớp
-  const enrollSnap = await db.collection(C.ENROLLMENTS)
-    .where('classId', '==', session.classId)
-    .get()
-  const enrollments = toDocs<ClassEnrollment>(enrollSnap).filter(e => e.status === 'ACTIVE')
-
-  // Kiểm tra điểm danh đã có chưa
-  const existingSnap = await db.collection(C.STUDENT_ATTENDANCES)
-    .where('sessionId', '==', sessionId)
-    .get()
-  const existingStudentIds = new Set(existingSnap.docs.map(d => d.data().studentId as string))
-
-  const batch = db.batch()
-
-  for (const e of enrollments) {
-    if (existingStudentIds.has(e.studentId)) continue
-    existingStudentIds.add(e.studentId) // tránh duplicate khi enroll 2 lần
-    const ref = db.collection(C.STUDENT_ATTENDANCES).doc()
-    batch.set(ref, {
-      sessionId, sessionDate: session.sessionDate,
-      classId: session.classId, className: session.className,
-      studentId: e.studentId, studentName: e.studentName,
-      status: 'PRESENT', createdAt: now(), updatedAt: now(),
-    })
-  }
-
-  // Teacher attendance (chỉ tạo nếu lớp có giáo viên)
-  if (session.teacherId) {
-    const existingTeacherSnap = await db.collection(C.TEACHER_ATTENDANCES)
-      .where('sessionId', '==', sessionId)
-      .where('teacherId', '==', session.teacherId)
-      .limit(1).get()
-
-    if (existingTeacherSnap.empty) {
-      const ref = db.collection(C.TEACHER_ATTENDANCES).doc()
-      batch.set(ref, {
-        sessionId, sessionDate: session.sessionDate,
-        classId: session.classId, className: session.className,
-        teacherId: session.teacherId, teacherName: session.teacherName ?? '',
-        status: 'PRESENT', createdAt: now(),
-      })
-    }
-  }
-
-  await batch.commit()
 }

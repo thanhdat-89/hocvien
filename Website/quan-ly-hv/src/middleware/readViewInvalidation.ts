@@ -6,7 +6,7 @@ import { invalidateReadView, ViewKind } from '../services/readViews'
 export function readViewInvalidation(req: Request, res: Response, next: NextFunction) {
   const mutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)
   const studentOrClass = mutation && /^\/api\/(students|classes)(\/|$)/.test(req.path)
-  const financial = mutation && /^\/api\/(tuition|schedules|sessions|holidays|attendance|parents)(\/|$)/.test(req.path)
+  const financial = mutation && /^\/api\/(tuition|schedules|sessions|holidays|parents)(\/|$)/.test(req.path)
     && !/^\/api\/tuition\/misa(\/|$)/.test(req.path)
   const sepay = mutation && req.path === '/api/webhooks/sepay'
   const cron = req.method === 'GET' && req.path === '/api/schedules/cron/generate-monthly'

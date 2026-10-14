@@ -18,7 +18,7 @@ api.interceptors.response.use(
   (res) => {
     const mutation = ['post', 'put', 'patch', 'delete'].includes(res.config.method || '')
     const path = res.config.url || ''
-    if (mutation && /^\/(students|classes|tuition|schedules|sessions|holidays|attendance|parents)(\/|\?|$)/.test(path)
+    if (mutation && /^\/(students|classes|tuition|schedules|sessions|holidays|parents)(\/|\?|$)/.test(path)
       && !/^\/tuition\/misa(\/|$)/.test(path)) {
       // Mark inactive pages stale without adding requests to the user's write flow.
       void queryClient.invalidateQueries({ queryKey: ['dashboard'], refetchType: 'none' })

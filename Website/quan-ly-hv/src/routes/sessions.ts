@@ -3,7 +3,6 @@ import { db, C, s, toDocs, toObj } from '../lib/firebase'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
 import type { Session } from '../types/models'
-import { initAttendanceForSession } from '../services/sessionGenerator'
 
 const router = Router()
 router.use(authenticate)
@@ -53,17 +52,7 @@ router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) =
     const doc = await db.collection(C.SESSIONS).doc(s(req.params.id)).get()
     if (!doc.exists) { res.status(404).json({ message: 'Không tìm thấy buổi học' }); return }
 
-    const session = toObj<Session>(doc)
-    const [studentAttSnap, teacherAttSnap] = await Promise.all([
-      db.collection(C.STUDENT_ATTENDANCES).where('sessionId', '==', session.id).get(),
-      db.collection(C.TEACHER_ATTENDANCES).where('sessionId', '==', session.id).get(),
-    ])
-
-    res.json({
-      ...session,
-      studentAttendances: toDocs(studentAttSnap),
-      teacherAttendances: toDocs(teacherAttSnap),
-    })
+    res.json(toObj<Session>(doc))
   } catch (err) {
     next(err)
   }
@@ -161,35 +150,11 @@ router.put('/:id', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthReq
 
     await db.collection(C.SESSIONS).doc(sessionId).update(updates)
 
-    // Đồng bộ TeacherAttendance nếu session đã COMPLETED
-    if (teacherId !== undefined) {
-      const sessionDoc = await db.collection(C.SESSIONS).doc(sessionId).get()
-      const session = sessionDoc.data()!
-
-      // Xoá teacher attendance cũ (nếu có)
-      const oldAttSnap = await db.collection(C.TEACHER_ATTENDANCES)
-        .where('sessionId', '==', sessionId).get()
-      const delBatch = db.batch()
-      oldAttSnap.docs.forEach(d => delBatch.delete(d.ref))
-      await delBatch.commit()
-
-      // Tạo mới nếu có giáo viên mới
-      if (teacherId && session.status === 'COMPLETED') {
-        const newTeacherDoc = await db.collection(C.TEACHERS).doc(teacherId).get()
-        await db.collection(C.TEACHER_ATTENDANCES).add({
-          sessionId, sessionDate: session.sessionDate,
-          classId: session.classId, className: session.className,
-          teacherId, teacherName: newTeacherDoc.data()!.fullName ?? '',
-          status: 'PRESENT', createdAt: now(),
-        })
-      }
-    }
-
     res.json({ message: 'Đã cập nhật buổi học' })
   } catch (err) { next(err) }
 })
 
-// PUT /api/sessions/:id/complete — Hoàn thành buổi + khởi tạo điểm danh
+// PUT /api/sessions/:id/complete — Hoàn thành buổi học, không tạo điểm danh
 router.put('/:id/complete', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const sessionId = s(req.params.id)
@@ -198,16 +163,15 @@ router.put('/:id/complete', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req
       notes: req.body.notes ?? null,
       updatedAt: now(),
     })
-    await initAttendanceForSession(sessionId)
     const updated = toObj<Session>(await db.collection(C.SESSIONS).doc(sessionId).get())
-    res.json({ message: 'Đã hoàn thành buổi học và khởi tạo điểm danh', session: updated })
+    res.json({ message: 'Đã hoàn thành buổi học', session: updated })
   } catch (err) {
     next(err)
   }
 })
 
-// POST /api/sessions/auto-init-attendance — Tự động khởi tạo điểm danh cho tất cả buổi quá khứ chưa có
-router.post('/auto-init-attendance', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+// POST /api/sessions/complete-past — Hoàn thành các buổi đã qua, không tạo điểm danh
+router.post('/complete-past', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const today = new Date().toISOString().slice(0, 10)
 
@@ -219,7 +183,7 @@ router.post('/auto-init-attendance', requireRole('ADMIN', 'STAFF'), async (req: 
     const pastSessions = toDocs<Session>(sessionsSnap).filter(s => s.sessionDate <= today)
 
     if (pastSessions.length === 0) {
-      res.json({ message: 'Không có buổi học nào cần khởi tạo điểm danh', count: 0 })
+      res.json({ message: 'Không có buổi học đã qua nào cần hoàn thành', count: 0 })
       return
     }
 
@@ -228,11 +192,10 @@ router.post('/auto-init-attendance', requireRole('ADMIN', 'STAFF'), async (req: 
       await db.collection(C.SESSIONS).doc(session.id).update({
         status: 'COMPLETED', updatedAt: now(),
       })
-      await initAttendanceForSession(session.id)
       count++
     }
 
-    res.json({ message: `Đã khởi tạo điểm danh cho ${count} buổi học`, count })
+    res.json({ message: `Đã hoàn thành ${count} buổi học`, count })
   } catch (err) {
     next(err)
   }
