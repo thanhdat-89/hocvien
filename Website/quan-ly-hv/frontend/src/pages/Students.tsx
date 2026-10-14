@@ -628,7 +628,7 @@ export default function Students() {
                           ))}
                         </div>
                       ) : (
-                        <span className="text-sm text-slate-600">
+                        <span className="inline-flex max-w-full items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium leading-4 text-primary">
                           Học riêng
                         </span>
                       )}
