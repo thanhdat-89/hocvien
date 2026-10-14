@@ -30,6 +30,7 @@ import telegramRoutes from './routes/telegram'
 
 import { errorHandler, notFound } from './middleware/errorHandler'
 import { activityLogMiddleware } from './middleware/activityLog'
+import { readViewInvalidation } from './middleware/readViewInvalidation'
 
 const app = express()
 const PORT = process.env.PORT || 3000
@@ -40,6 +41,7 @@ app.use(cors())
 app.use(morgan('dev'))
 app.use(express.json())
 app.use(activityLogMiddleware)
+app.use(readViewInvalidation)
 
 // ─── Health check ─────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok' }))

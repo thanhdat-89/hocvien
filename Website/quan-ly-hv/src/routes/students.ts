@@ -6,6 +6,7 @@ import { computeTuitionSummary } from '../lib/tuition'
 import { requireRole } from '../middleware/auth'
 import { authenticate } from '../middleware/auth'
 import { activityContext } from '../middleware/activityContext'
+import { getMissingPrivateStudents, validPeriod } from '../services/readViews'
 import { AuthRequest } from '../types'
 import type { Student, ClassEnrollment, StudentAttendance, PrivateSession } from '../types/models'
 
@@ -277,6 +278,16 @@ router.get('/private-sessions/all', async (req: AuthRequest, res: Response, next
     const snap = await query.get()
     res.json(toDocs(snap))
   } catch (err) { next(err) }
+})
+
+// GET /api/students/private-schedule/missing — shared monthly eligibility view.
+router.get('/private-schedule/missing', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const month = Number(req.query.month), year = Number(req.query.year)
+    if (!validPeriod(month, year)) { res.status(400).json({ message: 'Tháng/năm không hợp lệ.' }); return }
+    res.setHeader('Cache-Control', 'no-store')
+    res.json(await getMissingPrivateStudents(month, year, String(req.query.version || ''), req.query.force === 'true'))
+  } catch (error) { next(error) }
 })
 
 // GET /api/students/:id — Hồ sơ chi tiết

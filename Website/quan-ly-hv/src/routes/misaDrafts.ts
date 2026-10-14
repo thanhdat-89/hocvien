@@ -6,6 +6,7 @@ import type { Payment, TuitionRecord } from '../types/models'
 import { InvoicePreviewError, invoiceSource, listInvoiceTemplates, readMisaInvoiceStatus } from '../services/misaInvoicePreview'
 import { chooseDefaultInvoiceTemplate, createTuitionMisaInvoice } from '../services/misaAutoDraft'
 import { notifyInvoiceCreated } from '../services/telegramService'
+import { getInvoiceList, invalidateReadView, invoiceBillingPeriods, validPeriod } from '../services/readViews'
 
 const router = Router()
 router.use(requireRole('ADMIN'))
@@ -43,6 +44,17 @@ router.get('/invoices/statuses', async (_req, res, next) => {
     })
     const invoices = Array.from(byRecordId.values())
     res.json({ invoices })
+  } catch (error) { next(error) }
+})
+
+router.get('/invoices', async (req, res, next) => {
+  try {
+    const month = Number(req.query.month), year = Number(req.query.year)
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 30))
+    if (!validPeriod(month, year) || !Number.isInteger(limit)) throw new InvoicePreviewError(400, 'Tháng/năm hoặc số dòng không hợp lệ.')
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined
+    if (cursor && (cursor.length > 1000 || !/^[A-Za-z0-9_-]+$/.test(cursor))) throw new InvoicePreviewError(400, 'Vị trí trang hóa đơn không hợp lệ.')
+    res.json(await getInvoiceList(month, year, limit, cursor, req.query.force === 'true'))
   } catch (error) { next(error) }
 })
 
@@ -90,17 +102,19 @@ router.post('/invoices/:recordId/refresh-status', async (req, res, next) => {
     if (!current.exists || !current.data()?.refId) throw new InvoicePreviewError(404, 'Chưa có hóa đơn MISA cho phiếu này.')
     const status = await readMisaInvoiceStatus(String(current.data()!.refId), fetch)
     const statusFields = Object.fromEntries(Object.entries(status).filter(([, value]) => value !== undefined))
-    const updated: any = { ...current.data(), ...statusFields, updatedAt: new Date().toISOString() }
+    const updated: any = { ...current.data(), ...statusFields, billingPeriods: invoiceBillingPeriods(current.data()), updatedAt: new Date().toISOString() }
     const ids = Array.isArray(updated.recordIds) ? updated.recordIds as string[] : [id]
     if (status.status === 'REMOVED_FROM_MISA') {
       // A removed grouped draft must be split so any one tuition record can be invoiced again.
       const invoices = ids.map(recordId => ({ ...updated, id: recordId, recordIds: [recordId],
         invoiceNumber: null, invoiceUrl: null, transactionId: null, invoiceCode: null }))
       await Promise.all(invoices.map(invoice => db.collection(draftsCollection).doc(invoice.id).set(invoice)))
+      await invalidateReadView('invoices')
       res.json({ invoice: invoices.find(invoice => invoice.id === id), invoices })
       return
     }
     await Promise.all(ids.map(recordId => db.collection(draftsCollection).doc(recordId).set(updated)))
+    await invalidateReadView('invoices')
     if (['CREATING', 'OUTCOME_UNKNOWN'].includes(current.data()!.status) && updated.status === 'DRAFT_CREATED') {
       notifyInvoiceCreated(updated)
     }

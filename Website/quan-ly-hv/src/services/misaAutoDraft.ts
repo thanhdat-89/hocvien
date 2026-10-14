@@ -3,6 +3,7 @@ import { db, C, toDocs, toObj } from '../lib/firebase'
 import type { Payment, TuitionRecord } from '../types/models'
 import { InvoicePreviewError, invoiceSource, listInvoiceTemplates, validateDraftInput, InvoiceTemplate, MisaInvoiceRecord, createMisaDraft } from './misaInvoicePreview'
 import { notifyInvoiceCreated, notifyInvoiceCreationFailed } from './telegramService'
+import { invalidateReadView, invoiceBillingPeriods } from './readViews'
 
 export function chooseDefaultInvoiceTemplate(templates: InvoiceTemplate[]) {
   const id = process.env.MEINVOICE_DEFAULT_TEMPLATE_ID?.trim()
@@ -75,16 +76,19 @@ async function createTuitionMisaInvoiceInternal(recordIds: string[], actorId: st
     const at = new Date().toISOString()
     const invoice: MisaInvoiceRecord = { id: recordIds[0], recordIds, refId: randomUUID(), status: 'CREATING',
       source: sources[0], sources, template, buyer: input.buyer, invoiceDate: input.invoiceDate, revision: 0, createdAt: at, updatedAt: at, createdBy: actorId }
-    refs.forEach(r => tx.set(r.invoice, invoice))
-    return { invoice, alreadyExists: false }
+    const storedInvoice = { ...invoice, billingPeriods: invoiceBillingPeriods(invoice) }
+    refs.forEach(r => tx.set(r.invoice, storedInvoice))
+    return { invoice: storedInvoice, alreadyExists: false }
   })
   if (reserved.alreadyExists) return reserved
+  await invalidateReadView('invoices')
   try {
     // The active template was validated above, before reserving these records.
     // Reuse it rather than repeating developer-API authentication and lookup.
     const created = await createMisaDraft(reserved.invoice, request)
     const invoice = { ...reserved.invoice, invoiceNumber: created.invoiceNumber, invoiceCode: '', transactionId: created.transactionId || reserved.invoice.refId, status: 'DRAFT_CREATED' as const, updatedAt: new Date().toISOString() }
     await Promise.all(refs.map(r => r.invoice.set(invoice)))
+    await invalidateReadView('invoices')
     notifyInvoiceCreated(invoice)
     return { invoice, alreadyExists: false }
   } catch (error) {
@@ -92,6 +96,7 @@ async function createTuitionMisaInvoiceInternal(recordIds: string[], actorId: st
     const invoice = { ...reserved.invoice, status: known ? 'FAILED' as const : 'OUTCOME_UNKNOWN' as const,
       lastErrorMessage: error instanceof InvoicePreviewError ? error.message : 'Chưa xác định được kết quả MISA; cần đối chiếu RefID.', updatedAt: new Date().toISOString() }
     await Promise.all(refs.map(r => r.invoice.set(invoice)))
+    await invalidateReadView('invoices')
     return { invoice, alreadyExists: false }
   }
 }

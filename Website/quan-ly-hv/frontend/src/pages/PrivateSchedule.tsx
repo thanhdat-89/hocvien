@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { Student } from '../types'
 import { useAuth } from '../hooks/useAuth'
@@ -239,37 +239,52 @@ export default function PrivateSchedule() {
   const [monthKey, setMonthKey] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit' }))
   const [monthYear, monthNumber] = monthKey.split('-').map(Number)
 
-  const loadMissingStudents = useCallback(async () => {
-    setMissingLoading(true)
+  const missingVersion = useRef({ month: '', version: '' })
+  const missingRequest = useRef(0)
+  const missingInFlight = useRef(false)
+
+  const loadMissingStudents = useCallback(async (force = false) => {
+    if (missingInFlight.current && !force) return
+    const request = ++missingRequest.current
+    missingInFlight.current = true
     setMissingError('')
+    if (force || missingVersion.current.month !== monthKey) setMissingLoading(true)
     try {
-      const lastDay = new Date(monthYear, monthNumber, 0).getDate()
-      const [first, monthly] = await Promise.all([
-        api.get('/students?page=1&limit=20'),
-        api.get(`/students/private-sessions/all?fromDate=${monthKey}-01&toDate=${monthKey}-${lastDay}`),
-      ])
-      const pages = await Promise.all(Array.from({ length: first.data.totalPages - 1 }, (_, i) => api.get(`/students?page=${i + 2}&limit=20`)))
-      const students: Student[] = [...first.data.data, ...pages.flatMap(r => r.data.data)]
-      if (!Array.isArray(monthly.data) || students.length !== first.data.total) throw new Error('Incomplete data')
-      const scheduled = new Set((monthly.data as PrivateSession[]).map(session => session.studentId))
-      setMissingStudents(students.filter(student => !student.enrollments?.length && !scheduled.has(student.id)))
+      const version = missingVersion.current.month === monthKey ? missingVersion.current.version : ''
+      const { data } = await api.get('/students/private-schedule/missing', {
+        params: { month: monthNumber, year: monthYear, version, ...(force ? { force: true } : {}) },
+      })
+      if (request !== missingRequest.current) return
+      if (!data.unchanged) setMissingStudents(Array.isArray(data.data) ? data.data : [])
+      missingVersion.current = { month: monthKey, version: data.version }
     } catch {
-      setMissingError('Không thể tải danh sách học viên chưa có lịch. Vui lòng thử lại.')
+      if (request === missingRequest.current) setMissingError('Không thể tải danh sách học viên chưa có lịch. Vui lòng thử lại.')
     } finally {
-      setMissingLoading(false)
+      if (request === missingRequest.current) { setMissingLoading(false); missingInFlight.current = false }
     }
   }, [monthKey, monthYear, monthNumber])
 
-  useEffect(() => { void loadMissingStudents() }, [loadMissingStudents])
+  useEffect(() => {
+    missingInFlight.current = false
+    void loadMissingStudents()
+  }, [loadMissingStudents])
   useEffect(() => {
     const refresh = () => {
+      if (document.visibilityState !== 'visible') return
       const key = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit' })
       setMonthKey(key)
       if (key === monthKey) void loadMissingStudents()
     }
     window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refresh)
     const timer = window.setInterval(refresh, 60000)
-    return () => { window.removeEventListener('focus', refresh); window.clearInterval(timer) }
+    return () => {
+      missingRequest.current++
+      missingInFlight.current = false
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', refresh)
+      window.clearInterval(timer)
+    }
   }, [monthKey, loadMissingStudents])
 
   const loadSessions = useCallback((ws: Date) => {
@@ -506,7 +521,7 @@ export default function PrivateSchedule() {
         studentId={privateStudent.id}
         studentName={privateStudent.fullName}
         onClose={() => setPrivateStudent(null)}
-        onSaved={() => { setPrivateStudent(null); loadSessions(weekStart); void loadMissingStudents() }}
+        onSaved={() => { setPrivateStudent(null); loadSessions(weekStart); void loadMissingStudents(true) }}
       />}
 
       {selected && (
@@ -516,7 +531,7 @@ export default function PrivateSchedule() {
           onDeleted={() => {
             setSelected(null)
             loadSessions(weekStart)
-            void loadMissingStudents()
+            void loadMissingStudents(true)
           }}
           onUpdated={(patch) => {
             setSessions(prev => prev.map(s => s.id === selected.id ? { ...s, ...patch } : s))

@@ -1,29 +1,45 @@
 import { useEffect, useRef, useState } from 'react'
 import TopBar from '../components/TopBar'
-import EInvoicePreparation from '../components/EInvoicePreparation'
+import EInvoicePreparation, { InvoiceRow } from '../components/EInvoicePreparation'
 import api from '../services/api'
 
 export default function EInvoices() {
   const thisYear = new Date().getFullYear()
   const [month, setMonth] = useState(new Date().getMonth() + 1)
   const [year, setYear] = useState(thisYear)
-  const [rows, setRows] = useState<any[]>([])
+  const [rows, setRows] = useState<InvoiceRow[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const latestRequest = useRef(0)
+  const [counts, setCounts] = useState<Record<string, number>>({})
+  const [total, setTotal] = useState(0)
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
   const years = Array.from({ length: 4 }, (_, i) => thisYear - 1 + i)
 
-  const loadData = () => {
+  const loadData = async (cursor?: string, force = false) => {
     const request = ++latestRequest.current
-    setLoading(true)
+    if (cursor) setLoadingMore(true); else setLoading(true)
     setError(null)
-    api.get(`/tuition/schedule-summary?month=${month}&year=${year}`)
-      .then(({ data }) => { if (request === latestRequest.current) setRows(data) })
-      .catch(() => { if (request === latestRequest.current) { setRows([]); setError('Không tải được dữ liệu học phí.') } })
-      .finally(() => { if (request === latestRequest.current) setLoading(false) })
+    try {
+      const { data } = await api.get('/tuition/misa/invoices', { params: { month, year, limit: 30, cursor, ...(force ? { force: true } : {}) } })
+      if (request !== latestRequest.current) return
+      setRows(previous => cursor ? [...previous, ...data.rows] : data.rows)
+      setCounts(data.counts); setTotal(data.total); setNextCursor(data.nextCursor)
+    } catch (error: any) {
+      if (request !== latestRequest.current) return
+      if (cursor && error.response?.status === 409) { void loadData(); return }
+      setError('Không tải được danh sách hóa đơn. Vui lòng thử lại.')
+    } finally {
+      if (request === latestRequest.current) { setLoading(false); setLoadingMore(false) }
+    }
   }
 
-  useEffect(() => { loadData() }, [month, year])
+  useEffect(() => {
+    setRows([]); setNextCursor(null)
+    void loadData()
+    return () => { latestRequest.current++ }
+  }, [month, year])
 
   return (
     <div>
@@ -45,7 +61,7 @@ export default function EInvoices() {
             </select>
           </div>
         </div>
-        <EInvoicePreparation rows={rows} loading={loading} error={error} month={month} year={year} retry={loadData} />
+        <EInvoicePreparation rows={rows} counts={counts} total={total} loading={loading} error={error} month={month} year={year} retry={() => { void loadData(undefined, true) }} loadMore={nextCursor ? () => { void loadData(nextCursor) } : undefined} loadingMore={loadingMore} />
       </div>
     </div>
   )
