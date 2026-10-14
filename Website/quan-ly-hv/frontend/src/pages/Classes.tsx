@@ -880,7 +880,7 @@ export default function Classes() {
   const todayStr = toISO(new Date())
 
   // Collect unique time slots sorted
-  const timeSlots = [...new Set(sessions.map((s) => s.startTime))].sort()
+  const timeSlots = [...new Set(sessions.map((s) => s.startTime))].sort((a, b) => a.localeCompare(b, 'vi', { numeric: true }))
 
   // Map: day ISO → time → sessions[]
   const grid: Record<string, Record<string, Session[]>> = {}
@@ -1016,83 +1016,78 @@ export default function Classes() {
               </div>
             </div>
 
-            {/* Weekly grid */}
-            <div className="bg-surface-container-lowest rounded-2xl shadow-sm overflow-hidden overflow-x-auto">
-              <table className="w-full border-collapse min-w-[700px]">
-                <thead>
-                  <tr className="bg-surface-container-low/60">
-                    <th className="p-4 text-left border-r border-outline-variant/10 w-20">
-                      <span className="text-[10px] uppercase tracking-widest text-outline font-bold">Giờ</span>
-                    </th>
-                    {weekDays.map((day, i) => {
+            {/* Days run vertically; start times run horizontally. Keep the day label visible while scrolling. */}
+            <div className="overflow-hidden rounded-2xl border border-outline-variant/15 bg-surface-container-lowest shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full table-fixed border-collapse" style={{ minWidth: Math.max(700, 136 + timeSlots.length * 190) }}>
+                  <colgroup>
+                    <col style={{ width: 136 }} />
+                    {timeSlots.map(time => <col key={time} />)}
+                  </colgroup>
+                  <thead>
+                    <tr className="bg-surface-container-low/70">
+                      <th scope="col" className="sticky left-0 z-20 border-r border-outline-variant/15 bg-surface-container-low px-4 py-3.5 text-left text-xs font-semibold text-on-surface-variant">Thứ / ngày</th>
+                      {timeSlots.map(time => (
+                        <th scope="col" key={time} className="border-r border-outline-variant/10 px-3 py-3.5 text-left text-sm font-bold tabular-nums text-on-surface last:border-r-0">
+                          {time}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-outline-variant/15">
+                    {timeSlots.length === 0 ? (
+                      <tr>
+                        <td className="py-16 text-center text-outline">
+                          <span className="material-symbols-outlined mb-2 block text-4xl opacity-30">event_busy</span>
+                          <p className="text-sm font-medium">Không có buổi học trong tuần này</p>
+                          <p className="mt-1 text-xs">Chọn tuần khác hoặc tạo buổi học từ tab "Danh sách lớp học"</p>
+                        </td>
+                      </tr>
+                    ) : weekDays.map((day, i) => {
                       const iso = toISO(day)
                       const isToday = iso === todayStr
+                      const dayCount = sessions.filter(s => s.sessionDate === iso).length
                       return (
-                        <th key={iso} className={`p-3 text-center border-r border-outline-variant/10 last:border-r-0 ${isToday ? 'bg-primary/5' : ''}`}>
-                          <p className={`text-[10px] font-semibold ${isToday ? 'text-primary' : 'text-outline'}`}>{DAY_LABELS[i]}</p>
-                          <p className={`text-lg font-black mt-0.5 ${isToday ? 'text-primary' : 'text-on-surface'}`}>{day.getDate()}</p>
-                        </th>
+                        <tr key={iso} className={isToday ? 'bg-primary/[0.025]' : ''}>
+                          <th scope="row" className={`sticky left-0 z-10 border-r border-outline-variant/15 px-4 py-4 text-left align-top ${isToday ? 'bg-blue-50' : 'bg-surface-container-lowest'}`}>
+                            <span className={`block text-xs font-semibold ${isToday ? 'text-primary' : 'text-on-surface-variant'}`}>{DAY_LABELS[i]}</span>
+                            <span className={`mt-1 block font-headline text-xl font-bold tabular-nums ${isToday ? 'text-primary' : 'text-on-surface'}`}>{day.getDate()}/{day.getMonth() + 1}</span>
+                            <span className="mt-1 block text-[11px] font-normal text-outline">{dayCount} buổi học</span>
+                          </th>
+                          {timeSlots.map(time => {
+                            const daySessions = grid[iso]?.[time] ?? []
+                            return (
+                              <td key={time} className="border-r border-outline-variant/10 px-2.5 py-3 align-top last:border-r-0">
+                                <div className="flex flex-col gap-2">
+                                  {daySessions.map(s => {
+                                    const color = classColorMap[s.classId] ?? CLASS_COLORS[0]
+                                    const isCancelled = s.status === 'CANCELLED'
+                                    return (
+                                      <button key={s.id} type="button" onClick={() => setSelectedSession(s)}
+                                        className={`w-full rounded-xl border-l-4 p-2.5 text-left transition-all hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${color.bg} ${color.border} ${isCancelled ? 'opacity-50' : ''}`}
+                                      >
+                                        <span className={`block text-xs font-bold leading-snug ${color.text} ${isCancelled ? 'line-through' : ''}`}>{s.className}</span>
+                                        <span className={`mt-1.5 flex items-center justify-between gap-1 text-[11px] ${color.badge}`}>
+                                          <span>{s.startTime}–{s.endTime}</span>
+                                          {s.status === 'COMPLETED' && <span className="material-symbols-outlined text-sm text-secondary" title="Hoàn thành">check_circle</span>}
+                                          {isCancelled && <span className="material-symbols-outlined text-sm text-error" title="Đã huỷ">cancel</span>}
+                                        </span>
+                                        {s.teacherName && <span className={`mt-1 block truncate text-[11px] ${color.badge}`}>{s.teacherName}</span>}
+                                      </button>
+                                    )
+                                  })}
+                                  {daySessions.length === 0 && <span className="py-3 text-center text-sm text-outline/40" aria-label="Không có buổi học">—</span>}
+                                </div>
+                              </td>
+                            )
+                          })}
+                        </tr>
                       )
                     })}
-                  </tr>
-                </thead>
-                <tbody>
-                  {timeSlots.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="py-20 text-center text-outline">
-                        <span className="material-symbols-outlined text-5xl block mb-3 opacity-20">event_busy</span>
-                        <p className="text-sm font-medium">Không có buổi học trong tuần này</p>
-                        <p className="text-xs mt-1">Chọn tuần khác hoặc tạo buổi học từ tab "Danh sách lớp học"</p>
-                      </td>
-                    </tr>
-                  ) : (
-                    timeSlots.map((time) => (
-                      <tr key={time} className="border-t border-outline-variant/10">
-                        <td className="p-3 text-xs font-medium text-outline border-r border-outline-variant/10 align-top w-20">
-                          {time}
-                        </td>
-                        {weekDays.map((day) => {
-                          const iso = toISO(day)
-                          const isToday = iso === todayStr
-                          const daySessions = grid[iso]?.[time] ?? []
-                          return (
-                            <td key={iso} className={`p-2 border-r border-outline-variant/10 last:border-r-0 align-top min-w-[120px] ${isToday ? 'bg-primary/5' : ''}`}>
-                              {daySessions.map((s) => {
-                                const color = classColorMap[s.classId] ?? CLASS_COLORS[0]
-                                const isCancelled = s.status === 'CANCELLED'
-                                return (
-                                  <button
-                                    key={s.id}
-                                    onClick={() => setSelectedSession(s)}
-                                    className={`w-full text-left p-2.5 rounded-xl ${color.bg} border-l-4 ${color.border} space-y-1.5 mb-2 hover:shadow-md transition-all ${isCancelled ? 'opacity-50' : ''}`}
-                                  >
-                                    <p className={`text-xs font-bold ${color.text} leading-tight`}>
-                                      {isCancelled ? <span className="line-through">{s.className}</span> : s.className}
-                                    </p>
-                                    <div className="flex items-center justify-between gap-1">
-                                      <span className={`text-[10px] ${color.badge} flex items-center gap-0.5`}>
-                                        <span className="material-symbols-outlined text-[11px]">person</span>
-                                        {s.teacherName?.split(' ').slice(-1)[0] ?? ''}
-                                      </span>
-                                      {s.status === 'COMPLETED' && (
-                                        <span className="material-symbols-outlined text-[14px] text-secondary">check_circle</span>
-                                      )}
-                                      {s.status === 'CANCELLED' && (
-                                        <span className="material-symbols-outlined text-[14px] text-error">cancel</span>
-                                      )}
-                                    </div>
-                                    <p className={`text-[10px] ${color.badge}`}>{s.startTime}–{s.endTime}</p>
-                                  </button>
-                                )
-                              })}
-                            </td>
-                          )
-                        })}
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                  </tbody>
+                </table>
+              </div>
+              {timeSlots.length > 2 && <p className="border-t border-outline-variant/10 px-4 py-2 text-xs text-outline lg:hidden">Vuốt ngang để xem các khung giờ khác.</p>}
             </div>
           </div>
         )}
