@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import TopBar from '../components/TopBar'
 import api from '../services/api'
+import { settleWithConcurrency } from '../services/settleWithConcurrency'
 import * as XLSX from 'xlsx'
 import { buildInvoiceWorkbook } from '../lib/invoiceExport'
 import { useAlert, useConfirm } from '../components/ConfirmDialog'
@@ -127,6 +128,7 @@ export default function Tuition() {
   // Toggles local state
   const [pendingToggles, setPendingToggles] = useState<Record<string, boolean>>({})
   const [isSavingToggles, setIsSavingToggles] = useState(false)
+  const savingBatch = useRef(false)
 
   const showAlert = useAlert()
   const showConfirm = useConfirm()
@@ -168,45 +170,67 @@ export default function Tuition() {
 
   const handleSaveToggles = async () => {
     const keys = Object.keys(pendingToggles)
-    if (keys.length === 0) return
+    if (keys.length === 0 || savingBatch.current) return
+    savingBatch.current = true
     setIsSavingToggles(true)
+    const uncertain = new Set<string>()
     setInvoiceResults(keys.map(key => {
       const [studentId, classId] = key.split('___')
       const row = rows.find(item => item.studentId === studentId && item.classId === classId)
-      return row ? pendingResult(row, key) : { key, studentName: 'Học viên', className: classId, month, year, phase: 'processing' }
+      return row ? { ...pendingResult(row, key), phase: 'queued' } : { key, studentName: 'Học viên', className: classId, month, year, phase: 'queued' }
     }))
     try {
-      const settled = await Promise.allSettled(keys.map(async key => {
+      const settled = await settleWithConcurrency(keys, async key => {
         const [studentId, classId] = key.split('___')
+        updateInvoiceResult(key, { phase: 'processing' })
         try {
           const { data } = await api.post('/tuition/toggle-paid', {
             studentId, classId, month, year, paid: pendingToggles[key],
             tuitionRecordId: pendingToggleData[key]?.tuitionRecordId || undefined,
-          })
+          }, { timeout: 70_000 })
           updateInvoiceResult(key, { phase: 'complete', recordId: data.recordId, workflow: responseWorkflow(data) })
-          return { key, recordId: data.recordId }
-        } catch (error) {
-          updateInvoiceResult(key, { phase: 'request_failed', error: requestError(error) })
+          return { key, recordId: data.recordId, finalStatus: data.finalStatus }
+        } catch (error: any) {
+          const ambiguous = !error.response || error.response.status >= 500 || error.response.status === 408
+          if (ambiguous) {
+            uncertain.add(key)
+            try {
+              const { data } = await api.get('/tuition/workflow-result', { params: {
+                studentId, classId, month, year, recordId: pendingToggleData[key]?.tuitionRecordId,
+              }, timeout: 10_000 })
+              if (data.paid === pendingToggles[key]) {
+                updateInvoiceResult(key, { phase: 'complete', recordId: data.recordId, workflow: responseWorkflow(data) })
+                return { key, recordId: data.recordId, finalStatus: data.finalStatus }
+              }
+              updateInvoiceResult(key, { phase: 'request_failed', recordId: data.recordId,
+                error: 'Mất phản hồi khi lưu. Trạng thái thanh toán chưa khớp; kiểm tra phiếu trước khi thực hiện lại.' })
+            } catch {
+              updateInvoiceResult(key, { phase: 'request_failed', error: 'Chưa đối chiếu được kết quả. Phiếu hoặc hóa đơn có thể đã lưu; kiểm tra danh sách trước khi thực hiện lại.' })
+            }
+          } else updateInvoiceResult(key, { phase: 'request_failed', error: requestError(error) })
           throw error
         }
-      }))
+      }, 2)
       const completed = settled.flatMap(result => result.status === 'fulfilled' ? [result.value] : [])
       setRows(previous => previous.map(row => {
         const key = `${row.studentId}___${row.classId}`
         const result = completed.find(item => item.key === key)
         if (!result) return row
         const paid = pendingToggles[key]
+        const status = result.finalStatus
         return { ...row, tuitionRecord: { id: result.recordId || row.tuitionRecord?.id || '',
-          finalAmount: row.finalAmount, status: paid ? 'PAID' : 'PENDING',
-          paidAmount: paid ? row.finalAmount : 0, remainingAmount: paid ? 0 : row.finalAmount } }
+          finalAmount: status?.finalAmount ?? row.finalAmount,
+          status: status ? (status.remaining <= 0 ? 'PAID' : status.totalPaid > 0 ? 'PARTIAL' : 'PENDING') : paid ? 'PAID' : 'PENDING',
+          paidAmount: status?.totalPaid ?? (paid ? row.finalAmount : 0), remainingAmount: Math.max(0, status?.remaining ?? (paid ? 0 : row.finalAmount)) } }
       }))
-      // Preserve failed rows for review; do not replay successful payment requests.
-      const successful = new Set(completed.map(item => item.key))
+      // Unknown outcomes must be reviewed after a fresh read, never replayed from this batch.
+      const successful = new Set([...completed.map(item => item.key), ...uncertain])
       setPendingToggles(previous => Object.fromEntries(Object.entries(previous).filter(([key]) => !successful.has(key))))
       setPendingToggleData(previous => Object.fromEntries(Object.entries(previous).filter(([key]) => !successful.has(key))))
     } finally {
+      savingBatch.current = false
       setIsSavingToggles(false)
-      setTimeout(() => { loadData() }, 1500)
+      setTimeout(() => { loadData(uncertain.size > 0) }, 1500)
     }
   }
 
@@ -278,7 +302,7 @@ export default function Tuition() {
     try {
       const { data } = await api.post('/tuition/calculate', {
         studentId: row.studentId, classId: row.classId, month, year,
-      })
+      }, { timeout: 70_000 })
       updateInvoiceResult(key, { phase: 'complete', recordId: data.id, workflow: responseWorkflow(data) })
       loadData()
     } catch (e: any) {

@@ -2,10 +2,11 @@ import { useEffect, useRef } from 'react'
 
 export interface InvoiceWorkflowResult {
   key: string; studentName: string; className: string; month: number; year: number
-  phase: 'processing' | 'complete' | 'request_failed'; recordId?: string; error?: string
+  phase: 'queued' | 'processing' | 'complete' | 'request_failed'; recordId?: string; error?: string
   workflow?: { enabled?: boolean; status?: string; message?: string; refId?: string; transactionId?: string }
 }
 export function invoiceWorkflowLabel(result: InvoiceWorkflowResult) {
+  if (result.phase === 'queued') return 'Phiếu đang chờ đến lượt xử lý.'
   if (result.phase === 'processing') return 'Đang lưu phiếu và chờ kết quả xử lý hóa đơn từ MISA…'
   if (result.phase === 'request_failed') return result.error || 'Không nhận được kết quả. Kiểm tra phiếu đã lưu trước khi thử lại.'
   const workflow = result.workflow
@@ -32,6 +33,7 @@ export function invoiceWorkflowLabel(result: InvoiceWorkflowResult) {
 }
 type ResultTone = 'success' | 'error' | 'pending' | 'review'
 function resultPresentation(result: InvoiceWorkflowResult): { tone: ResultTone; label: string; icon: string } {
+  if (result.phase === 'queued') return { tone: 'pending', label: 'Chờ đến lượt', icon: 'schedule' }
   if (result.phase === 'processing') return { tone: 'pending', label: 'Đang xử lý', icon: 'progress_activity' }
   if (result.phase === 'request_failed') return { tone: 'review', label: 'Chưa nhận được kết quả', icon: 'help' }
   if (result.workflow?.enabled === false) return { tone: 'review', label: 'Đã lưu phiếu học phí', icon: 'info' }
@@ -50,8 +52,8 @@ const toneStyles: Record<ResultTone, { panel: string; badge: string; icon: strin
 }
 export default function InvoiceWorkflowResultDialog({ results, onClose }: { results: InvoiceWorkflowResult[]; onClose: () => void }) {
   const closeRef = useRef<HTMLButtonElement>(null)
-  const running = results.some(result => result.phase === 'processing')
-  const completed = results.filter(result => result.phase !== 'processing').length
+  const running = results.some(result => result.phase === 'processing' || result.phase === 'queued')
+  const completed = results.filter(result => result.phase === 'complete' || result.phase === 'request_failed').length
   const count = (tone: ResultTone) => results.filter(result => resultPresentation(result).tone === tone).length
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null
@@ -59,7 +61,7 @@ export default function InvoiceWorkflowResultDialog({ results, onClose }: { resu
     document.body.style.overflow = 'hidden'; closeRef.current?.focus()
     return () => { document.body.style.overflow = overflow; previous?.focus() }
   }, [])
-  return <div className="fixed inset-0 z-50 bg-slate-950/45 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6" onKeyDown={event => {
+  return <div className="fixed inset-0 z-[100] bg-slate-950/45 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6" onKeyDown={event => {
     if (event.key === 'Escape' && !running) onClose()
     if (event.key === 'Tab') { event.preventDefault(); closeRef.current?.focus() }
   }}>

@@ -3,6 +3,8 @@ import { misaConnectionStatus, checkMisaConnection } from '../services/misaConne
 import misaDrafts from './misaDrafts'
 import { tryCreateAutomaticMisaDraft } from '../services/misaAutoDraft'
 import { activityContext } from '../middleware/activityContext'
+import { getTuitionWorkflowResult } from '../services/tuitionWorkflowResult'
+import { validPeriod } from '../services/readViews'
 import { Router, Response, NextFunction } from 'express'
 import { db, C, s, toDocs, toObj, paginate } from '../lib/firebase'
 import { authenticate, requireRole } from '../middleware/auth'
@@ -20,6 +22,21 @@ router.use(authenticate)
 router.use(activityContext)
 router.use('/misa', misaDrafts)
 const now = () => new Date().toISOString()
+
+router.get('/workflow-result', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { studentId, classId, recordId } = req.query
+    const month = Number(req.query.month), year = Number(req.query.year)
+    if (typeof studentId !== 'string' || !studentId || typeof classId !== 'string' || !classId || !validPeriod(month, year)
+      || (recordId !== undefined && typeof recordId !== 'string')) {
+      res.status(400).json({ message: 'Thông tin đối chiếu phiếu không hợp lệ.' }); return
+    }
+    res.setHeader('Cache-Control', 'no-store')
+    const result = await getTuitionWorkflowResult({ studentId, classId, month, year, recordId: recordId as string | undefined })
+    if (!result) { res.status(404).json({ message: 'Chưa tìm thấy phiếu. Kiểm tra lại trước khi thực hiện lại.' }); return }
+    res.json(result)
+  } catch (error) { next(error) }
+})
 
 router.get('/misa/connection', requireRole('ADMIN'), (_req, res) => {
   res.setHeader('Cache-Control', 'no-store')

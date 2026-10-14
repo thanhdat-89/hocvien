@@ -4,6 +4,7 @@ import type { Payment, TuitionRecord } from '../types/models'
 import { InvoicePreviewError, invoiceSource, listInvoiceTemplates, validateDraftInput, InvoiceTemplate, MisaInvoiceRecord, createMisaDraft } from './misaInvoicePreview'
 import { notifyInvoiceCreated, notifyInvoiceCreationFailed } from './telegramService'
 import { invalidateReadView, invoiceBillingPeriods } from './readViews'
+import { withMisaDeadline } from './misaRequestDeadline'
 
 export function chooseDefaultInvoiceTemplate(templates: InvoiceTemplate[]) {
   const id = process.env.MEINVOICE_DEFAULT_TEMPLATE_ID?.trim()
@@ -15,7 +16,7 @@ export function chooseDefaultInvoiceTemplate(templates: InvoiceTemplate[]) {
 /** Shared by the invoice page and tuition actions; reserve all records before contacting MISA. */
 export async function createTuitionMisaInvoice(recordIds: string[], actorId: string, body?: any, request: typeof fetch = fetch) {
   try {
-    const result = await createTuitionMisaInvoiceInternal(recordIds, actorId, body, request)
+    const result = await createTuitionMisaInvoiceInternal(recordIds, actorId, body, withMisaDeadline(request))
     if (!result.alreadyExists && ['FAILED', 'OUTCOME_UNKNOWN'].includes(result.invoice.status)) {
       const invoice = result.invoice as MisaInvoiceRecord
       notifyInvoiceCreationFailed({ recordIds, refId: invoice.refId,
