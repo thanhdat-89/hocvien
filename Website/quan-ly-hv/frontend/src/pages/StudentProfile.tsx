@@ -1617,6 +1617,10 @@ export interface PrivateScheduleModalProps {
   onSaved: () => void
 }
 
+function localDateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
 export function PrivateScheduleModal({ studentId, studentName, onClose, onSaved }: PrivateScheduleModalProps) {
   const today = new Date()
   const [mode, setMode] = React.useState<'manual' | 'repeat'>('manual')
@@ -1671,7 +1675,7 @@ export function PrivateScheduleModal({ studentId, studentName, onClose, onSaved 
     const cur = new Date(start)
     while (cur <= end) {
       if (weekdays.has(cur.getDay())) {
-        dates.push(cur.toISOString().slice(0, 10))
+        dates.push(localDateKey(cur))
       }
       cur.setDate(cur.getDate() + 1)
     }
@@ -1716,85 +1720,95 @@ export function PrivateScheduleModal({ studentId, studentName, onClose, onSaved 
   const monthNames = ['Tháng 1','Tháng 2','Tháng 3','Tháng 4','Tháng 5','Tháng 6','Tháng 7','Tháng 8','Tháng 9','Tháng 10','Tháng 11','Tháng 12']
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-inverse-surface/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-lg bg-surface-container-lowest rounded-2xl shadow-2xl z-10 max-h-[90vh] overflow-y-auto">
-        <div className="p-6 pb-0">
-          <div className="flex items-center justify-between mb-5">
-            <h3 className="text-xl font-headline font-bold text-on-surface">Thêm lịch học: {studentName}</h3>
-            <button onClick={onClose} className="p-2 hover:bg-surface-container-low rounded-lg transition-colors">
-              <span className="material-symbols-outlined">close</span>
-            </button>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-5">
+      <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-[3px]" onClick={onClose} />
+      <div role="dialog" aria-modal="true" aria-labelledby="private-schedule-title" className="relative z-10 flex max-h-[92dvh] w-full max-w-[680px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-7 sm:py-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-primary">
+              <span className="material-symbols-outlined text-[22px]">edit_calendar</span>
+            </div>
+            <div className="min-w-0">
+              <h3 id="private-schedule-title" className="font-headline text-lg font-bold leading-6 text-on-surface">Thêm lịch học riêng</h3>
+              <p className="mt-0.5 truncate text-sm text-slate-500" title={studentName}>Học viên: <span className="font-medium text-slate-700">{studentName}</span></p>
+            </div>
           </div>
-          {error && <div className="mb-4 p-3 bg-error-container/10 text-error rounded-xl text-sm">{error}</div>}
+          <button type="button" onClick={onClose} aria-label="Đóng cửa sổ thêm lịch học" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+            <span className="material-symbols-outlined text-[20px]">close</span>
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 space-y-5 overflow-y-auto px-5 py-5 sm:px-7">
+          {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
 
           {/* Mode toggle */}
-          <div className="mb-5">
-            <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-2">Chế độ lên lịch</label>
-            <div className="flex gap-2">
+          <div>
+            <p className="mb-2 text-sm font-semibold text-on-surface">Cách chọn ngày học</p>
+            <div className="grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">
               {[{ v: 'manual', icon: 'calendar_month', label: 'Chọn thủ công' }, { v: 'repeat', icon: 'repeat', label: 'Lặp lại tự động' }].map(opt => (
                 <button key={opt.v} type="button" onClick={() => setMode(opt.v as 'manual' | 'repeat')}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-medium border transition-all ${mode === opt.v ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container-low text-on-surface-variant border-transparent'}`}>
-                  <span className="material-symbols-outlined text-base">{opt.icon}</span>{opt.label}
+                  aria-pressed={mode === opt.v}
+                  className={`flex min-h-10 items-center justify-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary sm:text-sm ${mode === opt.v ? 'bg-white text-primary shadow-sm' : 'text-slate-600 hover:text-on-surface'}`}>
+                  <span className="material-symbols-outlined text-[18px]">{opt.icon}</span>{opt.label}
                 </button>
               ))}
             </div>
           </div>
-        </div>
-
-        <form onSubmit={handleSubmit} className="p-6 pt-0 space-y-5">
           {mode === 'manual' ? (
             <div>
-              <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-2">Chọn các ngày học</label>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <h4 className="text-sm font-semibold text-on-surface">Chọn các ngày học</h4>
+                <span className="text-xs text-slate-500">{selectedDates.size} ngày đã chọn</span>
+              </div>
               {/* Calendar */}
-              <div className="bg-surface-container-low rounded-xl p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <button type="button" onClick={prevMonth} className="p-1 hover:bg-surface-container rounded-lg"><span className="material-symbols-outlined text-sm">chevron_left</span></button>
-                  <span className="text-sm font-bold text-on-surface">{monthNames[calMonth]}, {calYear}</span>
-                  <button type="button" onClick={nextMonth} className="p-1 hover:bg-surface-container rounded-lg"><span className="material-symbols-outlined text-sm">chevron_right</span></button>
+              <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <button type="button" onClick={prevMonth} aria-label="Tháng trước" className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><span className="material-symbols-outlined text-[20px]">chevron_left</span></button>
+                  <span className="text-sm font-semibold text-on-surface">{monthNames[calMonth]}, {calYear}</span>
+                  <button type="button" onClick={nextMonth} aria-label="Tháng sau" className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><span className="material-symbols-outlined text-[20px]">chevron_right</span></button>
                 </div>
-                <div className="grid grid-cols-7 gap-1 mb-1">
-                  {WEEKDAY_LABELS_MON_FIRST.map(d => <div key={d} className="text-center text-[10px] font-bold text-outline py-1">{d}</div>)}
+                <div className="mb-1 grid grid-cols-7 gap-1">
+                  {WEEKDAY_LABELS_MON_FIRST.map(d => <div key={d} className="py-1 text-center text-xs font-medium text-slate-500">{d}</div>)}
                 </div>
-                <div className="grid grid-cols-7 gap-1">
+                <div className="grid grid-cols-7 gap-x-1 gap-y-1.5">
                   {calDays.map((day, i) => {
                     if (!day) return <div key={i} />
                     const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
                     const isSelected = selectedDates.has(dateStr)
                     const isExisting = existingDates.has(dateStr)
-                    const isToday = dateStr === today.toISOString().slice(0, 10)
+                    const isToday = dateStr === localDateKey(today)
                     return (
                       <button key={i} type="button" onClick={() => toggleDate(dateStr)}
                         title={isExisting ? 'Đã có lịch học' : undefined}
-                        className={`aspect-square rounded-full text-sm flex items-center justify-center transition-all font-medium relative ${
+                        aria-label={`${day} ${monthNames[calMonth]} ${calYear}${isExisting ? ', đã có lịch' : ''}`}
+                        aria-pressed={isSelected}
+                        className={`relative mx-auto flex h-10 w-10 items-center justify-center rounded-full text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
                           isSelected ? 'bg-primary text-on-primary' :
-                          isExisting ? 'bg-tertiary/20 text-tertiary ring-1 ring-tertiary/50' :
-                          isToday ? 'border-2 border-primary text-primary' :
-                          'hover:bg-surface-container text-on-surface'
+                          isExisting ? 'bg-violet-100 text-violet-700 ring-1 ring-violet-300' :
+                          isToday ? 'border border-primary text-primary' :
+                          'text-slate-700 hover:bg-slate-100'
                         }`}>
                         {day}
                         {isExisting && !isSelected && (
-                          <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-tertiary" />
+                          <span className="absolute bottom-1 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-violet-600" />
                         )}
                       </button>
                     )
                   })}
                 </div>
               </div>
-              {existingDates.size > 0 && (
-                <div className="flex items-center gap-3 mt-2 text-[11px] text-outline">
-                  <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-tertiary/20 ring-1 ring-tertiary/50 inline-block" /> Đã có lịch</span>
-                  <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-primary inline-block" /> Đang chọn</span>
-                </div>
-              )}
+              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+                {existingDates.size > 0 && <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded-full bg-violet-100 ring-1 ring-violet-300" /> Đã có lịch</span>}
+                <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded-full bg-primary" /> Đang chọn</span>
+              </div>
               {selectedDates.size > 0 && (
-                <div className="flex flex-wrap gap-2 mt-3">
+                <div className="mt-3 flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
                   {[...selectedDates].sort().map(d => (
-                    <span key={d} className="flex items-center gap-1 px-2.5 py-1 bg-primary/10 text-primary rounded-full text-xs font-medium">
-                      <span className="material-symbols-outlined text-xs">calendar_today</span>
+                    <span key={d} className="flex items-center gap-1 rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-primary">
                       {fmt(d)}
-                      <button type="button" onClick={() => toggleDate(d)} className="hover:text-error ml-0.5">
-                        <span className="material-symbols-outlined text-xs">close</span>
+                      <button type="button" onClick={() => toggleDate(d)} aria-label={`Bỏ chọn ngày ${fmt(d)}`} className="ml-0.5 flex h-5 w-5 items-center justify-center rounded hover:bg-blue-100 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                        <span className="material-symbols-outlined text-sm">close</span>
                       </button>
                     </span>
                   ))}
@@ -1802,62 +1816,70 @@ export function PrivateScheduleModal({ studentId, studentName, onClose, onSaved 
               )}
             </div>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-4 rounded-xl border border-slate-200 p-4 sm:p-5">
               <div>
-                <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-2">Chọn thứ trong tuần</label>
+                <p className="mb-2 text-sm font-semibold text-on-surface">Chọn thứ trong tuần</p>
                 <div className="flex gap-2 flex-wrap">
                   {[1,2,3,4,5,6,0].map(wd => (
                     <button key={wd} type="button" onClick={() => toggleWeekday(wd)}
-                      className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all border ${weekdays.has(wd) ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container-low text-on-surface-variant border-transparent hover:border-primary/30'}`}>
+                      aria-pressed={weekdays.has(wd)}
+                      className={`flex h-10 w-10 items-center justify-center rounded-lg border text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${weekdays.has(wd) ? 'border-primary bg-primary text-white' : 'border-slate-200 text-slate-600 hover:border-blue-300 hover:text-primary'}`}>
                       {WEEKDAY_LABELS[wd]}
                     </button>
                   ))}
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
-                  <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Từ tháng</label>
-                  <input type="month" value={fromMonth} onChange={e => setFromMonth(e.target.value)}
-                    className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
+                  <label htmlFor="private-from-month" className="mb-1.5 block text-sm font-medium text-slate-700">Từ tháng</label>
+                  <input id="private-from-month" type="month" value={fromMonth} onChange={e => setFromMonth(e.target.value)}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
                 </div>
                 <div>
-                  <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Đến tháng</label>
-                  <input type="month" value={toMonth} onChange={e => setToMonth(e.target.value)}
-                    className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
+                  <label htmlFor="private-to-month" className="mb-1.5 block text-sm font-medium text-slate-700">Đến tháng</label>
+                  <input id="private-to-month" type="month" value={toMonth} onChange={e => setToMonth(e.target.value)}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
                 </div>
               </div>
               {repeatDates.length > 0 && (
-                <p className="text-sm text-primary font-semibold">Sẽ tạo {repeatDates.length} buổi học</p>
+                <p className="rounded-lg bg-blue-50 px-3 py-2 text-sm font-medium text-primary">Dự kiến tạo {repeatDates.length} buổi học</p>
               )}
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Giờ bắt đầu</label>
-              <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)}
-                className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
+          <div className="border-t border-slate-100 pt-5">
+            <h4 className="mb-3 text-sm font-semibold text-on-surface">Thời gian và học phí</h4>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label htmlFor="private-start-time" className="mb-1.5 block text-sm font-medium text-slate-700">Giờ bắt đầu</label>
+                <input id="private-start-time" type="time" value={startTime} onChange={e => setStartTime(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
+              </div>
+              <div>
+                <label htmlFor="private-end-time" className="mb-1.5 block text-sm font-medium text-slate-700">Giờ kết thúc</label>
+                <input id="private-end-time" type="time" value={endTime} onChange={e => setEndTime(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
+              </div>
             </div>
-            <div>
-              <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Giờ kết thúc</label>
-              <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)}
-                className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
+
+            <div className="mt-4">
+              <label htmlFor="private-session-rate" className="mb-1.5 block text-sm font-medium text-slate-700">Học phí mỗi buổi (đ)</label>
+              <input id="private-session-rate" type="number" value={rate} onChange={e => setRate(e.target.value)} required min={0}
+                placeholder="Ví dụ: 200000"
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
             </div>
           </div>
-
-          <div>
-            <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Học phí mỗi buổi (đ)</label>
-            <input type="number" value={rate} onChange={e => setRate(e.target.value)} required min={0}
-              placeholder="Ví dụ: 200000"
-              className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
           </div>
 
-          <div className="flex gap-3 pt-1">
-            <button type="button" onClick={onClose} className="flex-1 btn-secondary justify-center">Huỷ</button>
-            <button type="submit" disabled={saving || finalDates.length === 0}
-              className="flex-1 btn-primary justify-center disabled:opacity-60">
-              {saving ? 'Đang lưu...' : `Lưu ${finalDates.length} buổi học`}
-            </button>
+          <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-100 bg-white px-5 py-4 sm:px-7">
+            <span className="hidden text-sm text-slate-500 sm:block">{finalDates.length} buổi học được chọn</span>
+            <div className="ml-auto flex gap-2">
+              <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">Hủy</button>
+              <button type="submit" disabled={saving || finalDates.length === 0}
+                className="inline-flex min-w-[145px] items-center justify-center rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
+                {saving ? 'Đang lưu...' : `Lưu ${finalDates.length} buổi học`}
+              </button>
+            </div>
           </div>
         </form>
       </div>
