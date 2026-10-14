@@ -15,6 +15,7 @@ interface InvoiceStatus {
   status: string
   invoiceNumber?: string
   invoiceUrl?: string
+  invoiceDate?: string
   createdAt?: string
   recordIds?: string[]
 }
@@ -35,6 +36,13 @@ const statusClass: Record<string, string> = {
   REMOVED_FROM_MISA: 'text-red-600',
 }
 const money = (value: number) => value.toLocaleString('vi-VN') + 'đ'
+const createdTime = (invoice: InvoiceStatus) => Date.parse(invoice.createdAt || '') || 0
+const invoiceDate = (invoice: InvoiceStatus) => {
+  const date = new Date(invoice.invoiceDate || invoice.createdAt || '')
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString('vi-VN', {
+    day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Asia/Ho_Chi_Minh',
+  })
+}
 
 export default function EInvoicePreparation({ rows, loading, error, month, year, retry }: {
   rows: Row[]; loading: boolean; error: string | null; month: number; year: number; retry: () => void
@@ -63,7 +71,8 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
   }
 
   const invoiceRows = useMemo(() => rows.filter(row => row.tuitionRecord && invoiceStatuses[row.tuitionRecord.id]
-    && invoiceStatuses[row.tuitionRecord.id].status !== 'NOT_CREATED'), [rows, invoiceStatuses])
+    && invoiceStatuses[row.tuitionRecord.id].status !== 'NOT_CREATED')
+    .sort((a, b) => createdTime(invoiceStatuses[b.tuitionRecord!.id]) - createdTime(invoiceStatuses[a.tuitionRecord!.id])), [rows, invoiceStatuses])
   const counts = invoiceRows.reduce((result, row) => {
     const status = invoiceStatuses[row.tuitionRecord!.id]?.status || 'NOT_CREATED'
     result[status] = (result[status] || 0) + 1
@@ -100,11 +109,11 @@ export default function EInvoicePreparation({ rows, loading, error, month, year,
     </div>
 
     <div className="bg-surface-container-lowest rounded-2xl overflow-x-auto border border-outline-variant/10">
-      <table className="w-full"><thead><tr>{['STT', 'Học viên', 'Lớp học', 'Số tiền', 'Trạng thái hóa đơn', 'RefID', 'Số hóa đơn', 'Thao tác'].map(label => <th key={label} className="table-header">{label}</th>)}</tr></thead>
-        <tbody>{invoiceRows.map((row, index) => {
+      <table className="w-full"><thead><tr>{['Ngày hóa đơn', 'Học viên', 'Lớp học', 'Số tiền', 'Trạng thái hóa đơn', 'RefID', 'Số hóa đơn', 'Thao tác'].map(label => <th key={label} className="table-header">{label}</th>)}</tr></thead>
+        <tbody>{invoiceRows.map(row => {
           const invoice = invoiceStatuses[row.tuitionRecord!.id]
           return <tr key={row.tuitionRecord!.id} className="border-t border-outline-variant/10">
-            <td className="table-cell">{index + 1}</td>
+            <td className="table-cell whitespace-nowrap">{invoiceDate(invoice)}</td>
             <td className="table-cell font-semibold">{row.studentName}</td>
             <td className="table-cell">{row.className}</td>
             <td className="table-cell whitespace-nowrap">{money(row.tuitionRecord!.finalAmount)}</td>

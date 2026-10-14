@@ -37,7 +37,7 @@ router.get('/invoices/statuses', async (_req, res, next) => {
       for (const id of (Array.isArray(data.recordIds) && data.recordIds.length ? data.recordIds : [doc.id])) {
         byRecordId.set(id, { id, refId: data.refId,
           status: ['CREATING', 'OUTCOME_UNKNOWN', 'FAILED', 'DRAFT_CREATED', 'ISSUED', 'SENT_TO_TAX', 'REMOVED_FROM_MISA'].includes(data.status) ? data.status : 'NOT_CREATED',
-          invoiceNumber: data.invoiceNumber, invoiceUrl: data.invoiceUrl, createdAt: data.createdAt, recordIds: data.recordIds })
+          invoiceNumber: data.invoiceNumber, invoiceUrl: data.invoiceUrl, invoiceDate: data.invoiceDate, createdAt: data.createdAt, recordIds: data.recordIds })
       }
     })
     const invoices = Array.from(byRecordId.values())
