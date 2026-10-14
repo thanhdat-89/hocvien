@@ -64,9 +64,15 @@ export default function Tuition() {
     const request = ++latestRequest.current
     setLoading(true)
     setLoadError(null)
-    api.get(`/tuition/schedule-summary?month=${month}&year=${year}${force ? '&force=true' : ''}`)
+    api.get(`/tuition/schedule-summary?month=${month}&year=${year}${force ? '&force=true' : ''}`, { timeout: 30_000 })
       .then(r => { if (request === latestRequest.current) setRows(r.data) })
-      .catch(() => { if (request === latestRequest.current) { setRows([]); setLoadError('Không tải được dữ liệu học phí.'); } })
+      .catch((error) => {
+        if (request !== latestRequest.current) return
+        setRows([])
+        setLoadError(error.code === 'ECONNABORTED'
+          ? 'Dữ liệu học phí phản hồi quá lâu. Vui lòng thử tải lại.'
+          : 'Không tải được dữ liệu học phí.')
+      })
       .finally(() => { if (request === latestRequest.current) setLoading(false) })
   }
 
