@@ -1,8 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { db, C, toDocs, toObj } from '../lib/firebase'
 import type { Payment, TuitionRecord } from '../types/models'
-import { InvoicePreviewError, invoiceSource, listInvoiceTemplates, validateDraftInput, InvoiceTemplate, MisaInvoiceRecord } from './misaInvoicePreview'
-import { prepareUnsignedInvoice } from './misaDraftGateway'
+import { InvoicePreviewError, invoiceSource, listInvoiceTemplates, validateDraftInput, InvoiceTemplate, MisaInvoiceRecord, createMisaDraft } from './misaInvoicePreview'
 
 export function chooseDefaultInvoiceTemplate(templates: InvoiceTemplate[]) {
   const id = process.env.MEINVOICE_DEFAULT_TEMPLATE_ID?.trim()
@@ -40,7 +39,7 @@ export async function createTuitionMisaInvoice(recordIds: string[], actorId: str
     const snapshots = await Promise.all(refs.map(async r => ({ fee: await tx.get(r.fee), payments: await tx.get(r.payments), invoice: await tx.get(r.invoice) })))
     const existing = snapshots.find(s => s.invoice.exists && !['REMOVED_FROM_MISA', 'FAILED'].includes(s.invoice.data()?.status))
     if (existing) {
-      if (recordIds.length === 1) return { invoice: existing.invoice.data()!, alreadyExists: true }
+      if (recordIds.length === 1) return { invoice: existing.invoice.data()! as MisaInvoiceRecord, alreadyExists: true }
       throw new InvoicePreviewError(409, 'Có phiếu đã có hóa đơn hoặc đang chờ đối chiếu MISA.')
     }
     const sources = snapshots.map(s => {
@@ -56,8 +55,10 @@ export async function createTuitionMisaInvoice(recordIds: string[], actorId: str
   })
   if (reserved.alreadyExists) return reserved
   try {
-    const created = await prepareUnsignedInvoice(reserved.invoice as any, request)
-    const invoice = { ...reserved.invoice, invoiceNumber: created.invoiceNo, invoiceCode: created.invoiceCode, transactionId: created.transactionId, status: 'DRAFT_CREATED' as const, updatedAt: new Date().toISOString() }
+    // The active template was validated above, before reserving these records.
+    // Reuse it rather than repeating developer-API authentication and lookup.
+    const created = await createMisaDraft(reserved.invoice, request)
+    const invoice = { ...reserved.invoice, invoiceNumber: created.invoiceNumber, invoiceCode: '', transactionId: created.transactionId || reserved.invoice.refId, status: 'DRAFT_CREATED' as const, updatedAt: new Date().toISOString() }
     await Promise.all(refs.map(r => r.invoice.set(invoice)))
     return { invoice, alreadyExists: false }
   } catch (error) {

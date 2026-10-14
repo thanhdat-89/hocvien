@@ -45,27 +45,43 @@ export async function invoiceApi(request: typeof fetch = fetch) {
   const headers = { 'Content-Type': 'application/json', ClientID: fields.MEINVOICE_CLIENT_ID!, ClientSecret: fields.MEINVOICE_CLIENT_SECRET! }
   const deadline = Date.now() + 20000
   const call = async (path: string, init: RequestInit) => {
-    try {
-      const response = await request(BASE + path, { ...init, redirect: 'error', signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())) })
-      let result: any
+    const step = path === '/token' ? 'xác thực' : 'lấy mẫu hóa đơn'
+    const startedAt = Date.now()
+    // These endpoints only authenticate/read. Never retry the invoice write here.
+    const attempts = (path === '/token' && init.method === 'POST')
+      || (path.startsWith('/templates?') && init.method === 'GET') ? 2 : 1
+    for (let attempt = 1; attempt <= attempts; attempt++) {
       try {
-        result = typeof (response as any).text === 'function'
-          ? JSON.parse(await response.text())
-          : await response.json()
-      } catch {
-        throw new InvoicePreviewError(502, `MISA trả phản hồi không đọc được ở bước ${path === '/token' ? 'xác thực' : 'lấy mẫu hóa đơn'}.`)
+        const response = await request(BASE + path, { ...init, redirect: 'error', signal: AbortSignal.timeout(Math.max(1, Math.min(8000, deadline - Date.now()))) })
+        let result: any
+        try {
+          result = typeof (response as any).text === 'function'
+            ? JSON.parse(await response.text())
+            : await response.json()
+        } catch {
+          throw new InvoicePreviewError(502, `MISA trả phản hồi không đọc được ở bước ${path === '/token' ? 'xác thực' : 'lấy mẫu hóa đơn'}.`)
+        }
+        if (!response.ok) throw new InvoicePreviewError(502, `MISA trả lỗi HTTP ${response.status} ở bước ${path === '/token' ? 'xác thực' : 'lấy mẫu hóa đơn'}.`)
+        if ((result?.Success ?? result?.success) !== true) {
+          const code = result?.ErrorCode ?? result?.errorCode
+          const safeCode = typeof code === 'string' && /^[A-Z0-9_-]{1,60}$/i.test(code) ? ` (${code})` : ''
+          throw new InvoicePreviewError(502, `MISA chưa xử lý được yêu cầu ở bước ${path === '/token' ? 'xác thực' : 'lấy mẫu hóa đơn'}${safeCode}.`)
+        }
+        return decode(result.Data ?? result.data)
+      } catch (error: any) {
+        if (error instanceof InvoicePreviewError) throw error
+        const networkCode = error?.cause?.code ?? error?.code
+        const code = typeof networkCode === 'string' ? networkCode : error?.name
+        console.warn('[MISA lookup] network failure', {
+          step: path === '/token' ? 'token' : 'templates', attempt,
+          elapsedMs: Date.now() - startedAt,
+          code: typeof code === 'string' && /^[A-Z0-9_]{1,60}$/i.test(code) ? code : 'NETWORK_ERROR',
+        })
+        if (attempt < attempts && deadline - Date.now() > 1000) continue
+        throw new InvoicePreviewError(502, `Không kết nối được MISA ở bước ${step}. Vui lòng thử lại sau.`)
       }
-      if (!response.ok) throw new InvoicePreviewError(502, `MISA trả lỗi HTTP ${response.status} ở bước ${path === '/token' ? 'xác thực' : 'lấy mẫu hóa đơn'}.`)
-      if ((result?.Success ?? result?.success) !== true) {
-        const code = result?.ErrorCode ?? result?.errorCode
-        const safeCode = typeof code === 'string' && /^[A-Z0-9_-]{1,60}$/i.test(code) ? ` (${code})` : ''
-        throw new InvoicePreviewError(502, `MISA chưa xử lý được yêu cầu ở bước ${path === '/token' ? 'xác thực' : 'lấy mẫu hóa đơn'}${safeCode}.`)
-      }
-      return decode(result.Data ?? result.data)
-    } catch (error) {
-      if (error instanceof InvoicePreviewError) throw error
-      throw new InvoicePreviewError(502, `Không kết nối được MISA ở bước ${path === '/token' ? 'xác thực' : 'lấy mẫu hóa đơn'}.`)
     }
+    throw new InvoicePreviewError(502, `Không kết nối được MISA ở bước ${step}.`)
   }
   const token = await call('/token', { method: 'POST', headers, body: JSON.stringify({
     taxcode: fields.MEINVOICE_TAXCODE, username: fields.MEINVOICE_USERNAME, password: fields.MEINVOICE_PASSWORD,
