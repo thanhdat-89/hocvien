@@ -1,9 +1,11 @@
 import { Router, Response, NextFunction } from 'express'
 import { db, C, toDocs } from '../lib/firebase'
-import { getTuitionScheduleSummary } from '../services/tuitionScheduleSummary'
+import { getCachedTuitionSummary } from '../services/tuitionReadView'
+import { readView } from '../services/readViews'
+import { getStudentIndex } from '../services/studentReadView'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
-import type { Session, TuitionRecord, Payment, Student, ClassEnrollment, PrivateSession } from '../types/models'
+import type { Session, TuitionRecord, Payment, ClassEnrollment, PrivateSession } from '../types/models'
 
 const router = Router()
 router.use(authenticate)
@@ -22,8 +24,6 @@ function nextMonthStart(monthKey: string) {
   return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-01`
 }
 
-let revenueCache: { at: number; data: any[] } | null = null
-let studentsByGradeCache: { at: number; data: any[] } | null = null
 
 async function computeDashboard() {
   const today = dateInVietnam()
@@ -31,7 +31,7 @@ async function computeDashboard() {
   const nextMonth = nextMonthStart(thisMonth)
 
   const [
-    activeStudentsSnap,
+    studentsIndex,
     activeClassesSnap,
     sessionsTodaySnap,
     privateSessionsTodaySnap,
@@ -40,7 +40,7 @@ async function computeDashboard() {
     overdueSnap,
     recentPaymentsSnap,
   ] = await Promise.all([
-    db.collection(C.STUDENTS).where('status', '==', 'ACTIVE').get(),
+    getStudentIndex(),
     db.collection(C.CLASSES).where('status', '==', 'ACTIVE').get(),
     db.collection(C.SESSIONS).where('sessionDate', '==', today).get(),
     db.collection(C.PRIVATE_SCHEDULES).where('sessionDate', '==', today).get(),
@@ -55,6 +55,7 @@ async function computeDashboard() {
     db.collection(C.TUITION_RECORDS).where('dueDate', '<', today).get(),
     db.collection(C.PAYMENTS).orderBy('createdAt', 'desc').limit(10).get(),
   ])
+  const activeStudents = studentsIndex.data!.filter(student => student.status === 'ACTIVE')
 
   const revenueThisMonth = toDocs<Payment>(revenueSnap).reduce((sum, p) => sum + p.amount, 0)
   const overdueCount = toDocs<TuitionRecord>(overdueSnap)
@@ -75,7 +76,7 @@ async function computeDashboard() {
     ])
     const enrolledStudents = new Set(toDocs<ClassEnrollment>(enrollmentsSnap).map(e => e.studentId))
     const scheduledStudents = new Set(toDocs<PrivateSession>(privateSchedulesSnap).map(p => p.studentId))
-    const privateStudents = toDocs<Student>(activeStudentsSnap).filter(s => !enrolledStudents.has(s.id))
+    const privateStudents = activeStudents.filter(s => !enrolledStudents.has(s.id))
     totalPrivateStudents = privateStudents.length
     unscheduledPrivateStudentsThisMonth = privateStudents.filter(s => !scheduledStudents.has(s.id)).length
 
@@ -85,17 +86,15 @@ async function computeDashboard() {
 
   // Use the same schedule rows and outstanding amounts as the tuition page.
   try {
-    const rows = await getTuitionScheduleSummary(Number(thisMonth.slice(5)), Number(thisMonth.slice(0, 4)))
-    unpaidStudentsThisMonth = new Set(rows
-      .filter(row => (row.tuitionRecord ? row.tuitionRecord.remainingAmount : row.finalAmount) > 0)
-      .map(row => row.studentId)).size
+    const summary = await getCachedTuitionSummary(Number(thisMonth.slice(5)), Number(thisMonth.slice(0, 4)))
+    unpaidStudentsThisMonth = summary.unpaidStudents
   } catch (error: any) {
     console.warn('[Dashboard] Tuition summary unavailable', error?.code ?? error?.name ?? 'unknown')
   }
 
   return {
     stats: {
-      totalActiveStudents: activeStudentsSnap.size,
+      totalActiveStudents: activeStudents.length,
       totalActiveClasses: activeClassesSnap.size,
       newStudentsThisMonth: newStudentsSnap.size,
       revenueThisMonth,
@@ -113,75 +112,54 @@ async function computeDashboard() {
   }
 }
 
-// GET /api/dashboard — lazy write-through: trả aggregate doc nếu fresh, nếu không compute + lưu
+// Shared revision invalidation refreshes all workers after business mutations.
 router.get('/', async (_req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const aggRef = db.collection(C.AGGREGATES).doc('dashboard')
-    const aggSnap = await aggRef.get()
-
-    if (aggSnap.exists) {
-      const cached = aggSnap.data() as { cachedAt?: number; metricsMonth?: string; metricsVersion?: number; stats?: Record<string, unknown> }
-      const hasMonthlyMetrics = cached.metricsVersion === 5 && cached.metricsMonth === dateInVietnam().slice(0, 7)
-        && ['unscheduledPrivateStudentsThisMonth', 'totalPrivateStudents', 'unpaidStudentsThisMonth']
-          .every(key => typeof cached.stats?.[key] === 'number' && Number.isFinite(cached.stats[key]))
-      if (cached.cachedAt && Date.now() - cached.cachedAt < DASHBOARD_TTL_MS && hasMonthlyMetrics) {
-        res.json(cached)
-        return
-      }
-    }
-
-    const fresh = await computeDashboard()
-    await aggRef.set(fresh)
-    res.json(fresh)
-  } catch (err) {
-    next(err)
-  }
+    const view = await readView('dashboard', dateInVietnam(), computeDashboard, undefined, false, DASHBOARD_TTL_MS)
+    res.json(view.data)
+  } catch (err) { next(err) }
 })
 
-// POST /api/dashboard/refresh — force refresh (dùng khi có payment/enrollment mới)
 router.post('/refresh', async (_req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const fresh = await computeDashboard()
-    await db.collection(C.AGGREGATES).doc('dashboard').set(fresh)
-    res.json(fresh)
-  } catch (err) {
-    next(err)
-  }
+    const today = dateInVietnam()
+    await getCachedTuitionSummary(Number(today.slice(5, 7)), Number(today.slice(0, 4)), true)
+    const view = await readView('dashboard', today, computeDashboard, undefined, true, DASHBOARD_TTL_MS)
+    res.json(view.data)
+  } catch (err) { next(err) }
 })
 
 // GET /api/dashboard/revenue — Doanh thu 12 tháng gần nhất
 router.get('/revenue', requireRole('ADMIN', 'STAFF'), async (_req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    if (revenueCache && Date.now() - revenueCache.at < REVENUE_TTL_MS) {
-      res.json(revenueCache.data)
-      return
-    }
-    const today = new Date()
+    const view = await readView('dashboard', `revenue-${dateInVietnam().slice(0, 7)}`, async () => {
+      const [currentYear, currentMonth] = dateInVietnam().slice(0, 7).split('-').map(Number)
 
-    // Tính khoảng 12 tháng
-    const monthRanges = Array.from({ length: 12 }, (_, i) => {
-      const d = new Date(today.getFullYear(), today.getMonth() - (11 - i), 1)
-      return { year: d.getFullYear(), month: d.getMonth() + 1 }
-    })
-
-    // Query song song thay vì tuần tự
-    const snaps = await Promise.all(
-      monthRanges.map(({ year, month }) => {
-        const monthStr = `${year}-${String(month).padStart(2, '0')}`
-        return db.collection(C.PAYMENTS)
-          .where('paymentDate', '>=', `${monthStr}-01`)
-          .where('paymentDate', '<=', `${monthStr}-31`)
-          .get()
+      // Tính khoảng 12 tháng
+      const monthRanges = Array.from({ length: 12 }, (_, i) => {
+        const d = new Date(Date.UTC(currentYear, currentMonth - 1 - (11 - i), 1))
+        return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1 }
       })
-    )
 
-    const months = monthRanges.map((r, i) => ({
-      ...r,
-      revenue: toDocs<Payment>(snaps[i]).reduce((sum, p) => sum + p.amount, 0),
-    }))
+      // Query song song thay vì tuần tự
+      const snaps = await Promise.all(
+        monthRanges.map(({ year, month }) => {
+          const monthStr = `${year}-${String(month).padStart(2, '0')}`
+          return db.collection(C.PAYMENTS)
+            .where('paymentDate', '>=', `${monthStr}-01`)
+            .where('paymentDate', '<=', `${monthStr}-31`)
+            .get()
+        })
+      )
 
-    revenueCache = { at: Date.now(), data: months }
-    res.json(months)
+      const months = monthRanges.map((r, i) => ({
+        ...r,
+        revenue: toDocs<Payment>(snaps[i]).reduce((sum, p) => sum + p.amount, 0),
+      }))
+
+      return months
+    }, undefined, false, REVENUE_TTL_MS)
+    res.json(view.data)
   } catch (err) {
     next(err)
   }
@@ -190,26 +168,24 @@ router.get('/revenue', requireRole('ADMIN', 'STAFF'), async (_req: AuthRequest, 
 // GET /api/dashboard/students-by-grade
 router.get('/students-by-grade', async (_req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    if (studentsByGradeCache && Date.now() - studentsByGradeCache.at < STUDENTS_BY_GRADE_TTL_MS) {
-      res.json(studentsByGradeCache.data)
-      return
-    }
-    const snap = await db.collection(C.STUDENTS).where('status', '==', 'ACTIVE').get()
-    const students = toDocs<Student>(snap)
+    const view = await readView('dashboard', 'students-by-grade', async () => {
+      const index = await getStudentIndex()
+      const students = index.data!.filter(student => student.status === 'ACTIVE')
 
-    const groups = new Map<number, number>()
-    for (const s of students) {
-      if (s.gradeLevel) {
-        groups.set(s.gradeLevel, (groups.get(s.gradeLevel) ?? 0) + 1)
+      const groups = new Map<number, number>()
+      for (const s of students) {
+        if (s.gradeLevel) {
+          groups.set(s.gradeLevel, (groups.get(s.gradeLevel) ?? 0) + 1)
+        }
       }
-    }
 
-    const result = Array.from(groups.entries())
-      .map(([gradeLevel, count]) => ({ gradeLevel, count }))
-      .sort((a, b) => a.gradeLevel - b.gradeLevel)
+      const result = Array.from(groups.entries())
+        .map(([gradeLevel, count]) => ({ gradeLevel, count }))
+        .sort((a, b) => a.gradeLevel - b.gradeLevel)
 
-    studentsByGradeCache = { at: Date.now(), data: result }
-    res.json(result)
+      return result
+    }, undefined, false, STUDENTS_BY_GRADE_TTL_MS)
+    res.json(view.data)
   } catch (err) {
     next(err)
   }

@@ -1,4 +1,4 @@
-import { getTuitionScheduleSummary } from '../services/tuitionScheduleSummary'
+import { getCachedTuitionSummary } from '../services/tuitionReadView'
 import { misaConnectionStatus, checkMisaConnection } from '../services/misaConnection'
 import misaDrafts from './misaDrafts'
 import { tryCreateAutomaticMisaDraft } from '../services/misaAutoDraft'
@@ -78,7 +78,7 @@ router.get('/schedule-summary', async (req: AuthRequest, res: Response, next: Ne
     if (!Number.isInteger(month) || month < 1 || month > 12 || !Number.isInteger(year) || year < 2000 || year > 2100) {
       res.status(400).json({ message: 'Month/year không hợp lệ' }); return
     }
-    res.json(await getTuitionScheduleSummary(month, year))
+    res.json((await getCachedTuitionSummary(month, year, req.query.force === 'true')).rows)
   } catch (err) { next(err) }
 })
 

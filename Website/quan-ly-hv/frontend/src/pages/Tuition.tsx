@@ -59,11 +59,11 @@ export default function Tuition() {
   const [classFilter, setClassFilter] = useState<string | null>(null)
   const [gradeFilter, setGradeFilter] = useState<number | null>(null)
 
-  const loadData = () => {
+  const loadData = (force = false) => {
     const request = ++latestRequest.current
     setLoading(true)
     setLoadError(null)
-    api.get(`/tuition/schedule-summary?month=${month}&year=${year}`)
+    api.get(`/tuition/schedule-summary?month=${month}&year=${year}${force ? '&force=true' : ''}`)
       .then(r => { if (request === latestRequest.current) setRows(r.data) })
       .catch(() => { if (request === latestRequest.current) { setRows([]); setLoadError('Không tải được dữ liệu học phí.'); } })
       .finally(() => { if (request === latestRequest.current) setLoading(false) })
@@ -302,6 +302,10 @@ export default function Tuition() {
             <h2 className="text-4xl font-black text-on-surface font-headline tracking-tight">Quản lý Học phí</h2>
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            <button onClick={() => loadData(true)} disabled={loading}
+              className="px-4 py-2 rounded-xl bg-primary/10 text-primary text-sm font-semibold hover:bg-primary/20 disabled:opacity-40">
+              Tải lại dữ liệu
+            </button>
             <button
               onClick={exportExcel}
               disabled={filtered.length === 0}
@@ -324,7 +328,7 @@ export default function Tuition() {
         </div>
 
         <div className="space-y-8">
-        {loadError && <div role="alert" className="text-red-700">{loadError} <button className="underline" onClick={loadData}>Thử lại</button></div>}
+        {loadError && <div role="alert" className="text-red-700">{loadError} <button className="underline" onClick={() => loadData(true)}>Thử lại</button></div>}
         {/* Stats */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="bg-surface-container-lowest p-6 rounded-2xl shadow-sm border border-outline-variant/10">

@@ -14,7 +14,11 @@ test('legacy Supabase flags cannot activate sync, fallback, reporting or export 
   const reads = []
   let readError
   const query = {
-    where() { return this }, orderBy() { return this },
+    where() { return this }, orderBy() { return this }, select() { return this },
+    doc() { return { get: async () => {
+      if (readError) throw readError
+      return { exists: false, data: () => undefined }
+    }, set: async () => {} } },
     offset() { return this }, limit() { return this },
     count() { return { get: async () => {
       if (readError) throw readError

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { db, C } from '../lib/firebase'
 
-type ViewKind = 'privateMissing' | 'invoices'
+export type ViewKind = 'privateMissing' | 'invoices' | 'tuition' | 'studentsIndex' | 'dashboard'
 const MAX_AGE_MS = 15 * 60 * 1000
 
 export async function invalidateReadView(kind: ViewKind) {
@@ -9,23 +9,26 @@ export async function invalidateReadView(kind: ViewKind) {
   catch { console.warn('[Read views] invalidation failed', kind) }
 }
 
-async function readView<T>(kind: ViewKind, key: string, build: () => Promise<T>, clientVersion?: string, force = false): Promise<{ data?: T; version: string; unchanged?: boolean }> {
+export async function readView<T>(kind: ViewKind, key: string, build: () => Promise<T>, clientVersion?: string, force = false, maxAge = MAX_AGE_MS): Promise<{ data?: T; version: string; unchanged?: boolean }> {
   const revisionRef = db.collection('readViewRevisions').doc(kind)
   const revision = (await revisionRef.get()).data()?.revision || 'initial'
   const [clientRevision, clientTime] = (clientVersion || '').split(':')
-  if (!force && clientRevision === revision && Date.now() - Number(clientTime) < MAX_AGE_MS && Number(clientTime) <= Date.now()) {
+  if (!force && clientRevision === revision && Date.now() - Number(clientTime) < maxAge && Number(clientTime) <= Date.now()) {
     return { unchanged: true, version: clientVersion! }
   }
   const cacheRef = db.collection('readViews').doc(`${kind}-${key}`)
   const cached = (await cacheRef.get()).data()
-  if (!force && cached && cached.revision === revision && Date.now() - cached.generatedAt < MAX_AGE_MS) {
+  if (!force && cached && cached.revision === revision && Date.now() - cached.generatedAt < maxAge) {
     return { data: cached.data as T, version: `${revision}:${cached.generatedAt}` }
   }
   const data = await build()
   const generatedAt = Date.now()
   const currentRevision = (await revisionRef.get()).data()?.revision || 'initial'
   // A concurrent mutation must prevent this snapshot from being reused.
-  if (currentRevision === revision) await cacheRef.set({ revision, generatedAt, data })
+  if (currentRevision === revision) {
+    try { await cacheRef.set({ revision, generatedAt, data }) }
+    catch { console.warn('[Read views] cache write failed', kind) }
+  }
   return { data, version: `${revision}:${generatedAt}` }
 }
 

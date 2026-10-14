@@ -7,6 +7,7 @@ import { requireRole } from '../middleware/auth'
 import { authenticate } from '../middleware/auth'
 import { activityContext } from '../middleware/activityContext'
 import { getMissingPrivateStudents, validPeriod } from '../services/readViews'
+import { getStudentPage } from '../services/studentReadView'
 import { AuthRequest } from '../types'
 import type { Student, ClassEnrollment, StudentAttendance, PrivateSession } from '../types/models'
 
@@ -15,27 +16,7 @@ router.use(authenticate)
 router.use(activityContext)
 
 const now = () => new Date().toISOString()
-const STUDENT_COUNT_TTL_MS = 60 * 1000
 const IN_QUERY_LIMIT = 30
-
-let studentCountsCache: { at: number; totalAll: number; totalActive: number } | null = null
-
-async function getCount(query: FirebaseFirestore.Query): Promise<number> {
-  const snap = await query.count().get()
-  return snap.data().count
-}
-
-async function getStudentCounts() {
-  if (studentCountsCache && Date.now() - studentCountsCache.at < STUDENT_COUNT_TTL_MS) {
-    return studentCountsCache
-  }
-  const [totalAll, totalActive] = await Promise.all([
-    getCount(db.collection(C.STUDENTS)),
-    getCount(db.collection(C.STUDENTS).where('status', '==', 'ACTIVE')),
-  ])
-  studentCountsCache = { at: Date.now(), totalAll, totalActive }
-  return studentCountsCache
-}
 
 function chunkIds(ids: string[]): string[][] {
   const chunks: string[][] = []
@@ -109,63 +90,15 @@ async function enrichStudents(pageStudents: (Student & { id: string })[]) {
 // GET /api/students
 router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { page = '1', limit = '20', search, status, classId, gradeLevel } = req.query as Record<string, string>
-
-    const pageNum = Math.max(1, Number(page) || 1)
-    const limitNum = Math.min(500, Math.max(1, Number(limit) || 20))
-    const offset = (pageNum - 1) * limitNum
-    const trimmedSearch = search?.trim().toLowerCase()
-
-    const { totalAll, totalActive } = await getStudentCounts()
-
-    let students: (Student & { id: string })[] = []
-    let total = 0
-
-    if (classId) {
-      const enrollSnap = await db.collection(C.ENROLLMENTS)
-        .where('classId', '==', classId)
-        .where('status', '==', 'ACTIVE')
-        .get()
-      const ids = [...new Set(enrollSnap.docs.map(d => d.data().studentId as string).filter(Boolean))]
-      let classStudents = await loadStudentsByIds(ids)
-      if (status) classStudents = classStudents.filter(s => s.status === status)
-      if (gradeLevel) classStudents = classStudents.filter(s => s.gradeLevel === Number(gradeLevel))
-      if (trimmedSearch) classStudents = classStudents.filter(s => s.fullName.toLowerCase().includes(trimmedSearch))
-      classStudents.sort((a, b) => a.fullName.localeCompare(b.fullName, 'vi'))
-      total = classStudents.length
-      students = classStudents.slice(offset, offset + limitNum)
-    } else if (trimmedSearch) {
-      let query = db.collection(C.STUDENTS) as FirebaseFirestore.Query
-      if (status) query = query.where('status', '==', status)
-      if (gradeLevel) query = query.where('gradeLevel', '==', Number(gradeLevel))
-      const snap = await query.orderBy('fullName').get()
-      const matched = toDocs<Student>(snap)
-        .filter(s => s.fullName.toLowerCase().includes(trimmedSearch))
-      total = matched.length
-      students = matched.slice(offset, offset + limitNum)
-    } else {
-      let query = db.collection(C.STUDENTS) as FirebaseFirestore.Query
-      let countQuery = db.collection(C.STUDENTS) as FirebaseFirestore.Query
-      if (status) {
-        query = query.where('status', '==', status)
-        countQuery = countQuery.where('status', '==', status)
-      }
-      if (gradeLevel) {
-        query = query.where('gradeLevel', '==', Number(gradeLevel))
-        countQuery = countQuery.where('gradeLevel', '==', Number(gradeLevel))
-      }
-
-      const [totalForFilter, pageSnap] = await Promise.all([
-        getCount(countQuery),
-        query.orderBy('fullName').offset(offset).limit(limitNum).get(),
-      ])
-      total = totalForFilter
-      students = toDocs<Student>(pageSnap)
-    }
-
-    const result = await enrichStudents(students)
-
-    res.json({ data: result, total, page: pageNum, limit: limitNum, totalPages: Math.ceil(total / limitNum), totalAll, totalActive })
+    const { page = '1', limit = '20', search, status, classId, gradeLevel, cursor } = req.query as Record<string, string>
+    const pageNum = Math.max(1, Math.floor(Number(page) || 1))
+    const limitNum = Math.min(500, Math.max(1, Math.floor(Number(limit) || 20)))
+    const { ids, ...pagination } = await getStudentPage({ page: pageNum, limit: limitNum, search, status, classId, gradeLevel, cursor })
+    const loaded = await loadStudentsByIds(ids)
+    const positions = new Map(ids.map((id, index) => [id, index]))
+    loaded.sort((a, b) => positions.get(a.id)! - positions.get(b.id)!)
+    const result = await enrichStudents(loaded)
+    res.json({ data: result, ...pagination })
   } catch (err) {
     next(err)
   }

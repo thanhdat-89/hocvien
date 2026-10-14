@@ -372,6 +372,7 @@ export default function Students() {
   const { canManageStudents, canImportStudents } = useAuth()
 
   const searchRef = useRef<ReturnType<typeof setTimeout>>()
+  const pageCursors = useRef(new Map<string, string>())
 
   const studentsQuery = useQuery<{
     data: Student[]
@@ -379,13 +380,25 @@ export default function Students() {
     totalPages: number
     totalAll: number
     totalActive: number
+    nextCursor: string | null
   }>({
     queryKey: ['students', page, debouncedSearch, gradeLevel],
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE) })
       if (debouncedSearch) params.set('search', debouncedSearch)
       if (gradeLevel) params.set('gradeLevel', gradeLevel)
-      const res = await api.get(`/students?${params}`)
+      const filterKey = JSON.stringify([debouncedSearch, gradeLevel])
+      const cursor = pageCursors.current.get(`${filterKey}:${page}`)
+      if (cursor) params.set('cursor', cursor)
+      let res
+      try { res = await api.get(`/students?${params}`) }
+      catch (error: any) {
+        if (error.response?.status !== 409 || !cursor) throw error
+        pageCursors.current.clear()
+        params.delete('cursor')
+        res = await api.get(`/students?${params}`)
+      }
+      if (res.data.nextCursor) pageCursors.current.set(`${filterKey}:${page + 1}`, res.data.nextCursor)
       return res.data
     },
     placeholderData: (prev) => prev, // giữ data cũ khi chuyển trang → không flash trắng
@@ -398,7 +411,10 @@ export default function Students() {
   const totalActive = studentsQuery.data?.totalActive ?? 0
   const loading = studentsQuery.isLoading
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['students'] })
+  const invalidate = () => {
+    pageCursors.current.clear()
+    return queryClient.invalidateQueries({ queryKey: ['students'] })
+  }
 
   const handleSearch = (q: string) => {
     setSearch(q)
