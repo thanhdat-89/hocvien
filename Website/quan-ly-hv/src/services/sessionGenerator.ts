@@ -50,12 +50,12 @@ export async function generateSessionsFromSchedule(
   const sessionDates: string[] = []
 
   const current = new Date(fromDate)
-  while (current.getDay() !== targetDow) current.setDate(current.getDate() + 1)
+  while (current.getUTCDay() !== targetDow) current.setUTCDate(current.getUTCDate() + 1)
 
   while (current <= toDate) {
     const dateStr = current.toISOString().slice(0, 10)
     if (!holidaySet.has(dateStr)) sessionDates.push(dateStr)
-    current.setDate(current.getDate() + 7)
+    current.setUTCDate(current.getUTCDate() + 7)
   }
 
   if (sessionDates.length === 0) return 0
@@ -110,8 +110,8 @@ export async function generateSessionsForClassMonth(
   year: number,
   month: number
 ): Promise<number> {
-  const fromDate = new Date(year, month - 1, 1)
-  const toDate = new Date(year, month, 0)
+  const fromDate = new Date(Date.UTC(year, month - 1, 1))
+  const toDate = new Date(Date.UTC(year, month, 0))
 
   const fromStr = fromDate.toISOString().slice(0, 10)
   const toStr = toDate.toISOString().slice(0, 10)

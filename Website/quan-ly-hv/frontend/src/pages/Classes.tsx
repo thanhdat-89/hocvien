@@ -404,9 +404,10 @@ function EditClassModal({ cls, onClose, onSaved }: { cls: Class; onClose: () => 
     tuitionRate: String(cls.tuitionRate ?? ''),
     startDate: cls.startDate ?? todayLocal,
     endDate: cls.endDate ?? '',
-    effectiveDate: cls.startDate ?? todayLocal,
+    effectiveDate: todayLocal,
   })
   const [daySchedules, setDaySchedules] = useState<Record<string, DaySchedule>>({})
+  const [schedulesLoaded, setSchedulesLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -415,9 +416,12 @@ function EditClassModal({ cls, onClose, onSaved }: { cls: Class; onClose: () => 
     api.get(`/schedules?classId=${cls.id}`).then((r) => {
       const list = Array.isArray(r.data) ? r.data : r.data?.data ?? []
       const existing: Record<string, DaySchedule> = {}
-      for (const s of list) existing[s.dayOfWeek] = { startTime: s.startTime, endTime: s.endTime }
+      for (const s of list.filter((s: any) => s.effectiveFrom <= todayLocal && (!s.effectiveTo || s.effectiveTo >= todayLocal))) {
+        existing[s.dayOfWeek] = { startTime: s.startTime, endTime: s.endTime }
+      }
       setDaySchedules(existing)
-    }).catch(() => {})
+      setSchedulesLoaded(true)
+    }).catch(() => setError('Không tải được lịch học. Vui lòng mở lại để thử lại.'))
   }, [cls.id])
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -438,8 +442,17 @@ function EditClassModal({ cls, onClose, onSaved }: { cls: Class; onClose: () => 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.name) { setError('Vui lòng nhập tên lớp'); return }
+    if (!schedulesLoaded) { setError('Lịch học chưa tải xong. Vui lòng thử lại.'); return }
     setSaving(true); setError('')
     try {
+      const oldRes = await api.get(`/schedules?classId=${cls.id}`)
+      const oldList = Array.isArray(oldRes.data) ? oldRes.data : oldRes.data?.data ?? []
+      const activeOld = oldList.filter((s: any) => s.effectiveFrom <= todayLocal && (!s.effectiveTo || s.effectiveTo >= todayLocal))
+      const oldDays = activeOld.map((s: any) => `${s.dayOfWeek}:${s.startTime}-${s.endTime}`).sort()
+      const newDays = Object.entries(daySchedules).map(([day, time]) => `${day}:${time.startTime}-${time.endTime}`).sort()
+      const scheduleChanged = JSON.stringify(oldDays) !== JSON.stringify(newDays)
+        || form.endDate !== (cls.endDate ?? '')
+        || form.startDate !== (cls.startDate ?? todayLocal)
       const updates: Record<string, unknown> = { name: form.name }
       if (form.teacherId) updates.teacherId = form.teacherId
       if (form.tuitionRate) updates.tuitionRate = Number(form.tuitionRate)
@@ -447,16 +460,11 @@ function EditClassModal({ cls, onClose, onSaved }: { cls: Class; onClose: () => 
       if (form.endDate) updates.endDate = form.endDate
       await api.put(`/classes/${cls.id}`, updates)
 
-      // Xóa schedules cũ rồi tạo lại
-      const oldRes = await api.get(`/schedules?classId=${cls.id}`)
-      const oldList = Array.isArray(oldRes.data) ? oldRes.data : oldRes.data?.data ?? []
-      await Promise.all(oldList.map((s: any) => api.delete(`/schedules/${s.id}`).catch(() => {})))
-
-      // Xoá SCHEDULED sessions từ ngày áp dụng trở đi
-      await api.delete(`/sessions/scheduled?classId=${cls.id}`).catch(() => {})
-
-      const days = Object.entries(daySchedules)
-      if (days.length > 0) {
+      // Chỉ xây lại buổi học khi lịch thực sự đổi. Đổi tên lớp không ảnh hưởng học phí.
+      if (scheduleChanged) {
+        await api.delete(`/sessions/scheduled?classId=${encodeURIComponent(cls.id)}&fromDate=${form.effectiveDate}`)
+        await Promise.all(activeOld.map((s: any) => api.delete(`/schedules/${s.id}`)))
+        const days = Object.entries(daySchedules)
         await Promise.all(days.map(([dayOfWeek, { startTime, endTime }]) =>
           api.post('/schedules', {
             classId: cls.id, dayOfWeek, startTime, endTime,
@@ -465,11 +473,11 @@ function EditClassModal({ cls, onClose, onSaved }: { cls: Class; onClose: () => 
           })
         ))
         // Generate từ effectiveDate đến hết tháng sau
-        const eff = new Date(form.effectiveDate)
+        const eff = new Date(`${form.effectiveDate}T00:00:00`)
         const nxt = new Date(eff); nxt.setMonth(nxt.getMonth() + 1)
         await Promise.all([
-          api.post('/schedules/generate-month', { classId: cls.id, month: eff.getMonth() + 1, year: eff.getFullYear() }).catch(() => {}),
-          api.post('/schedules/generate-month', { classId: cls.id, month: nxt.getMonth() + 1, year: nxt.getFullYear() }).catch(() => {}),
+          api.post('/schedules/generate-month', { classId: cls.id, month: eff.getMonth() + 1, year: eff.getFullYear() }),
+          api.post('/schedules/generate-month', { classId: cls.id, month: nxt.getMonth() + 1, year: nxt.getFullYear() }),
         ])
       }
       onSaved()
@@ -569,7 +577,7 @@ function EditClassModal({ cls, onClose, onSaved }: { cls: Class; onClose: () => 
           </div>
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={onClose} className="flex-1 btn-secondary justify-center">Huỷ</button>
-            <button type="submit" disabled={saving} className="flex-1 btn-primary justify-center disabled:opacity-60">
+            <button type="submit" disabled={saving || !schedulesLoaded} className="flex-1 btn-primary justify-center disabled:opacity-60">
               {saving ? 'Đang lưu...' : 'Lưu thay đổi'}
             </button>
           </div>

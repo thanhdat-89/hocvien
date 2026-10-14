@@ -58,29 +58,25 @@ router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) =
   }
 })
 
-// DELETE /api/sessions/scheduled?classId=X&fromDate=YYYY-MM-DD — xoá SCHEDULED sessions từ ngày đó trở đi
-// Khi không có fromDate: xoá tất cả SCHEDULED + COMPLETED sessions không có điểm danh học viên
+// DELETE /api/sessions/scheduled?classId=X&fromDate=YYYY-MM-DD — chỉ xoá buổi chưa diễn ra từ ngày áp dụng lịch mới
 router.delete('/scheduled', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { classId, fromDate } = req.query as Record<string, string>
     if (!classId) { res.status(400).json({ message: 'Cần classId' }); return }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate ?? '')) {
+      res.status(400).json({ message: 'Cần fromDate theo định dạng YYYY-MM-DD để bảo vệ lịch học cũ' }); return
+    }
 
     const snap = await db.collection(C.SESSIONS)
       .where('classId', '==', classId)
       .get()
 
-    let toDelete = snap.docs.filter(d => {
+    const toDelete = snap.docs.filter(d => {
       const data = d.data()
       if (data.status !== 'SCHEDULED') return false
-      if (fromDate && (data.sessionDate as string) < fromDate) return false
+      if ((data.sessionDate as string) < fromDate) return false
       return true
     })
-
-    // Khi không có fromDate (full cleanup khi edit lịch): xoá thêm tất cả COMPLETED sessions + attendance liên quan
-    if (!fromDate) {
-      const completedDocs = snap.docs.filter(d => d.data().status === 'COMPLETED')
-      toDelete = [...toDelete, ...completedDocs]
-    }
 
     // Xoá attendance records liên quan trước
     if (toDelete.length > 0) {
