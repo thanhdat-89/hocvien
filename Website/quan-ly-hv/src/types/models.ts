@@ -100,6 +100,8 @@ export interface Class {
   room?: string
   maxStudents?: number
   tuitionRate?: number
+  tuitionRateHistory?: { effectiveMonth: string; rate: number }[]
+  tuitionRateEffectiveMonth?: string
   sessionsPerMonth?: number
   gradeLevel?: number
   startDate?: string

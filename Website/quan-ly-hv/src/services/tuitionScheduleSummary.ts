@@ -1,5 +1,6 @@
 import { db, C, toDocs } from '../lib/firebase'
 import type { TuitionRecord, Payment } from '../types/models'
+import { classRateForMonth } from './classChange'
 
 /** Shared calculation for the tuition page and automated exports. */
 export async function getTuitionScheduleSummary(month: number, year: number, sourceDb: Pick<FirebaseFirestore.Firestore, 'collection'> = db) {
@@ -84,7 +85,7 @@ export async function getTuitionScheduleSummary(month: number, year: number, sou
     const student = studentMap[enrollment.studentId]
     if (!cls || !student) continue
 
-    const ratePerSession: number = (enrollment.customTuitionRate as number) || (cls.tuitionRate as number) || 0
+    const ratePerSession: number = (enrollment.customTuitionRate as number) || classRateForMonth(cls, m, y)
 
     const classSessions = sessionsByClass[enrollment.classId] ?? []
     const sessions = classSessions.filter((sess: any) => {

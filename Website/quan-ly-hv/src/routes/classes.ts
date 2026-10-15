@@ -1,11 +1,26 @@
-import { Router, Response, NextFunction } from 'express'
+import { Router, Request, Response, NextFunction } from 'express'
 import { db, C, s, toDocs, toObj, paginate } from '../lib/firebase'
 import { authenticate, requireRole } from '../middleware/auth'
 import { activityContext } from '../middleware/activityContext'
 import { AuthRequest } from '../types'
 import type { Class, ClassEnrollment } from '../types/models'
+import { applyClassChange, prepareClassChange } from '../services/classChange'
+import { auditClassTuition } from '../services/classIntegrityAudit'
 
 const router = Router()
+router.get('/cron/audit', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!process.env.CRON_SECRET || req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) {
+      res.status(401).json({ message: 'Unauthorized' }); return
+    }
+    const localDate = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' })
+    const [year, month] = localDate.slice(0, 7).split('-').map(Number)
+    const report = await auditClassTuition(month, year)
+    await db.collection('classIntegrityAudits').doc(localDate).set({ ...report, createdAt: now() })
+    if (report.anomalies.length) console.warn('[Class integrity]', JSON.stringify(report))
+    res.json({ period: report.period, checkedClasses: report.checkedClasses, anomalies: report.anomalies.length })
+  } catch (err) { next(err) }
+})
 router.use(authenticate)
 router.use(activityContext)
 const now = () => new Date().toISOString()
@@ -110,6 +125,19 @@ router.post('/', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Re
 })
 
 // PUT /api/classes/:id
+router.post('/:id/change-preview', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const plan = await prepareClassChange(s(req.params.id), req.body)
+    res.json({ ...plan.summary, previewToken: plan.token })
+  } catch (err) { next(err) }
+})
+
+router.put('/:id/change', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try { res.json(await applyClassChange(s(req.params.id), req.body)) }
+  catch (err) { next(err) }
+})
+
+// PUT /api/classes/:id — metadata-only compatibility route; never changes sessions.
 router.put('/:id', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { name, subjectId, teacherId, room, maxStudents, status, notes, tuitionRate, sessionsPerMonth, startDate, endDate } = req.body
@@ -118,18 +146,15 @@ router.put('/:id', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: 
     if (name !== undefined) updates.name = name
     if (room !== undefined) updates.room = room
     if (maxStudents !== undefined) updates.maxStudents = Number(maxStudents)
-    if (status !== undefined) updates.status = status
-    if (notes !== undefined) updates.notes = notes
-    if (tuitionRate !== undefined) updates.tuitionRate = Number(tuitionRate)
-    if (sessionsPerMonth !== undefined) updates.sessionsPerMonth = Number(sessionsPerMonth)
-    if (startDate !== undefined) updates.startDate = startDate
-    if (endDate !== undefined) updates.endDate = endDate
-
-    if (subjectId) {
-      const d = await db.collection(C.SUBJECTS).doc(subjectId).get()
-      updates.subjectId = subjectId
-      updates.subjectName = d.data()?.name
+    if (status !== undefined || subjectId !== undefined || sessionsPerMonth !== undefined) {
+      res.status(409).json({ message: 'Thông tin ảnh hưởng lịch và học phí cần được đổi qua chức năng chuyên biệt' }); return
     }
+    if (notes !== undefined) updates.notes = notes
+    if (tuitionRate !== undefined) { res.status(409).json({ message: 'Đổi đơn giá phải dùng chức năng sửa lớp có ngày áp dụng' }); return }
+    if (startDate !== undefined || endDate !== undefined) {
+      res.status(409).json({ message: 'Không đổi ngày bắt đầu/kết thúc qua thao tác sửa thông tin lớp' }); return
+    }
+
     if (teacherId) {
       const d = await db.collection(C.TEACHERS).doc(teacherId).get()
       updates.teacherId = teacherId
@@ -149,45 +174,55 @@ router.put('/:id/end', requireRole('ADMIN'), async (req: AuthRequest, res: Respo
   try {
     const classId = s(req.params.id)
     const { endDate } = req.body as { endDate?: string }
-    if (!endDate) { res.status(400).json({ message: 'Cần cung cấp ngày kết thúc' }); return }
-
-    // Cập nhật class
-    await db.collection(C.CLASSES).doc(classId).update({ status: 'CLOSED', endDate, updatedAt: now() })
-
-    // Xoá schedules (lịch lặp lại không còn cần thiết)
-    const schedulesSnap = await db.collection(C.SCHEDULES).where('classId', '==', classId).get()
-    await Promise.all(schedulesSnap.docs.map(d => d.ref.delete()))
-
-    // Xoá SCHEDULED sessions sau endDate + attendances liên quan (filter in-memory để tránh cần composite index)
-    const scheduledSnap = await db.collection(C.SESSIONS)
-      .where('classId', '==', classId)
-      .where('status', '==', 'SCHEDULED')
-      .get()
-    const futureSessions = scheduledSnap.docs.filter(d => (d.data().sessionDate as string) > endDate)
-    const futureSessionIds = futureSessions.map(d => d.id)
-    await Promise.all(futureSessions.map(d => d.ref.delete()))
-
-    if (futureSessionIds.length > 0) {
-      // Firestore 'in' chỉ hỗ trợ tối đa 30 phần tử
-      const chunks = []
-      for (let i = 0; i < futureSessionIds.length; i += 30) chunks.push(futureSessionIds.slice(i, i + 30))
-      const [studAttDocs, teachAttDocs] = await Promise.all([
-        Promise.all(chunks.map(c => db.collection(C.STUDENT_ATTENDANCES).where('sessionId', 'in', c).get())),
-        Promise.all(chunks.map(c => db.collection(C.TEACHER_ATTENDANCES).where('sessionId', 'in', c).get())),
-      ])
-      await Promise.all([
-        ...studAttDocs.flatMap(s => s.docs.map(d => d.ref.delete())),
-        ...teachAttDocs.flatMap(s => s.docs.map(d => d.ref.delete())),
-      ])
+    const endDateTime = endDate ? Date.parse(`${endDate}T00:00:00Z`) : NaN
+    if (!endDate || !/^\d{4}-\d{2}-\d{2}$/.test(endDate) || !Number.isFinite(endDateTime)
+      || new Date(endDateTime).toISOString().slice(0, 10) !== endDate) {
+      res.status(400).json({ message: 'Ngày kết thúc không hợp lệ' }); return
+    }
+    const [classDoc, tuitionSnap] = await Promise.all([
+      db.collection(C.CLASSES).doc(classId).get(),
+      db.collection(C.TUITION_RECORDS).where('classId', '==', classId).get(),
+    ])
+    if (!classDoc.exists) { res.status(404).json({ message: 'Không tìm thấy lớp học' }); return }
+    if (endDate < new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' })) {
+      res.status(409).json({ message: 'Không thể kết thúc lớp trong quá khứ vì có thể ảnh hưởng học phí đã lập' }); return
+    }
+    if (tuitionSnap.docs.some(d => {
+      const data = d.data()
+      const period = `${data.billingYear}-${String(data.billingMonth).padStart(2, '0')}`
+      return period >= endDate.slice(0, 7)
+    })) {
+      res.status(409).json({ message: 'Đã có phiếu học phí trong hoặc sau tháng kết thúc; cần đối chiếu trước' }); return
     }
 
-    // Xoá tuition records có dueDate sau endDate
-    const tuitionSnap = await db.collection(C.TUITION_RECORDS).where('classId', '==', classId).get()
-    const futureTuition = tuitionSnap.docs.filter(d => {
-      const due = d.data().dueDate as string | undefined
-      return due && due > endDate
-    })
-    await Promise.all(futureTuition.map(d => d.ref.delete()))
+    const [schedulesSnap, scheduledSnap] = await Promise.all([
+      db.collection(C.SCHEDULES).where('classId', '==', classId).get(),
+      db.collection(C.SESSIONS).where('classId', '==', classId).where('status', '==', 'SCHEDULED').get(),
+    ])
+    const futureSessions = scheduledSnap.docs.filter(d => (d.data().sessionDate as string) > endDate)
+    const futureSessionIds = futureSessions.map(d => d.id)
+    const attendanceDocs: FirebaseFirestore.QueryDocumentSnapshot[] = []
+    if (futureSessionIds.length > 0) {
+      for (let i = 0; i < futureSessionIds.length; i += 30) {
+        const chunk = futureSessionIds.slice(i, i + 30)
+        const [students, teachers] = await Promise.all([
+          db.collection(C.STUDENT_ATTENDANCES).where('sessionId', 'in', chunk).get(),
+          db.collection(C.TEACHER_ATTENDANCES).where('sessionId', 'in', chunk).get(),
+        ])
+        attendanceDocs.push(...students.docs, ...teachers.docs)
+      }
+    }
+
+    const schedulesToEnd = schedulesSnap.docs.filter(d => !d.data().effectiveTo || d.data().effectiveTo > endDate)
+    if (1 + schedulesToEnd.length + futureSessions.length + attendanceDocs.length > 450) {
+      res.status(409).json({ message: 'Lớp có quá nhiều buổi tương lai; cần xử lý riêng trước khi kết thúc' }); return
+    }
+    const batch = db.batch()
+    batch.update(classDoc.ref, { status: 'CLOSED', endDate, updatedAt: now() })
+    for (const schedule of schedulesToEnd) batch.update(schedule.ref, { effectiveTo: endDate })
+    for (const session of futureSessions) batch.delete(session.ref)
+    for (const attendance of attendanceDocs) batch.delete(attendance.ref)
+    await batch.commit()
 
     res.json({ message: 'Đã kết thúc lớp học' })
   } catch (err) { next(err) }
@@ -206,17 +241,16 @@ router.delete('/:id', requireRole('ADMIN'), async (req: AuthRequest, res: Respon
       db.collection(C.TEACHER_ATTENDANCES).where('classId', '==', classId).get(),
       db.collection(C.TUITION_RECORDS).where('classId', '==', classId).get(),
     ])
+    if (!sessionsSnap.empty || !enrollSnap.empty || !tuitionSnap.empty) {
+      res.status(409).json({ message: 'Lớp đã có lịch sử học tập hoặc học phí. Hãy kết thúc lớp thay vì xoá.' }); return
+    }
 
-    await Promise.all([
-      ...schedulesSnap.docs.map(d => d.ref.delete()),
-      ...sessionsSnap.docs.map(d => d.ref.delete()),
-      ...enrollSnap.docs.map(d => d.ref.delete()),
-      ...studAttSnap.docs.map(d => d.ref.delete()),
-      ...teachAttSnap.docs.map(d => d.ref.delete()),
-      ...tuitionSnap.docs.map(d => d.ref.delete()),
-    ])
-
-    await db.collection(C.CLASSES).doc(classId).delete()
+    const related = [...schedulesSnap.docs, ...studAttSnap.docs, ...teachAttSnap.docs]
+    if (related.length > 450) { res.status(409).json({ message: 'Lớp có quá nhiều dữ liệu liên quan; cần xử lý riêng' }); return }
+    const batch = db.batch()
+    related.forEach(d => batch.delete(d.ref))
+    batch.delete(db.collection(C.CLASSES).doc(classId))
+    await batch.commit()
     res.json({ message: 'Đã xoá lớp học' })
   } catch (err) { next(err) }
 })

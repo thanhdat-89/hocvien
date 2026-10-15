@@ -1,5 +1,6 @@
 import { db, C, toDocs } from './firebase'
 import type { ClassEnrollment } from '../types/models'
+import { classRateForMonth } from '../services/classChange'
 
 export interface TuitionSummaryRow {
   monthKey: string
@@ -56,7 +57,6 @@ export async function computeTuitionSummary(studentId: string): Promise<TuitionS
     )
 
     const cls = classMap[enroll.classId] ?? {}
-    const rate = (enroll as any).customTuitionRate || cls.tuitionRate || 0
 
     const today = new Date().toISOString().slice(0, 10)
     const promoSnap = await db.collection(C.STUDENT_PROMOTIONS)
@@ -75,6 +75,7 @@ export async function computeTuitionSummary(studentId: string): Promise<TuitionS
 
     Object.entries(monthCounts).forEach(([mk, count]) => {
       const [y, m] = mk.split('-')
+      const rate = (enroll as any).customTuitionRate || classRateForMonth(cls, Number(m), Number(y))
       const baseAmt = count * rate
 
       let discount = 0

@@ -20,6 +20,10 @@
   ],
   "crons": [
     {
+      "path": "/api/classes/cron/audit",
+      "schedule": "0 23 * * *"
+    },
+    {
       "path": "/api/activity/cleanup",
       "schedule": "0 3 * * 0"
     },

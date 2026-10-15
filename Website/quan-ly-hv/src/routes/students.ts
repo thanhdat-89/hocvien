@@ -3,6 +3,7 @@ import { admin, db, C, s, toObj, toDocs, paginate } from '../lib/firebase'
 import { syncPrimaryParentToStudent } from '../lib/studentSync'
 import { recountClassActiveStudents } from '../lib/classSync'
 import { computeTuitionSummary } from '../lib/tuition'
+import { classRateForMonth } from '../services/classChange'
 import { requireRole } from '../middleware/auth'
 import { authenticate } from '../middleware/auth'
 import { activityContext } from '../middleware/activityContext'
@@ -622,7 +623,7 @@ router.get('/:id/schedule', async (req: AuthRequest, res: Response, next: NextFu
         })
         .forEach((s: any) => {
           // Học phí buổi: ưu tiên customTuitionRate của enrollment, fallback về class tuitionRate
-          const rate = (enroll?.customTuitionRate as number) || (cls.tuitionRate as number) || 0
+          const rate = (enroll?.customTuitionRate as number) || classRateForMonth(cls, month, year)
           allSessions.push({
             ...s,
             className: (cls.name as string) || s.className,

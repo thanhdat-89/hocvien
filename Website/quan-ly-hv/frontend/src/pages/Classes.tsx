@@ -31,6 +31,14 @@ function toISO(date: Date) {
   return `${y}-${m}-${d}`
 }
 
+function displayedClassRate(cls: Class) {
+  const month = toISO(new Date()).slice(0, 7)
+  const applicable = cls.tuitionRateHistory
+    ?.filter(item => item.effectiveMonth <= month)
+    .sort((a, b) => b.effectiveMonth.localeCompare(a.effectiveMonth))[0]
+  return applicable?.rate ?? cls.tuitionRate
+}
+
 const DAY_LABELS = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN']
 const SCHEDULE_DAY_ORDER = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']
 const SCHEDULE_DAY_LABELS: Record<string, string> = {
@@ -398,15 +406,17 @@ function ClassModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
 function EditClassModal({ cls, onClose, onSaved }: { cls: Class; onClose: () => void; onSaved: () => void }) {
   const [teachers, setTeachers] = useState<any[]>([])
   const todayLocal = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` })()
+  const tomorrowLocal = (() => { const d = new Date(); d.setDate(d.getDate() + 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` })()
+  const nextMonth = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` })()
   const [form, setForm] = useState({
     name: cls.name,
     teacherId: cls.teacherId ?? '',
     tuitionRate: String(cls.tuitionRate ?? ''),
-    startDate: cls.startDate ?? todayLocal,
-    endDate: cls.endDate ?? '',
-    effectiveDate: todayLocal,
+    effectiveDate: tomorrowLocal,
+    rateEffectiveMonth: nextMonth,
   })
   const [daySchedules, setDaySchedules] = useState<Record<string, DaySchedule>>({})
+  const [preview, setPreview] = useState<null | { previewToken: string; scheduleChanged: boolean; rateChanged: boolean; removeSessions: number; createSessions: number; protectedSessions: number }>(null)
   const [schedulesLoaded, setSchedulesLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -424,18 +434,23 @@ function EditClassModal({ cls, onClose, onSaved }: { cls: Class; onClose: () => 
     }).catch(() => setError('Không tải được lịch học. Vui lòng mở lại để thử lại.'))
   }, [cls.id])
 
-  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    setPreview(null)
     setForm((f) => ({ ...f, [k]: e.target.value }))
+  }
 
   const toggleDay = (day: string) => {
+    setPreview(null)
     setDaySchedules((prev) => {
       if (prev[day]) { const n = { ...prev }; delete n[day]; return n }
       return { ...prev, [day]: { startTime: '08:00', endTime: '10:00' } }
     })
   }
 
-  const setDayTime = (day: string, field: 'startTime' | 'endTime', value: string) =>
+  const setDayTime = (day: string, field: 'startTime' | 'endTime', value: string) => {
+    setPreview(null)
     setDaySchedules((prev) => ({ ...prev, [day]: { ...prev[day], [field]: value } }))
+  }
 
   const selectedDays = DAY_OF_WEEK_OPTIONS.filter((d) => daySchedules[d.value])
 
@@ -445,40 +460,19 @@ function EditClassModal({ cls, onClose, onSaved }: { cls: Class; onClose: () => 
     if (!schedulesLoaded) { setError('Lịch học chưa tải xong. Vui lòng thử lại.'); return }
     setSaving(true); setError('')
     try {
-      const oldRes = await api.get(`/schedules?classId=${cls.id}`)
-      const oldList = Array.isArray(oldRes.data) ? oldRes.data : oldRes.data?.data ?? []
-      const activeOld = oldList.filter((s: any) => s.effectiveFrom <= todayLocal && (!s.effectiveTo || s.effectiveTo >= todayLocal))
-      const oldDays = activeOld.map((s: any) => `${s.dayOfWeek}:${s.startTime}-${s.endTime}`).sort()
-      const newDays = Object.entries(daySchedules).map(([day, time]) => `${day}:${time.startTime}-${time.endTime}`).sort()
-      const scheduleChanged = JSON.stringify(oldDays) !== JSON.stringify(newDays)
-        || form.endDate !== (cls.endDate ?? '')
-        || form.startDate !== (cls.startDate ?? todayLocal)
-      const updates: Record<string, unknown> = { name: form.name }
-      if (form.teacherId) updates.teacherId = form.teacherId
-      if (form.tuitionRate) updates.tuitionRate = Number(form.tuitionRate)
-      if (form.startDate) updates.startDate = form.startDate
-      if (form.endDate) updates.endDate = form.endDate
-      await api.put(`/classes/${cls.id}`, updates)
-
-      // Chỉ xây lại buổi học khi lịch thực sự đổi. Đổi tên lớp không ảnh hưởng học phí.
-      if (scheduleChanged) {
-        await api.delete(`/sessions/scheduled?classId=${encodeURIComponent(cls.id)}&fromDate=${form.effectiveDate}`)
-        await Promise.all(activeOld.map((s: any) => api.delete(`/schedules/${s.id}`)))
-        const days = Object.entries(daySchedules)
-        await Promise.all(days.map(([dayOfWeek, { startTime, endTime }]) =>
-          api.post('/schedules', {
-            classId: cls.id, dayOfWeek, startTime, endTime,
-            effectiveFrom: form.effectiveDate,
-            ...(form.endDate && { effectiveTo: form.endDate }),
-          })
-        ))
-        // Generate từ effectiveDate đến hết tháng sau
-        const eff = new Date(`${form.effectiveDate}T00:00:00`)
-        const nxt = new Date(eff); nxt.setMonth(nxt.getMonth() + 1)
-        await Promise.all([
-          api.post('/schedules/generate-month', { classId: cls.id, month: eff.getMonth() + 1, year: eff.getFullYear() }),
-          api.post('/schedules/generate-month', { classId: cls.id, month: nxt.getMonth() + 1, year: nxt.getFullYear() }),
-        ])
+      const payload = { name: form.name, teacherId: form.teacherId || null,
+        tuitionRate: form.tuitionRate === '' ? 0 : Number(form.tuitionRate),
+        rateEffectiveMonth: form.rateEffectiveMonth, effectiveDate: form.effectiveDate,
+        days: Object.entries(daySchedules).map(([dayOfWeek, time]) => ({ dayOfWeek, ...time })) }
+      if (!preview) {
+        const result = await api.post(`/classes/${cls.id}/change-preview`, payload)
+        if (result.data.scheduleChanged || result.data.rateChanged) {
+          setPreview(result.data)
+          return
+        }
+        await api.put(`/classes/${cls.id}/change`, { ...payload, previewToken: result.data.previewToken })
+      } else {
+        await api.put(`/classes/${cls.id}/change`, { ...payload, previewToken: preview.previewToken })
       }
       onSaved()
     } catch (err: any) {
@@ -552,33 +546,31 @@ function EditClassModal({ cls, onClose, onSaved }: { cls: Class; onClose: () => 
               </div>
             )}
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Ngày bắt đầu</label>
-              <input type="date" value={form.startDate} onChange={set('startDate')}
-                className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
-            </div>
-            <div>
-              <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">
-                Ngày kết thúc <span className="text-outline/50 normal-case font-normal">(tuỳ chọn)</span>
-              </label>
-              <input type="date" value={form.endDate} onChange={set('endDate')}
-                className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
-            </div>
-          </div>
+          <p className="text-xs text-outline">Ngày bắt đầu: {cls.startDate || 'Chưa đặt'}. Để kết thúc lớp, dùng thao tác Kết thúc lớp trong danh sách.</p>
           <div className="bg-primary/5 border border-primary/20 rounded-2xl p-4">
             <label className="text-[10px] font-bold text-primary uppercase tracking-wider block mb-1.5 flex items-center gap-1.5">
               <span className="material-symbols-outlined text-[14px]">update</span>
-              Ngày áp dụng lịch mới *
+              Ngày áp dụng nếu đổi lịch *
             </label>
             <input type="date" value={form.effectiveDate} onChange={set('effectiveDate')} required
               className="w-full bg-white border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
-            <p className="text-[11px] text-primary/70 mt-1.5">Các buổi học chưa diễn ra từ ngày này sẽ được tạo lại theo lịch mới. Buổi đã hoàn thành không bị ảnh hưởng.</p>
+            <p className="text-[11px] text-primary/70 mt-1.5">Chỉ buổi học tương lai được thay đổi. Kỳ đã lập phiếu học phí sẽ được bảo vệ.</p>
           </div>
+          <div>
+            <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Áp dụng đơn giá mới từ tháng</label>
+            <input type="month" value={form.rateEffectiveMonth} min={nextMonth} onChange={set('rateEffectiveMonth')}
+              className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
+          </div>
+          {preview && <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-sm text-on-surface space-y-1">
+            <p className="font-bold">Xem trước tác động</p>
+            <p>{preview.scheduleChanged ? `Thay ${preview.removeSessions} buổi tương lai bằng ${preview.createSessions} buổi theo lịch mới.` : 'Lịch học không thay đổi.'}</p>
+            <p>{preview.rateChanged ? `Đơn giá mới áp dụng từ tháng ${form.rateEffectiveMonth}.` : 'Đơn giá không thay đổi.'}</p>
+            <p>{preview.protectedSessions} buổi đã hoàn thành được giữ nguyên. Phiếu học phí đã lập không bị sửa.</p>
+          </div>}
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={onClose} className="flex-1 btn-secondary justify-center">Huỷ</button>
             <button type="submit" disabled={saving || !schedulesLoaded} className="flex-1 btn-primary justify-center disabled:opacity-60">
-              {saving ? 'Đang lưu...' : 'Lưu thay đổi'}
+              {saving ? 'Đang xử lý...' : preview ? 'Xác nhận lưu thay đổi' : 'Lưu thay đổi'}
             </button>
           </div>
         </form>
@@ -1090,7 +1082,14 @@ export default function Classes() {
                             <span className={days.length ? 'font-medium text-primary' : 'text-outline'}>{days.length ? days.map(day => SCHEDULE_DAY_LABELS[day] ?? day).join(', ') : 'Chưa có lịch'}</span>
                             {!!cls.sessionsPerMonth && <div className="mt-1 text-xs text-outline">{cls.sessionsPerMonth} buổi/tháng</div>}
                           </td>
-                          <td className="px-4 py-4 align-middle font-semibold tabular-nums text-on-surface">{(cls.tuitionRate ?? 0).toLocaleString('vi-VN')}đ</td>
+                          <td className="px-4 py-4 align-middle font-semibold tabular-nums text-on-surface">
+                            {displayedClassRate(cls).toLocaleString('vi-VN')}đ
+                            {cls.tuitionRateEffectiveMonth && cls.tuitionRateEffectiveMonth > toISO(new Date()).slice(0, 7) && (
+                              <div className="mt-1 text-xs font-normal text-outline">
+                                {cls.tuitionRate.toLocaleString('vi-VN')}đ từ {cls.tuitionRateEffectiveMonth.slice(5)}/{cls.tuitionRateEffectiveMonth.slice(0, 4)}
+                              </div>
+                            )}
+                          </td>
                           <td className="px-4 py-4 align-middle">
                             <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${cls.status === 'ACTIVE' ? 'bg-secondary-container/25 text-secondary' : 'bg-surface-container-low text-on-surface-variant'}`}>
                               <span className={`h-1.5 w-1.5 rounded-full ${cls.status === 'ACTIVE' ? 'bg-secondary' : 'bg-outline'}`} />

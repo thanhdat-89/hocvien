@@ -1,5 +1,6 @@
 import { db, C, toDocs } from '../lib/firebase'
 import type { ClassEnrollment, StudentPromotion, TuitionRecord, Payment } from '../types/models'
+import { classRateForMonth } from './classChange'
 
 const now = () => new Date().toISOString()
 
@@ -36,8 +37,8 @@ export async function calculateTuitionForStudent(
   if (!ratePerSession) {
     const classDoc = await db.collection(C.CLASSES).doc(classId).get()
     const classData = classDoc.data() || {}
-    if (classData.tuitionRate) {
-      ratePerSession = Number(classData.tuitionRate)
+    if (classRateForMonth(classData, month, year)) {
+      ratePerSession = classRateForMonth(classData, month, year)
     } else if (classData.subjectId) {
       const subjectDoc = await db.collection(C.SUBJECTS).doc(classData.subjectId as string).get()
       ratePerSession = Number(subjectDoc.data()?.tuitionRatePerSession || 0)
@@ -103,6 +104,20 @@ export async function calculateTuitionForStudent(
     .get()
 
   const isNew = existingSnap.empty
+  if (!isNew) {
+    const existing = existingSnap.docs[0]
+    const previous = existing.data() as TuitionRecord
+    if (previous.status === 'PAID' || previous.status === 'PARTIAL' || Number((previous as any).paidAmount || 0) > 0) {
+      return { tuitionRecord: { ...previous, id: existing.id }, isNew: false }
+    }
+    const [directInvoice, groupedInvoice] = await Promise.all([
+      db.collection('misaInvoices').doc(existing.id).get(),
+      db.collection('misaInvoices').where('recordIds', 'array-contains', existing.id).limit(1).get(),
+    ])
+    if (directInvoice.exists || !groupedInvoice.empty) {
+      return { tuitionRecord: { ...previous, id: existing.id }, isNew: false }
+    }
+  }
 
   const recordData = {
     studentId, studentName: studentDoc.data()!.fullName as string,

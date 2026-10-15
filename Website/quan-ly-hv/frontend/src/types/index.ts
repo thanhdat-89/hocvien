@@ -56,6 +56,8 @@ export interface Class {
   teacherName: string
   gradeLevel?: number
   tuitionRate: number
+  tuitionRateEffectiveMonth?: string
+  tuitionRateHistory?: { effectiveMonth: string; rate: number }[]
   sessionsPerMonth: number
   room?: string
   startDate: string
