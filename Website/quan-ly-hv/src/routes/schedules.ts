@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { db, C, s, toDocs, toObj } from '../lib/firebase'
 import { authenticate, requireRole } from '../middleware/auth'
+import { currentClassNames, displayClassName } from '../lib/classDisplayNames'
 import { AuthRequest } from '../types'
 import type { Schedule } from '../types/models'
 import { generateSessionsFromSchedule, generateSessionsForClassMonth } from '../services/sessionGenerator'
@@ -50,7 +51,9 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
     let query = db.collection(C.SCHEDULES) as FirebaseFirestore.Query
     if (classId) query = query.where('classId', '==', classId)
     const snap = await query.get()
-    res.json(toDocs<Schedule>(snap))
+    const schedules = toDocs<Schedule>(snap)
+    const classNames = await currentClassNames(schedules.map(schedule => schedule.classId))
+    res.json(schedules.map(schedule => displayClassName(schedule, classNames)))
   } catch (err) { next(err) }
 })
 

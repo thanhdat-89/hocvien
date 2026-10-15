@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { db, C, s, toDocs, toObj } from '../lib/firebase'
 import { computeTuitionSummary, loadStudentPromotions } from '../lib/tuition'
+import { currentClassNames } from '../lib/classDisplayNames'
 import { listMaterialsForStudent } from './materials'
 import { studentShortId } from '../services/sepayMatcher'
 import type { Student, ClassEnrollment, Class, Schedule, TuitionRecord, Payment, PrivateSession } from '../types/models'
@@ -240,13 +241,14 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
         updatedAt: data.updatedAt,
       }
     })
+    const scoreNames = await currentClassNames(monthlyScoresSnap.docs.map(doc => String(doc.data().classId || '')))
     const monthlyScores = monthlyScoresSnap.docs
       .map(d => ({ id: d.id, ...d.data() } as any))
-      .sort((a, b) => (b.year - a.year) || (b.month - a.month) || (a.className ?? '').localeCompare(b.className ?? '', 'vi'))
+      .sort((a, b) => (b.year - a.year) || (b.month - a.month) || (scoreNames.get(a.classId) ?? a.className ?? '').localeCompare(scoreNames.get(b.classId) ?? b.className ?? '', 'vi'))
       .map(m => ({
         id: m.id,
         classId: m.classId,
-        className: m.className,
+        className: scoreNames.get(m.classId) || m.className,
         year: m.year,
         month: m.month,
         expectedCount: m.expectedCount,

@@ -41,7 +41,7 @@ test('tuition and dashboard reuse summaries; financial writes invalidate before 
     admin:{firestore:{FieldPath:{documentId:()=> '__name__'}}},toDocs:snap=>snap.docs.map(d=>({id:d.id,...d.data()}))}
   const loaded = []
   Module._load = function(request,parent,isMain) {
-    if (request.endsWith('/lib/firebase')) return firebase
+    if (request.endsWith('/lib/firebase') || (request === './firebase' && parent?.filename.endsWith('/classDisplayNames.js'))) return firebase
     if (request.endsWith('/tuitionScheduleSummary')) return {getTuitionScheduleSummary:async()=>{calculations++;return structuredClone(summaryRows)}}
     const result = original.call(this,request,parent,isMain)
     if (parent && request.startsWith('.')) { const path = Module._resolveFilename(request,parent); if(path.includes('/dist/')) loaded.push(path) }

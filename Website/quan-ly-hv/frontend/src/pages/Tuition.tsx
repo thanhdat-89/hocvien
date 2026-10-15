@@ -80,33 +80,32 @@ export default function Tuition() {
     loadData()
   }, [month, year])
 
-  // Bỏ classFilter nếu lớp không thuộc khối đang chọn
+  // Keep the selection tied to the class ID when its display name changes.
   useEffect(() => {
-    if (gradeFilter != null && classFilter) {
-      const stillValid = rows.some(r => r.className === classFilter && r.gradeLevel === gradeFilter)
+    if (classFilter) {
+      const stillValid = rows.some(r => r.classId === classFilter && (gradeFilter == null || r.gradeLevel === gradeFilter))
       if (!stillValid) setClassFilter(null)
     }
-  }, [gradeFilter, rows])
+  }, [classFilter, gradeFilter, rows])
 
   // Danh sách khối lớp có trong dữ liệu
   const grades = Array.from(new Set(rows.map(r => r.gradeLevel).filter((g): g is number => g != null)))
     .sort((a, b) => a - b)
 
   // Danh sách lớp học có trong dữ liệu (lọc theo grade nếu đang chọn)
-  const classes = Array.from(new Set(
+  const classes = Array.from(new Map(
     rows
-      .filter(r => gradeFilter == null || r.gradeLevel === gradeFilter)
-      .map(r => r.className)
-      .filter(Boolean)
-  )).sort((a, b) => {
-    const na = Number(a.match(/\d+/)?.[0] ?? 999)
-    const nb = Number(b.match(/\d+/)?.[0] ?? 999)
-    return na - nb || a.localeCompare(b)
+      .filter(r => (gradeFilter == null || r.gradeLevel === gradeFilter) && r.classId && r.className)
+      .map(r => [r.classId, { id: r.classId, name: r.className }] as const)
+  ).values()).sort((a, b) => {
+    const na = Number(a.name.match(/\d+/)?.[0] ?? 999)
+    const nb = Number(b.name.match(/\d+/)?.[0] ?? 999)
+    return na - nb || a.name.localeCompare(b.name)
   })
 
   const filtered = rows.filter(r => {
     if (gradeFilter != null && r.gradeLevel !== gradeFilter) return false
-    if (classFilter && r.className !== classFilter) return false
+    if (classFilter && r.classId !== classFilter) return false
     return true
   })
 
@@ -322,7 +321,7 @@ export default function Tuition() {
     const wb = buildInvoiceWorkbook(filtered)
     const suffix = [
       gradeFilter != null ? `khoi${gradeFilter}` : '',
-      classFilter ? classFilter.replace(/\s+/g, '_') : '',
+      classFilter ? (classes.find(c => c.id === classFilter)?.name || classFilter).replace(/\s+/g, '_') : '',
     ].filter(Boolean).join('-')
     XLSX.writeFile(wb, `hoa-don-thang-${month}-${year}${suffix ? `-${suffix}` : ''}.xlsx`)
   }
@@ -438,15 +437,15 @@ export default function Tuition() {
               </button>
               {classes.map(c => (
                 <button
-                  key={c}
-                  onClick={() => setClassFilter(c === classFilter ? null : c)}
+                  key={c.id}
+                  onClick={() => setClassFilter(c.id === classFilter ? null : c.id)}
                   className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
-                    classFilter === c
+                    classFilter === c.id
                       ? 'bg-secondary text-on-secondary border-secondary shadow-sm'
                       : 'bg-surface-container-low text-outline border-outline-variant/20 hover:border-secondary/40 hover:text-secondary'
                   }`}
                 >
-                  {c}
+                  {c.name}
                 </button>
               ))}
             </div>

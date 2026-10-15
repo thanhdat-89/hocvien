@@ -3,6 +3,7 @@ import { admin, db, C, s, toObj, toDocs, paginate } from '../lib/firebase'
 import { syncPrimaryParentToStudent } from '../lib/studentSync'
 import { recountClassActiveStudents } from '../lib/classSync'
 import { computeTuitionSummary } from '../lib/tuition'
+import { currentClassNames, displayClassName } from '../lib/classDisplayNames'
 import { classRateForMonth } from '../services/classChange'
 import { requireRole } from '../middleware/auth'
 import { authenticate } from '../middleware/auth'
@@ -62,6 +63,7 @@ async function enrichStudents(pageStudents: (Student & { id: string })[]) {
     arr.push(e)
     enrollByStudent.set(e.studentId, arr)
   }
+  const classNames = await currentClassNames([...enrollByStudent.values()].flat().map(e => e.classId))
 
   const promoByStudent = new Map<string, any[]>()
   for (const doc of promoSnaps.flatMap(snap => snap.docs)) {
@@ -82,7 +84,7 @@ async function enrichStudents(pageStudents: (Student & { id: string })[]) {
           zalo: stu.primaryParentZalo ?? null,
         }
       : null
-    const enrollments = enrollByStudent.get(stu.id) ?? []
+    const enrollments = (enrollByStudent.get(stu.id) ?? []).map(e => displayClassName(e, classNames))
     const promotions = promoByStudent.get(stu.id) ?? []
     return { ...stu, primaryParent, enrollments, promotions }
   })
@@ -240,7 +242,9 @@ router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) =
     const enrollSnap = await db.collection(C.ENROLLMENTS)
       .where('studentId', '==', student.id)
       .get()
-    const enrollments = toDocs<ClassEnrollment>(enrollSnap)
+    const storedEnrollments = toDocs<ClassEnrollment>(enrollSnap)
+    const classNames = await currentClassNames(storedEnrollments.map(e => e.classId))
+    const enrollments = storedEnrollments.map(e => displayClassName(e, classNames))
 
     // Tuition records (6 tháng gần nhất) — sort in memory to avoid composite index requirement
     const tuitionSnap = await db.collection(C.TUITION_RECORDS)

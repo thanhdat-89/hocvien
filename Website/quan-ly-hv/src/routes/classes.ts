@@ -69,8 +69,9 @@ router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) =
 
     res.json({
       ...cls,
-      enrollments: toDocs<ClassEnrollment>(enrollSnap).filter(e => e.status === 'ACTIVE'),
-      schedules: toDocs(scheduleSnap),
+      enrollments: toDocs<ClassEnrollment>(enrollSnap).filter(e => e.status === 'ACTIVE')
+        .map(e => ({ ...e, className: cls.name })),
+      schedules: toDocs(scheduleSnap).map(schedule => ({ ...schedule, className: cls.name })),
     })
   } catch (err) {
     next(err)
@@ -267,10 +268,13 @@ router.delete('/:id', requireRole('ADMIN'), async (req: AuthRequest, res: Respon
 // GET /api/classes/:id/students
 router.get('/:id/students', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    const classDoc = await db.collection(C.CLASSES).doc(s(req.params.id)).get()
+    if (!classDoc.exists) { res.status(404).json({ message: 'Không tìm thấy lớp học' }); return }
     const snap = await db.collection(C.ENROLLMENTS)
       .where('classId', '==', req.params.id)
       .get()
     const enrollments = toDocs<ClassEnrollment>(snap).filter(e => e.status === 'ACTIVE')
+      .map(e => ({ ...e, className: String(classDoc.data()?.name || e.className) }))
 
     // Gắn thông tin phụ huynh liên hệ chính
     const result = await Promise.all(

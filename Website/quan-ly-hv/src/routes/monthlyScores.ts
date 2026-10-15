@@ -3,6 +3,7 @@ import { db, C, s, toObj } from '../lib/firebase'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
 import type { MonthlyScores, Session, PrivateSession, ClassEnrollment, Class } from '../types/models'
+import { currentClassNames, displayClassName } from '../lib/classDisplayNames'
 
 const router = Router()
 router.use(authenticate)
@@ -140,6 +141,9 @@ async function buildRows(year: number, month: number, classFilter?: string): Pro
     r.updatedAt = doc.updatedAt
   })
 
+  const classNames = await currentClassNames(rows.map(row => row.classId))
+  rows.forEach(row => { row.className = classNames.get(row.classId) || row.className })
+
   // Sort by class name, then student name
   rows.sort((a, b) => {
     const c = a.className.localeCompare(b.className, 'vi')
@@ -168,7 +172,9 @@ router.get('/student/:studentId', async (req: AuthRequest, res: Response, next: 
   try {
     const studentId = s(req.params.studentId)
     const snap = await db.collection(C.MONTHLY_SCORES).where('studentId', '==', studentId).get()
-    const docs = snap.docs.map(d => toObj<MonthlyScores>(d))
+    const stored = snap.docs.map(d => toObj<MonthlyScores>(d))
+    const classNames = await currentClassNames(stored.map(row => row.classId))
+    const docs = stored.map(row => displayClassName(row, classNames))
       .sort((a, b) => (b.year - a.year) || (b.month - a.month) || a.className.localeCompare(b.className, 'vi'))
     res.json(docs)
   } catch (err) { next(err) }

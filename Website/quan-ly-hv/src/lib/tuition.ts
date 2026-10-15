@@ -90,7 +90,7 @@ export async function computeTuitionSummary(studentId: string): Promise<TuitionS
       if (!rows[key]) {
         rows[key] = {
           monthKey: mk, month: Number(m), year: Number(y),
-          classId: enroll.classId, className: enroll.className || cls.name || '',
+          classId: enroll.classId, className: cls.name || enroll.className || '',
           totalSessions: 0, ratePerSession: rate, discountAmount: 0,
         }
       }

@@ -3,6 +3,7 @@ import { db, C, s, toDocs, toObj } from '../lib/firebase'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
 import type { Session } from '../types/models'
+import { currentClassNames, displayClassName } from '../lib/classDisplayNames'
 
 const router = Router()
 router.use(authenticate)
@@ -35,7 +36,9 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
     }
 
     const snap = await query.get()
-    const result = toDocs<Session>(snap).sort((a, b) =>
+    const stored = toDocs<Session>(snap)
+    const classNames = await currentClassNames(stored.map(session => session.classId))
+    const result = stored.map(session => displayClassName(session, classNames)).sort((a, b) =>
       a.sessionDate !== b.sessionDate
         ? a.sessionDate.localeCompare(b.sessionDate)
         : a.startTime.localeCompare(b.startTime)
@@ -52,7 +55,9 @@ router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) =
     const doc = await db.collection(C.SESSIONS).doc(s(req.params.id)).get()
     if (!doc.exists) { res.status(404).json({ message: 'Không tìm thấy buổi học' }); return }
 
-    res.json(toObj<Session>(doc))
+    const session = toObj<Session>(doc)
+    const classNames = await currentClassNames([session.classId])
+    res.json(displayClassName(session, classNames))
   } catch (err) {
     next(err)
   }

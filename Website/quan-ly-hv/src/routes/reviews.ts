@@ -2,6 +2,7 @@ import { Router, Response, NextFunction } from 'express'
 import { db, C, s, toDocs } from '../lib/firebase'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
+import { currentClassNames } from '../lib/classDisplayNames'
 
 const router = Router()
 router.use(authenticate)
@@ -34,13 +35,14 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
       db.collection(C.ENROLLMENTS).where('status', '==', 'ACTIVE').get(),
       db.collectionGroup('reviews').where('month', '==', month).get(),
     ])
+    const classNames = await currentClassNames(enrollSnap.docs.map(doc => String(doc.data().classId || '')))
 
     const enrollByStudent = new Map<string, { classId: string; className: string }[]>()
     enrollSnap.docs.forEach(d => {
       const e = d.data() as any
       if (!e.studentId || !e.classId) return
       const list = enrollByStudent.get(e.studentId) ?? []
-      list.push({ classId: e.classId, className: e.className ?? '' })
+      list.push({ classId: e.classId, className: classNames.get(e.classId) || e.className || '' })
       enrollByStudent.set(e.studentId, list)
     })
 
