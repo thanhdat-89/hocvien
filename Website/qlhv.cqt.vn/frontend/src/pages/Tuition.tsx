@@ -1,6 +1,6 @@
 import InvoiceWorkflowResultDialog, { type InvoiceWorkflowResult } from '../components/InvoiceWorkflowResultDialog'
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import TopBar from '../components/TopBar'
 import api from '../services/api'
 import { settleWithConcurrency } from '../services/settleWithConcurrency'
@@ -51,8 +51,11 @@ function buildZaloUrl(phone?: string | null): string | null {
 
 export default function Tuition() {
   const thisYear = new Date().getFullYear()
-  const [month, setMonth] = useState(new Date().getMonth() + 1)
-  const [year, setYear] = useState(thisYear)
+  const [searchParams] = useSearchParams()
+  const requestedMonth = Number(searchParams.get('month'))
+  const requestedYear = Number(searchParams.get('year'))
+  const [month, setMonth] = useState(requestedMonth >= 1 && requestedMonth <= 12 ? requestedMonth : new Date().getMonth() + 1)
+  const [year, setYear] = useState(requestedYear >= 2026 ? requestedYear : thisYear)
   const [rows, setRows] = useState<ScheduleRow[]>([])
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -124,7 +127,8 @@ export default function Tuition() {
     .filter(r => (r.tuitionRecord ? r.tuitionRecord.remainingAmount : r.finalAmount) > 0)
     .map(r => r.studentId)).size
 
-  const years = Array.from({ length: 4 }, (_, i) => thisYear - 1 + i)
+  const firstYear = Math.min(2026, thisYear - 1)
+  const years = Array.from({ length: thisYear + 2 - firstYear + 1 }, (_, i) => firstYear + i)
 
   const [creatingRow, setCreatingRow] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)

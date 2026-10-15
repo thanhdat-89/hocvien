@@ -13,6 +13,7 @@ router.use(authenticate)
 const DASHBOARD_TTL_MS = 5 * 60 * 1000 // 5 phút
 const REVENUE_TTL_MS = 12 * 60 * 60 * 1000 // 12 giờ
 const STUDENTS_BY_GRADE_TTL_MS = 10 * 60 * 1000 // 10 phút
+const DASHBOARD_METRICS_VERSION = 6
 
 function dateInVietnam(date = new Date()) {
   return date.toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit' })
@@ -22,6 +23,22 @@ function nextMonthStart(monthKey: string) {
   const [year, month] = monthKey.split('-').map(Number)
   const next = new Date(Date.UTC(year, month, 1))
   return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-01`
+}
+
+function monthsFromSeptember2026(throughMonthKey: string) {
+  const [throughYear, throughMonth] = throughMonthKey.split('-').map(Number)
+  const months: Array<{ year: number; month: number }> = []
+
+  for (let year = 2026, month = 9; year < throughYear || (year === throughYear && month <= throughMonth);) {
+    months.push({ year, month })
+    month += 1
+    if (month === 13) {
+      year += 1
+      month = 1
+    }
+  }
+
+  return months
 }
 
 
@@ -67,6 +84,7 @@ async function computeDashboard() {
   let unscheduledPrivateStudentsThisMonth: number | null = null
   let totalPrivateStudents: number | null = null
   let unpaidStudentsThisMonth: number | null = null
+  let unpaidStudentsByMonth: Array<{ year: number; month: number; count: number }> = []
   try {
     const [enrollmentsSnap, privateSchedulesSnap] = await Promise.all([
       db.collection(C.ENROLLMENTS).where('status', '==', 'ACTIVE').get(),
@@ -86,10 +104,16 @@ async function computeDashboard() {
 
   // Use the same schedule rows and outstanding amounts as the tuition page.
   try {
-    const summary = await getCachedTuitionSummary(Number(thisMonth.slice(5)), Number(thisMonth.slice(0, 4)))
-    unpaidStudentsThisMonth = summary.unpaidStudents
+    const months = monthsFromSeptember2026(thisMonth)
+    const summaries = await Promise.all(months.map(({ month, year }) => getCachedTuitionSummary(month, year)))
+    unpaidStudentsByMonth = months.map(({ month, year }, index) => ({
+      month,
+      year,
+      count: summaries[index].unpaidStudents,
+    }))
+    unpaidStudentsThisMonth = unpaidStudentsByMonth[unpaidStudentsByMonth.length - 1]?.count ?? null
   } catch (error: any) {
-    console.warn('[Dashboard] Tuition summary unavailable', error?.code ?? error?.name ?? 'unknown')
+    console.warn('[Dashboard] Tuition summaries unavailable', error?.code ?? error?.name ?? 'unknown')
   }
 
   return {
@@ -103,11 +127,12 @@ async function computeDashboard() {
       unscheduledPrivateStudentsThisMonth,
       totalPrivateStudents,
       unpaidStudentsThisMonth,
+      unpaidStudentsByMonth,
     },
     sessionsToday,
     recentPayments,
     metricsMonth: thisMonth,
-    metricsVersion: 5,
+    metricsVersion: DASHBOARD_METRICS_VERSION,
     cachedAt: Date.now(),
   }
 }
@@ -115,7 +140,7 @@ async function computeDashboard() {
 // Shared revision invalidation refreshes all workers after business mutations.
 router.get('/', async (_req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const view = await readView('dashboard', dateInVietnam(), computeDashboard, undefined, false, DASHBOARD_TTL_MS)
+    const view = await readView('dashboard', `v${DASHBOARD_METRICS_VERSION}-${dateInVietnam()}`, computeDashboard, undefined, false, DASHBOARD_TTL_MS)
     res.json(view.data)
   } catch (err) { next(err) }
 })
@@ -124,7 +149,7 @@ router.post('/refresh', async (_req: AuthRequest, res: Response, next: NextFunct
   try {
     const today = dateInVietnam()
     await getCachedTuitionSummary(Number(today.slice(5, 7)), Number(today.slice(0, 4)), true)
-    const view = await readView('dashboard', today, computeDashboard, undefined, true, DASHBOARD_TTL_MS)
+    const view = await readView('dashboard', `v${DASHBOARD_METRICS_VERSION}-${today}`, computeDashboard, undefined, true, DASHBOARD_TTL_MS)
     res.json(view.data)
   } catch (err) { next(err) }
 })

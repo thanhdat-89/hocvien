@@ -20,6 +20,11 @@ interface DashboardData {
     unscheduledPrivateStudentsThisMonth: number | null
     totalPrivateStudents: number | null
     unpaidStudentsThisMonth: number | null
+    unpaidStudentsByMonth: Array<{
+      year: number
+      month: number
+      count: number
+    }>
   }
   sessionsToday: Array<{
     id: string
@@ -92,6 +97,7 @@ export default function Dashboard() {
   const loading = dashQuery.isLoading
 
   const stats = data?.stats
+  const unpaidMonths = (stats?.unpaidStudentsByMonth ?? []).filter(item => item.count > 0)
 
   const revenueChartData = revenue.map(r => ({
     label: `T${r.month}`,
@@ -202,30 +208,34 @@ export default function Dashboard() {
             </div>
           </button>
 
-          {canSeeFinance && (
+          {canSeeFinance && unpaidMonths.map(({ year, month, count }) => {
+            const unpaidMonthLabel = `${month}/${year}`
+            return (
             <button
+              key={`${year}-${month}`}
               type="button"
-              onClick={() => navigate('/tuition')}
+              onClick={() => navigate(`/tuition?month=${month}&year=${year}`)}
               className="group w-full text-left bg-surface-container-lowest rounded-2xl p-6 border border-outline-variant/15 hover:border-secondary/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-secondary transition-colors"
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="p-3 rounded-xl bg-secondary/10 text-secondary">
                   <span className="material-symbols-outlined">payments</span>
                 </div>
-                <span className="text-xs font-semibold text-on-surface-variant bg-surface-container-low px-3 py-1.5 rounded-full">tháng {monthLabel}</span>
+                <span className="text-xs font-semibold text-on-surface-variant bg-surface-container-low px-3 py-1.5 rounded-full">tháng {unpaidMonthLabel}</span>
               </div>
               <div className="mt-5 flex items-end justify-between gap-4">
                 <div>
-                  <h2 className="text-lg font-headline font-bold text-on-surface">Học viên chưa thanh toán học phí — tháng {monthLabel}</h2>
+                  <h2 className="text-lg font-headline font-bold text-on-surface">Học viên chưa thanh toán học phí — tháng {unpaidMonthLabel}</h2>
                   <p className="text-sm text-on-surface-variant mt-1">Học viên phát sinh học phí trong tháng và còn tiền phải trả, kể cả chưa có phiếu</p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-4xl font-headline font-black text-on-surface">{stats?.unpaidStudentsThisMonth ?? '—'}</span>
+                  <span className="text-4xl font-headline font-black text-on-surface">{count}</span>
                   <span className="material-symbols-outlined text-outline group-hover:text-secondary transition-colors">chevron_right</span>
                 </div>
               </div>
             </button>
-          )}
+            )
+          })}
         </section>
 
         {/* Charts */}

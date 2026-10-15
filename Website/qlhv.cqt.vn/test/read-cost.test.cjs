@@ -59,8 +59,13 @@ test('tuition and dashboard reuse summaries; financial writes invalidate before 
     assert.deepEqual(await getCachedTuitionSummary(10,2026),first)
     const dashboard=require('../dist/routes/dashboard').default
     const dashboardRead=handler(dashboard,'/')
-    assert.equal((await request(dashboardRead)).stats.unpaidStudentsThisMonth,1)
-    assert.equal(calculations,1,'dashboard must reuse tuition summary')
+    const firstDashboard = await request(dashboardRead)
+    assert.equal(firstDashboard.stats.unpaidStudentsThisMonth,1)
+    assert.deepEqual(firstDashboard.stats.unpaidStudentsByMonth, [
+      {year:2026,month:9,count:1},
+      {year:2026,month:10,count:1},
+    ])
+    assert.equal(calculations,2,'dashboard must reuse the current month and calculate each earlier month once')
     const beforeScans=scans.length
     await request(dashboardRead)
     assert.equal(scans.length,beforeScans,'warm dashboard must not scan business collections')
@@ -73,10 +78,10 @@ test('tuition and dashboard reuse summaries; financial writes invalidate before 
       response.json({saved:true})
     })
     assert.equal((await request(dashboardRead)).stats.unpaidStudentsThisMonth,0)
-    assert.equal(calculations,2)
+    assert.equal(calculations,4)
     assert.deepEqual((await getCachedTuitionSummary(10,2026)).rows,summaryRows)
     await getCachedTuitionSummary(10,2026,true)
-    assert.equal(calculations,3,'manual refresh forces original calculation')
+    assert.equal(calculations,5,'manual refresh forces original calculation')
     let builds=0
     await readView('dashboard','expiry',async()=>++builds,undefined,false,100)
     tables.get('readViews').get('dashboard-expiry').generatedAt=Date.now()-101
