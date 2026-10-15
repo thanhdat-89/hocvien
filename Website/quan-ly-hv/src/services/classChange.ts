@@ -4,12 +4,11 @@ import { db, C } from '../lib/firebase'
 type Day = 'SUNDAY' | 'MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY' | 'FRIDAY' | 'SATURDAY'
 type Slot = { dayOfWeek: Day; startTime: string; endTime: string }
 export type ClassChangeInput = {
-  name: string
-  teacherId?: string | null
+  scope: 'schedule' | 'rate'
   tuitionRate?: number
   rateEffectiveMonth?: string
-  effectiveDate: string
-  days: Slot[]
+  effectiveDate?: string
+  days?: Slot[]
   previewToken?: string
 }
 
@@ -37,6 +36,17 @@ export function classRateForMonth(cls: any, month: number, year: number): number
   return Number(applicable?.rate ?? cls.tuitionRate ?? 0)
 }
 
+/** The document ID remains the permanent class key; renaming writes only the display label. */
+export async function renameClass(classId: string, value: unknown) {
+  const name = String(value ?? '').trim()
+  if (!name || name.length > 120) fail('Tên lớp phải có từ 1 đến 120 ký tự')
+  const ref = db.collection(C.CLASSES).doc(classId)
+  const current = await ref.get()
+  if (!current.exists) fail('Không tìm thấy lớp học', 404)
+  if (current.data()?.name !== name) await ref.update({ name })
+  return { id: classId, name }
+}
+
 const scheduleDates = (days: Slot[], fromDate: string, toDate: string, holidays: Set<string>) => {
   const result: { date: string; slot: Slot }[] = []
   for (const slot of days) {
@@ -51,12 +61,15 @@ const scheduleDates = (days: Slot[], fromDate: string, toDate: string, holidays:
 }
 
 export async function prepareClassChange(classId: string, input: ClassChangeInput) {
-  const name = String(input.name ?? '').trim()
-  if (!name) fail('Tên lớp không được để trống')
-  if (!isDate(input.effectiveDate)) fail('Ngày áp dụng lịch không hợp lệ')
-  if (!Array.isArray(input.days) || input.days.length > 7) fail('Lịch học không hợp lệ')
+  if (input.scope !== 'schedule' && input.scope !== 'rate') fail('Loại thay đổi không hợp lệ')
+  if ('name' in input || 'teacherId' in input) fail('Chỉ được sửa đúng phần thông tin đã chọn')
+  if (input.scope === 'schedule' && ('tuitionRate' in input || 'rateEffectiveMonth' in input)) fail('Sửa lịch không thay đổi học phí')
+  if (input.scope === 'rate' && ('days' in input || 'effectiveDate' in input)) fail('Sửa học phí không thay đổi lịch')
+  if (input.scope === 'schedule' && !isDate(input.effectiveDate || '')) fail('Ngày áp dụng lịch không hợp lệ')
+  if (input.scope === 'schedule' && (!Array.isArray(input.days) || input.days.length > 7)) fail('Lịch học không hợp lệ')
+  const requestedDays = input.scope === 'schedule' ? input.days! : []
   const seen = new Set<string>()
-  for (const slot of input.days) {
+  for (const slot of requestedDays) {
     if (!weekdays.includes(slot.dayOfWeek) || !isTime(slot.startTime)
       || !isTime(slot.endTime) || slot.startTime >= slot.endTime || seen.has(slot.dayOfWeek)) {
       fail('Ngày hoặc giờ học không hợp lệ')
@@ -74,7 +87,7 @@ export async function prepareClassChange(classId: string, input: ClassChangeInpu
   if (!classDoc.exists) fail('Không tìm thấy lớp học', 404)
   const cls = classDoc.data()!
   if (cls.status !== 'ACTIVE') fail('Chỉ có thể sửa lớp đang hoạt động', 409)
-  const effectiveDate = input.effectiveDate
+  const effectiveDate = input.scope === 'schedule' ? input.effectiveDate! : vietnamDate()
   const currentSchedules = schedulesSnap.docs.filter(doc => {
     const s = doc.data()
     const today = vietnamDate()
@@ -88,12 +101,12 @@ export async function prepareClassChange(classId: string, input: ClassChangeInpu
     const s = doc.data()
     return `${s.dayOfWeek}:${s.startTime}-${s.endTime}`
   }).sort()
-  const newDays = input.days.map(slot => `${slot.dayOfWeek}:${slot.startTime}-${slot.endTime}`).sort()
-  const scheduleChanged = JSON.stringify(oldDays) !== JSON.stringify(newDays)
-  if (scheduleChanged && input.days.length === 0) fail('Lớp đang hoạt động cần ít nhất một ngày học; hãy kết thúc lớp nếu ngừng dạy', 409)
-  const rate = input.tuitionRate === undefined ? Number(cls.tuitionRate ?? 0) : Number(input.tuitionRate)
+  const newDays = requestedDays.map(slot => `${slot.dayOfWeek}:${slot.startTime}-${slot.endTime}`).sort()
+  const scheduleChanged = input.scope === 'schedule' && JSON.stringify(oldDays) !== JSON.stringify(newDays)
+  if (scheduleChanged && requestedDays.length === 0) fail('Lớp đang hoạt động cần ít nhất một ngày học; hãy kết thúc lớp nếu ngừng dạy', 409)
+  const rate = input.scope === 'rate' ? Number(input.tuitionRate) : Number(cls.tuitionRate ?? 0)
   if (!Number.isFinite(rate) || rate < 0) fail('Đơn giá học phí không hợp lệ')
-  const rateChanged = rate !== Number(cls.tuitionRate ?? 0)
+  const rateChanged = input.scope === 'rate' && rate !== Number(cls.tuitionRate ?? 0)
   const nextMonth = monthAfter(vietnamDate())
   const rateEffectiveMonth = input.rateEffectiveMonth || nextMonth
   if (rateChanged && (!monthPattern.test(rateEffectiveMonth) || rateEffectiveMonth < nextMonth)) {
@@ -142,7 +155,7 @@ export async function prepareClassChange(classId: string, input: ClassChangeInpu
   const removedIds = new Set(toRemove.map(doc => doc.id))
   const remaining = new Set(sessionsSnap.docs.filter(doc => !removedIds.has(doc.id))
     .map(doc => `${doc.data().sessionDate}:${doc.data().startTime}`))
-  const toCreate = scheduleChanged ? scheduleDates(input.days, effectiveDate, toDate, holidays)
+  const toCreate = scheduleChanged ? scheduleDates(requestedDays, effectiveDate, toDate, holidays)
     .filter(item => !remaining.has(`${item.date}:${item.slot.startTime}`)) : []
   if (scheduleChanged && toCreate.length === 0) {
     fail('Lịch mới không tạo được buổi học thay thế; giữ nguyên lịch cũ', 409)
@@ -154,7 +167,7 @@ export async function prepareClassChange(classId: string, input: ClassChangeInpu
     records: recordsSnap.docs.map(doc => [doc.id, doc.data().status]),
     input: { ...input, previewToken: undefined },
   })).digest('hex')
-  return { classRef, cls, oldSchedules, toRemove, toCreate, scheduleChanged, rateChanged,
+  return { classRef, cls, oldSchedules, toRemove, toCreate, scheduleChanged, rateChanged, requestedDays,
     rate, rateEffectiveMonth, token: fingerprint,
     summary: { scheduleChanged, rateChanged, removeSessions: toRemove.length, createSessions: toCreate.length,
       protectedSessions: sessionsSnap.docs.filter(doc => doc.data().status === 'COMPLETED').length,
@@ -164,17 +177,10 @@ export async function prepareClassChange(classId: string, input: ClassChangeInpu
 export async function applyClassChange(classId: string, input: ClassChangeInput) {
   const plan = await prepareClassChange(classId, input)
   if (!input.previewToken || input.previewToken !== plan.token) fail('Dữ liệu lớp đã thay đổi; vui lòng xem lại tác động trước khi lưu', 409)
-  const writes = 1 + plan.oldSchedules.length + plan.toRemove.length + input.days.length + plan.toCreate.length
+  const writes = 1 + (plan.scheduleChanged ? plan.oldSchedules.length + plan.toRemove.length + plan.requestedDays.length + plan.toCreate.length : 0)
   if (writes > 450) fail('Số buổi cần đổi quá lớn; vui lòng liên hệ quản trị để xử lý riêng', 409)
-  let teacherName: string | null = null
-  if (input.teacherId) {
-    const teacher = await db.collection(C.TEACHERS).doc(input.teacherId).get()
-    if (!teacher.exists) fail('Không tìm thấy giáo viên')
-    teacherName = String(teacher.data()?.fullName || '')
-  }
   const now = new Date().toISOString()
-  const updates: Record<string, unknown> = { name: input.name.trim(), teacherId: input.teacherId || null,
-    teacherName, updatedAt: now }
+  const updates: Record<string, unknown> = { updatedAt: now }
   if (plan.rateChanged) {
     const history = Array.isArray(plan.cls.tuitionRateHistory) ? plan.cls.tuitionRateHistory : [
       { effectiveMonth: '2000-01', rate: Number(plan.cls.tuitionRate ?? 0) },
@@ -183,25 +189,26 @@ export async function applyClassChange(classId: string, input: ClassChangeInput)
     updates.tuitionRateHistory = [...history, { effectiveMonth: plan.rateEffectiveMonth, rate: plan.rate }]
     updates.tuitionRateEffectiveMonth = plan.rateEffectiveMonth
   }
-  const newScheduleRefs = input.days.map(() => db.collection(C.SCHEDULES).doc())
-  const scheduleRefByDay = new Map(input.days.map((day, index) => [day.dayOfWeek, newScheduleRefs[index]]))
+  const newScheduleRefs = plan.requestedDays.map(() => db.collection(C.SCHEDULES).doc())
+  const scheduleRefByDay = new Map(plan.requestedDays.map((day, index) => [day.dayOfWeek, newScheduleRefs[index]]))
   await db.runTransaction(async transaction => {
     const fresh = await transaction.get(plan.classRef)
     if (fresh.data()?.updatedAt !== plan.cls.updatedAt) fail('Lớp vừa được thay đổi; vui lòng tải lại', 409)
     transaction.update(plan.classRef, updates)
     if (plan.scheduleChanged) {
-      for (const old of plan.oldSchedules) transaction.update(old.ref, { effectiveTo: dayBefore(input.effectiveDate) })
+      for (const old of plan.oldSchedules) transaction.update(old.ref, { effectiveTo: dayBefore(input.effectiveDate!) })
       for (const old of plan.toRemove) transaction.delete(old.ref)
-      for (let i = 0; i < input.days.length; i++) {
-        const day = input.days[i]
-        transaction.set(newScheduleRefs[i], { classId, className: input.name.trim(), ...day,
+      for (let i = 0; i < plan.requestedDays.length; i++) {
+        const day = plan.requestedDays[i]
+        transaction.set(newScheduleRefs[i], { classId, className: plan.cls.name, ...day,
           effectiveFrom: input.effectiveDate, createdAt: now })
       }
       for (const item of plan.toCreate) {
         const ref = db.collection(C.SESSIONS).doc()
-        transaction.set(ref, { classId, className: input.name.trim(), scheduleId: scheduleRefByDay.get(item.slot.dayOfWeek)!.id,
+        transaction.set(ref, { classId, className: plan.cls.name, scheduleId: scheduleRefByDay.get(item.slot.dayOfWeek)!.id,
           sessionDate: item.date, startTime: item.slot.startTime, endTime: item.slot.endTime,
-          teacherId: input.teacherId || null, teacherName, status: 'SCHEDULED', createdAt: now, updatedAt: now })
+          teacherId: plan.cls.teacherId || null, teacherName: plan.cls.teacherName || null,
+          status: 'SCHEDULED', createdAt: now, updatedAt: now })
       }
     }
   })

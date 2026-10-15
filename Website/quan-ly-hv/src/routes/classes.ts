@@ -4,7 +4,7 @@ import { authenticate, requireRole } from '../middleware/auth'
 import { activityContext } from '../middleware/activityContext'
 import { AuthRequest } from '../types'
 import type { Class, ClassEnrollment } from '../types/models'
-import { applyClassChange, prepareClassChange } from '../services/classChange'
+import { applyClassChange, prepareClassChange, renameClass } from '../services/classChange'
 import { auditClassTuition } from '../services/classIntegrityAudit'
 
 const router = Router()
@@ -125,6 +125,15 @@ router.post('/', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Re
 })
 
 // PUT /api/classes/:id
+router.patch('/:id/name', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (Object.keys(req.body || {}).some(key => key !== 'name')) {
+      res.status(400).json({ message: 'Thao tác này chỉ đổi tên hiển thị của lớp' }); return
+    }
+    res.json(await renameClass(s(req.params.id), req.body?.name))
+  } catch (err) { next(err) }
+})
+
 router.post('/:id/change-preview', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const plan = await prepareClassChange(s(req.params.id), req.body)
@@ -143,7 +152,7 @@ router.put('/:id', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: 
     const { name, subjectId, teacherId, room, maxStudents, status, notes, tuitionRate, sessionsPerMonth, startDate, endDate } = req.body
     const updates: Record<string, unknown> = { updatedAt: now() }
 
-    if (name !== undefined) updates.name = name
+    if (name !== undefined) { res.status(409).json({ message: 'Đổi tên hiển thị phải dùng thao tác sửa tên lớp' }); return }
     if (room !== undefined) updates.room = room
     if (maxStudents !== undefined) updates.maxStudents = Number(maxStudents)
     if (status !== undefined || subjectId !== undefined || sessionsPerMonth !== undefined) {

@@ -192,10 +192,8 @@ interface DaySchedule {
 }
 
 function ClassModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const [teachers, setTeachers] = useState<any[]>([])
   const [form, setForm] = useState({
     name: '',
-    teacherId: '',
     tuitionRate: '',
     startDate: new Date().toISOString().slice(0, 10),
     endDate: '',
@@ -205,10 +203,6 @@ function ClassModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
   const [daySchedules, setDaySchedules] = useState<Record<string, DaySchedule>>({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-
-  useEffect(() => {
-    api.get('/teachers').then((r) => setTeachers(Array.isArray(r.data) ? r.data : r.data?.data ?? [])).catch(() => {})
-  }, [])
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }))
@@ -239,7 +233,6 @@ function ClassModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
       // 1. Tạo lớp học
       const classRes = await api.post('/classes', {
         name: form.name,
-        ...(form.teacherId && { teacherId: form.teacherId }),
         tuitionRate: Number(form.tuitionRate),
         startDate: form.startDate,
         ...(form.endDate && { endDate: form.endDate }),
@@ -296,18 +289,6 @@ function ClassModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
             <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Tên lớp *</label>
             <input value={form.name} onChange={set('name')} required placeholder="VD: Toán 9A - Tối T2/T4/T6"
               className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
-          </div>
-
-          {/* Giáo viên */}
-          <div>
-            <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">
-              Giáo viên <span className="text-outline/50 normal-case font-normal">(có thể bổ sung sau)</span>
-            </label>
-            <select value={form.teacherId} onChange={set('teacherId')}
-              className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
-              <option value="">Chưa phân công...</option>
-              {teachers.map((t: any) => <option key={t.id} value={t.id}>{t.fullName}</option>)}
-            </select>
           </div>
 
           {/* Học phí */}
@@ -403,26 +384,26 @@ function ClassModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
 
 // ─── Edit Class Modal ────────────────────────────────────────────────────────
 
-function EditClassModal({ cls, onClose, onSaved }: { cls: Class; onClose: () => void; onSaved: () => void }) {
-  const [teachers, setTeachers] = useState<any[]>([])
+type ClassEditSection = 'name' | 'schedule' | 'rate'
+
+function EditClassModal({ cls, section, onClose, onSaved }: { cls: Class; section: ClassEditSection; onClose: () => void; onSaved: () => void }) {
   const todayLocal = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` })()
   const tomorrowLocal = (() => { const d = new Date(); d.setDate(d.getDate() + 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` })()
   const nextMonth = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` })()
   const [form, setForm] = useState({
     name: cls.name,
-    teacherId: cls.teacherId ?? '',
     tuitionRate: String(cls.tuitionRate ?? ''),
     effectiveDate: tomorrowLocal,
     rateEffectiveMonth: nextMonth,
   })
   const [daySchedules, setDaySchedules] = useState<Record<string, DaySchedule>>({})
   const [preview, setPreview] = useState<null | { previewToken: string; scheduleChanged: boolean; rateChanged: boolean; removeSessions: number; createSessions: number; protectedSessions: number }>(null)
-  const [schedulesLoaded, setSchedulesLoaded] = useState(false)
+  const [schedulesLoaded, setSchedulesLoaded] = useState(section !== 'schedule')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    api.get('/teachers').then((r) => setTeachers(Array.isArray(r.data) ? r.data : r.data?.data ?? [])).catch(() => {})
+    if (section !== 'schedule') return
     api.get(`/schedules?classId=${cls.id}`).then((r) => {
       const list = Array.isArray(r.data) ? r.data : r.data?.data ?? []
       const existing: Record<string, DaySchedule> = {}
@@ -432,7 +413,7 @@ function EditClassModal({ cls, onClose, onSaved }: { cls: Class; onClose: () => 
       setDaySchedules(existing)
       setSchedulesLoaded(true)
     }).catch(() => setError('Không tải được lịch học. Vui lòng mở lại để thử lại.'))
-  }, [cls.id])
+  }, [cls.id, section])
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setPreview(null)
@@ -456,21 +437,24 @@ function EditClassModal({ cls, onClose, onSaved }: { cls: Class; onClose: () => 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!form.name) { setError('Vui lòng nhập tên lớp'); return }
+    if (section === 'name' && !form.name.trim()) { setError('Vui lòng nhập tên lớp'); return }
     if (!schedulesLoaded) { setError('Lịch học chưa tải xong. Vui lòng thử lại.'); return }
     setSaving(true); setError('')
     try {
-      const payload = { name: form.name, teacherId: form.teacherId || null,
-        tuitionRate: form.tuitionRate === '' ? 0 : Number(form.tuitionRate),
-        rateEffectiveMonth: form.rateEffectiveMonth, effectiveDate: form.effectiveDate,
-        days: Object.entries(daySchedules).map(([dayOfWeek, time]) => ({ dayOfWeek, ...time })) }
+      if (section === 'name') {
+        await api.patch(`/classes/${cls.id}/name`, { name: form.name.trim() })
+        onSaved()
+        return
+      }
+      const payload = section === 'schedule'
+        ? { scope: 'schedule' as const, effectiveDate: form.effectiveDate,
+          days: Object.entries(daySchedules).map(([dayOfWeek, time]) => ({ dayOfWeek, ...time })) }
+        : { scope: 'rate' as const, tuitionRate: Number(form.tuitionRate), rateEffectiveMonth: form.rateEffectiveMonth }
       if (!preview) {
         const result = await api.post(`/classes/${cls.id}/change-preview`, payload)
-        if (result.data.scheduleChanged || result.data.rateChanged) {
-          setPreview(result.data)
-          return
-        }
-        await api.put(`/classes/${cls.id}/change`, { ...payload, previewToken: result.data.previewToken })
+        if (!result.data.scheduleChanged && !result.data.rateChanged) { onClose(); return }
+        setPreview(result.data)
+        return
       } else {
         await api.put(`/classes/${cls.id}/change`, { ...payload, previewToken: preview.previewToken })
       }
@@ -487,32 +471,26 @@ function EditClassModal({ cls, onClose, onSaved }: { cls: Class; onClose: () => 
       <div className="absolute inset-0 bg-inverse-surface/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-lg bg-surface-container-lowest rounded-2xl shadow-2xl p-8 z-10 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-6">
-          <h3 className="text-xl font-headline font-bold text-on-surface">Chỉnh sửa lớp học</h3>
+          <div>
+            <h3 className="text-xl font-headline font-bold text-on-surface">{section === 'name' ? 'Đổi tên lớp' : section === 'schedule' ? 'Chỉnh sửa lịch học' : 'Chỉnh sửa học phí'}</h3>
+            <p className="mt-1 text-xs text-outline">{cls.name} · ID {cls.id}</p>
+          </div>
           <button onClick={onClose} className="p-2 hover:bg-surface-container-low rounded-lg"><span className="material-symbols-outlined">close</span></button>
         </div>
         {error && <div className="mb-4 p-3 bg-error-container/10 text-error rounded-xl text-sm">{error}</div>}
         <form onSubmit={handleSubmit} className="space-y-5">
-          <div>
+          {section === 'name' && <div>
             <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Tên lớp *</label>
             <input value={form.name} onChange={set('name')} required
               className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
-          </div>
-          <div>
-            <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">
-              Giáo viên <span className="text-outline/50 normal-case font-normal">(có thể bổ sung sau)</span>
-            </label>
-            <select value={form.teacherId} onChange={set('teacherId')}
-              className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
-              <option value="">Chưa phân công...</option>
-              {teachers.map((t: any) => <option key={t.id} value={t.id}>{t.fullName}</option>)}
-            </select>
-          </div>
-          <div>
+            <p className="mt-2 text-xs text-outline">ID lớp và dữ liệu lịch học, học phí được giữ nguyên.</p>
+          </div>}
+          {section === 'rate' && <div>
             <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Học phí / buổi (đ)</label>
-            <input type="number" value={form.tuitionRate} onChange={set('tuitionRate')} placeholder="200000" min={0}
+            <input type="number" value={form.tuitionRate} onChange={set('tuitionRate')} required placeholder="200000" min={0}
               className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
-          </div>
-          <div className="bg-surface-container-low rounded-2xl p-4 space-y-3">
+          </div>}
+          {section === 'schedule' && <div className="bg-surface-container-low rounded-2xl p-4 space-y-3">
             <p className="text-[10px] font-bold text-outline uppercase tracking-wider flex items-center gap-1.5">
               <span className="material-symbols-outlined text-[14px]">calendar_month</span>
               Lịch học
@@ -545,9 +523,9 @@ function EditClassModal({ cls, onClose, onSaved }: { cls: Class; onClose: () => 
                 ))}
               </div>
             )}
-          </div>
-          <p className="text-xs text-outline">Ngày bắt đầu: {cls.startDate || 'Chưa đặt'}. Để kết thúc lớp, dùng thao tác Kết thúc lớp trong danh sách.</p>
-          <div className="bg-primary/5 border border-primary/20 rounded-2xl p-4">
+          </div>}
+          {section === 'schedule' && <p className="text-xs text-outline">Ngày bắt đầu: {cls.startDate || 'Chưa đặt'}. Để kết thúc lớp, dùng thao tác Kết thúc lớp trong danh sách.</p>}
+          {section === 'schedule' && <div className="bg-primary/5 border border-primary/20 rounded-2xl p-4">
             <label className="text-[10px] font-bold text-primary uppercase tracking-wider block mb-1.5 flex items-center gap-1.5">
               <span className="material-symbols-outlined text-[14px]">update</span>
               Ngày áp dụng nếu đổi lịch *
@@ -555,22 +533,22 @@ function EditClassModal({ cls, onClose, onSaved }: { cls: Class; onClose: () => 
             <input type="date" value={form.effectiveDate} onChange={set('effectiveDate')} required
               className="w-full bg-white border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
             <p className="text-[11px] text-primary/70 mt-1.5">Chỉ buổi học tương lai được thay đổi. Kỳ đã lập phiếu học phí sẽ được bảo vệ.</p>
-          </div>
-          <div>
+          </div>}
+          {section === 'rate' && <div>
             <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Áp dụng đơn giá mới từ tháng</label>
             <input type="month" value={form.rateEffectiveMonth} min={nextMonth} onChange={set('rateEffectiveMonth')}
               className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
-          </div>
+          </div>}
           {preview && <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-sm text-on-surface space-y-1">
             <p className="font-bold">Xem trước tác động</p>
-            <p>{preview.scheduleChanged ? `Thay ${preview.removeSessions} buổi tương lai bằng ${preview.createSessions} buổi theo lịch mới.` : 'Lịch học không thay đổi.'}</p>
-            <p>{preview.rateChanged ? `Đơn giá mới áp dụng từ tháng ${form.rateEffectiveMonth}.` : 'Đơn giá không thay đổi.'}</p>
+            {section === 'schedule' && <p>Thay {preview.removeSessions} buổi tương lai bằng {preview.createSessions} buổi theo lịch mới.</p>}
+            {section === 'rate' && <p>Đơn giá mới áp dụng từ tháng {form.rateEffectiveMonth}.</p>}
             <p>{preview.protectedSessions} buổi đã hoàn thành được giữ nguyên. Phiếu học phí đã lập không bị sửa.</p>
           </div>}
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={onClose} className="flex-1 btn-secondary justify-center">Huỷ</button>
             <button type="submit" disabled={saving || !schedulesLoaded} className="flex-1 btn-primary justify-center disabled:opacity-60">
-              {saving ? 'Đang xử lý...' : preview ? 'Xác nhận lưu thay đổi' : 'Lưu thay đổi'}
+              {saving ? 'Đang xử lý...' : preview ? 'Xác nhận lưu' : section === 'name' ? 'Lưu tên lớp' : section === 'schedule' ? 'Xem trước lịch mới' : 'Xem trước đơn giá'}
             </button>
           </div>
         </form>
@@ -753,7 +731,7 @@ export default function Classes() {
   const [schedulesByClass, setSchedulesByClass] = useState<Record<string, string[]>>({})
   const [selectedSession, setSelectedSession] = useState<Session | null>(null)
   const [showClassModal, setShowClassModal] = useState(false)
-  const [editingClass, setEditingClass] = useState<Class | null>(null)
+  const [editingClass, setEditingClass] = useState<{ cls: Class; section: ClassEditSection } | null>(null)
   const [deletingClass, setDeletingClass] = useState<Class | null>(null)
   const [loadingSessions, setLoadingSessions] = useState(false)
   const [toasts, setToasts] = useState<ToastMessage[]>([])
@@ -775,9 +753,11 @@ export default function Classes() {
 
   const loadSchedules = () =>
     api.get('/schedules').then((r) => {
-      const list: Array<{ classId: string; dayOfWeek: string }> = Array.isArray(r.data) ? r.data : []
+      const list: Array<{ classId: string; dayOfWeek: string; effectiveFrom: string; effectiveTo?: string }> = Array.isArray(r.data) ? r.data : []
       const map: Record<string, string[]> = {}
       for (const s of list) {
+        const today = toISO(new Date())
+        if (s.effectiveFrom > today || (s.effectiveTo && s.effectiveTo < today)) continue
         if (!map[s.classId]) map[s.classId] = []
         if (!map[s.classId].includes(s.dayOfWeek)) map[s.classId].push(s.dayOfWeek)
       }
@@ -826,9 +806,10 @@ export default function Classes() {
   }
 
   const classGrades = [...new Set(classes.map(gradeOfClass).filter((grade): grade is number => grade !== null))].sort((a, b) => a - b)
+  const classNameById = Object.fromEntries(classes.map(cls => [cls.id, cls.name]))
   const visibleClasses = classes
     .filter((cls) => {
-      const matchesSearch = `${cls.name} ${cls.teacherName ?? ''}`.toLocaleLowerCase('vi-VN').includes(classSearch.trim().toLocaleLowerCase('vi-VN'))
+      const matchesSearch = `${cls.name} ${cls.id}`.toLocaleLowerCase('vi-VN').includes(classSearch.trim().toLocaleLowerCase('vi-VN'))
       return matchesSearch && (classStatus === 'ALL' || cls.status === classStatus)
         && (classGrade === 'ALL' || gradeOfClass(cls) === Number(classGrade))
     })
@@ -982,10 +963,10 @@ export default function Classes() {
                                     const color = classColorMap[s.classId] ?? CLASS_COLORS[0]
                                     const isCancelled = s.status === 'CANCELLED'
                                     return (
-                                      <button key={s.id} type="button" onClick={() => setSelectedSession(s)}
+                                      <button key={s.id} type="button" onClick={() => setSelectedSession({ ...s, className: classNameById[s.classId] || s.className })}
                                         className={`w-full rounded-xl border-l-4 p-2.5 text-left transition-all hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${color.bg} ${color.border} ${isCancelled ? 'opacity-50' : ''}`}
                                       >
-                                        <span className={`block text-xs font-bold leading-snug ${color.text} ${isCancelled ? 'line-through' : ''}`}>{s.className}</span>
+                                        <span className={`block text-xs font-bold leading-snug ${color.text} ${isCancelled ? 'line-through' : ''}`}>{classNameById[s.classId] || s.className}</span>
                                         <span className={`mt-1.5 flex items-center justify-between gap-1 text-[11px] ${color.badge}`}>
                                           <span>{s.startTime}–{s.endTime}</span>
                                           {s.status === 'COMPLETED' && <span className="material-symbols-outlined text-sm text-secondary" title="Hoàn thành">check_circle</span>}
@@ -1029,9 +1010,9 @@ export default function Classes() {
                 </div>
                 <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                   <label className="relative min-w-0 sm:w-60">
-                    <span className="sr-only">Tìm lớp hoặc giáo viên</span>
+                    <span className="sr-only">Tìm tên hoặc ID lớp</span>
                     <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-lg text-outline">search</span>
-                    <input value={classSearch} onChange={e => setClassSearch(e.target.value)} placeholder="Tìm lớp, giáo viên..." className="h-10 w-full rounded-xl border border-outline-variant/25 bg-white pl-10 pr-3 text-sm text-on-surface outline-none placeholder:text-outline focus:border-primary focus:ring-2 focus:ring-primary/10" />
+                    <input value={classSearch} onChange={e => setClassSearch(e.target.value)} placeholder="Tìm tên hoặc ID lớp..." className="h-10 w-full rounded-xl border border-outline-variant/25 bg-white pl-10 pr-3 text-sm text-on-surface outline-none placeholder:text-outline focus:border-primary focus:ring-2 focus:ring-primary/10" />
                   </label>
                   <label>
                     <span className="sr-only">Lọc theo khối</span>
@@ -1052,15 +1033,15 @@ export default function Classes() {
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[850px] table-fixed text-left text-sm">
+                <table className="w-full min-w-[950px] table-fixed text-left text-sm">
                   <colgroup>
-                    <col className="w-[25%]" /><col className="w-[17%]" /><col className="w-[17%]" />
-                    <col className="w-[17%]" /><col className="w-[13%]" /><col className="w-[11%]" />
+                    <col className="w-[22%]" /><col className="w-[18%]" /><col className="w-[22%]" />
+                    <col className="w-[16%]" /><col className="w-[12%]" /><col className="w-[10%]" />
                   </colgroup>
                   <thead className="bg-surface-container-low/50 text-xs font-semibold text-on-surface-variant">
                     <tr>
-                      <th scope="col" className="px-5 py-3.5">Lớp học</th>
-                      <th scope="col" className="px-4 py-3.5">Giáo viên</th>
+                      <th scope="col" className="px-5 py-3.5">Tên lớp</th>
+                      <th scope="col" className="px-4 py-3.5">ID lớp</th>
                       <th scope="col" className="px-4 py-3.5">Lịch học</th>
                       <th scope="col" className="px-4 py-3.5">Học phí / buổi</th>
                       <th scope="col" className="px-4 py-3.5">Trạng thái</th>
@@ -1074,16 +1055,25 @@ export default function Classes() {
                       return (
                         <tr key={cls.id} className="transition-colors hover:bg-primary/[0.035]">
                           <td className="px-5 py-4 align-middle">
-                            <div className="font-semibold leading-5 text-on-surface">{cls.name}</div>
+                            <div className="flex items-start gap-1">
+                              <span className="min-w-0 font-semibold leading-5 text-on-surface">{cls.name}</span>
+                              {canManageClasses && <button type="button" onClick={() => setEditingClass({ cls, section: 'name' })} className="shrink-0 rounded-lg p-1 text-outline hover:bg-primary/10 hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" title={`Đổi tên ${cls.name}`} aria-label={`Đổi tên ${cls.name}`}><span className="material-symbols-outlined text-base">edit</span></button>}
+                            </div>
                             <div className="mt-1 text-xs text-outline">{grade ? `Khối ${grade}` : 'Chưa có khối'}{cls.room ? ` · Phòng ${cls.room}` : ''}</div>
                           </td>
-                          <td className="px-4 py-4 align-middle text-on-surface-variant">{cls.teacherName || <span className="text-outline">Chưa phân công</span>}</td>
+                          <td className="px-4 py-4 align-middle"><code className="break-all text-xs text-on-surface-variant" title={cls.id}>{cls.id}</code></td>
                           <td className="px-4 py-4 align-middle">
-                            <span className={days.length ? 'font-medium text-primary' : 'text-outline'}>{days.length ? days.map(day => SCHEDULE_DAY_LABELS[day] ?? day).join(', ') : 'Chưa có lịch'}</span>
+                            <div className="flex items-start gap-1">
+                              <span className={days.length ? 'font-medium text-primary' : 'text-outline'}>{days.length ? days.map(day => SCHEDULE_DAY_LABELS[day] ?? day).join(', ') : 'Chưa có lịch'}</span>
+                              {canManageClasses && cls.status === 'ACTIVE' && <button type="button" onClick={() => setEditingClass({ cls, section: 'schedule' })} className="shrink-0 rounded-lg p-1 text-outline hover:bg-primary/10 hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" title={`Sửa lịch ${cls.name}`} aria-label={`Sửa lịch ${cls.name}`}><span className="material-symbols-outlined text-base">edit</span></button>}
+                            </div>
                             {!!cls.sessionsPerMonth && <div className="mt-1 text-xs text-outline">{cls.sessionsPerMonth} buổi/tháng</div>}
                           </td>
                           <td className="px-4 py-4 align-middle font-semibold tabular-nums text-on-surface">
-                            {displayedClassRate(cls).toLocaleString('vi-VN')}đ
+                            <div className="flex items-center gap-1">
+                              <span>{displayedClassRate(cls).toLocaleString('vi-VN')}đ</span>
+                              {canManageClasses && cls.status === 'ACTIVE' && <button type="button" onClick={() => setEditingClass({ cls, section: 'rate' })} className="shrink-0 rounded-lg p-1 text-outline hover:bg-primary/10 hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" title={`Sửa học phí ${cls.name}`} aria-label={`Sửa học phí ${cls.name}`}><span className="material-symbols-outlined text-base">edit</span></button>}
+                            </div>
                             {cls.tuitionRateEffectiveMonth && cls.tuitionRateEffectiveMonth > toISO(new Date()).slice(0, 7) && (
                               <div className="mt-1 text-xs font-normal text-outline">
                                 {cls.tuitionRate.toLocaleString('vi-VN')}đ từ {cls.tuitionRateEffectiveMonth.slice(5)}/{cls.tuitionRateEffectiveMonth.slice(0, 4)}
@@ -1098,7 +1088,6 @@ export default function Classes() {
                           </td>
                           <td className="px-4 py-4 align-middle text-right">
                             {canManageClasses && <div className="flex justify-end gap-1">
-                              <button type="button" onClick={() => setEditingClass(cls)} className="rounded-lg p-2 text-outline transition-colors hover:bg-primary/10 hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" title={`Chỉnh sửa ${cls.name}`} aria-label={`Chỉnh sửa ${cls.name}`}><span className="material-symbols-outlined text-xl">edit</span></button>
                               <button type="button" onClick={() => handleDeleteClass(cls)} className="rounded-lg p-2 text-outline transition-colors hover:bg-error/10 hover:text-error focus-visible:outline focus-visible:outline-2 focus-visible:outline-error" title={`Kết thúc hoặc xóa ${cls.name}`} aria-label={`Kết thúc hoặc xóa ${cls.name}`}><span className="material-symbols-outlined text-xl">more_horiz</span></button>
                             </div>}
                           </td>
@@ -1140,9 +1129,11 @@ export default function Classes() {
       )}
       {editingClass && (
         <EditClassModal
-          cls={editingClass}
+          key={`${editingClass.cls.id}-${editingClass.section}`}
+          cls={editingClass.cls}
+          section={editingClass.section}
           onClose={() => setEditingClass(null)}
-          onSaved={() => { setEditingClass(null); loadClasses(); loadSessions(weekStart) }}
+          onSaved={() => { setEditingClass(null); loadClasses(); loadSchedules(); loadSessions(weekStart) }}
         />
       )}
       {deletingClass && (
