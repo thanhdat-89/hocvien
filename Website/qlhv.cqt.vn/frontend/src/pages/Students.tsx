@@ -9,6 +9,7 @@ import { useAuth } from '../hooks/useAuth'
 import StudentModal from './StudentModal'
 import { PrivateScheduleModal } from './StudentProfile'
 import * as XLSX from 'xlsx'
+import { buildParentUrl } from '../lib/parentUrl'
 
 function StatusBadge({ status }: { status: string }) {
   if (status === 'ACTIVE')
@@ -334,16 +335,6 @@ function ImportExcelModal({ onClose, onImported }: { onClose: () => void; onImpo
       </div>
     </div>
   )
-}
-
-const IS_LOCAL =
-  typeof location !== 'undefined' &&
-  (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-
-function buildParentUrl(studentId: string) {
-  return IS_LOCAL
-    ? `http://localhost:5174/hoc-vien/index.html?id=${encodeURIComponent(studentId)}`
-    : `https://hocthemtoan.vn/hoc-vien/${encodeURIComponent(studentId)}`
 }
 
 function buildZaloUrl(phone?: string | null): string | null {

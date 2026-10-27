@@ -6,6 +6,7 @@ import api from '../services/api'
 import { settleWithConcurrency } from '../services/settleWithConcurrency'
 import * as XLSX from 'xlsx'
 import { buildInvoiceWorkbook } from '../lib/invoiceExport'
+import { buildParentUrl } from '../lib/parentUrl'
 import { useAlert, useConfirm } from '../components/ConfirmDialog'
 
 interface TuitionRecordSummary {
@@ -29,16 +30,6 @@ interface ScheduleRow {
   baseAmount: number
   finalAmount: number
   tuitionRecord: TuitionRecordSummary | null
-}
-
-const IS_LOCAL =
-  typeof location !== 'undefined' &&
-  (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-
-function buildParentUrl(studentId: string) {
-  return IS_LOCAL
-    ? `http://localhost:5174/hoc-vien/index.html?id=${encodeURIComponent(studentId)}`
-    : `https://hocthemtoan.vn/hoc-vien/${encodeURIComponent(studentId)}`
 }
 
 function buildZaloUrl(phone?: string | null): string | null {

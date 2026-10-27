@@ -6,6 +6,7 @@ import api from '../services/api'
 import { Student, ClassEnrollment, TuitionRecord, Parent, Class, StudentPromotion, PrivateSession } from '../types'
 import { useAuth } from '../hooks/useAuth'
 import { gradeOfClass } from '../lib/classGrade'
+import { buildParentUrl } from '../lib/parentUrl'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -2239,16 +2240,6 @@ function MoreMenu({ student, onUpdated }: { student: Student & { id: string }; o
 }
 
 // ─── Share Link Box ──────────────────────────────────────────────────────────
-
-const IS_LOCAL =
-  typeof location !== 'undefined' &&
-  (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-
-function buildParentUrl(studentId: string) {
-  return IS_LOCAL
-    ? `http://localhost:5174/hoc-vien/index.html?id=${encodeURIComponent(studentId)}`
-    : `https://hocthemtoan.vn/hoc-vien/${encodeURIComponent(studentId)}`
-}
 
 function buildZaloUrl(phone?: string | null): string | null {
   if (!phone) return null
