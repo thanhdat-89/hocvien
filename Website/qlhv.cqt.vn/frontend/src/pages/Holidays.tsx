@@ -166,18 +166,20 @@ export default function Holidays() {
                   
                   return (
                     <div key={h.id} className={`p-4 flex items-center gap-4 hover:bg-surface-container-low/40 transition-colors ${isPast ? 'opacity-60' : ''}`}>
-                      <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-700 border border-blue-200/60 flex flex-col items-center justify-center flex-shrink-0">
-                        {isRange ? (
-                          <>
-                            <span className="material-symbols-outlined text-xl">date_range</span>
-                            <span className="text-[11px] font-bold">{totalDays} ngày</span>
-                          </>
-                        ) : (
-                          <>
-                            <span className="text-xs font-bold uppercase">{startObj.toLocaleDateString('vi-VN', { month: 'short' })}</span>
+                      {/* Calendar-page tile: fixed header strip so long month labels never wrap */}
+                      <div className="w-14 h-14 rounded-xl overflow-hidden border border-blue-200/70 bg-white flex flex-col flex-shrink-0 shadow-sm">
+                        <span className="h-5 bg-blue-600 text-white text-[10px] font-bold uppercase tracking-wide leading-5 text-center">
+                          {isRange ? 'Kỳ nghỉ' : `Th ${startObj.getMonth() + 1}`}
+                        </span>
+                        <span className="flex-1 flex items-center justify-center text-blue-700">
+                          {isRange ? (
+                            <span className="text-base font-black leading-none">
+                              {totalDays}<span className="text-[10px] font-bold ml-0.5">ngày</span>
+                            </span>
+                          ) : (
                             <span className="text-xl font-black leading-none">{startObj.getDate()}</span>
-                          </>
-                        )}
+                          )}
+                        </span>
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
