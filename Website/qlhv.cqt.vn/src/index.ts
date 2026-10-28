@@ -44,6 +44,20 @@ app.use(helmet())
 app.use(cors())
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'))
 app.use(express.json())
+
+// ─── Chế độ bảo trì (MAINTENANCE_MODE=true) ───────────────────
+// Dùng khi chuyển máy chủ: vẫn xem và đăng nhập được; chặn mọi thao tác ghi, webhook và cron
+// để không phát sinh dữ liệu mới sau lần xuất dữ liệu cuối.
+const MAINTENANCE_ALLOWED_WRITES = new Set(['/api/auth/login', '/api/auth/verify-password'])
+app.use((req, res, next) => {
+  if (process.env.MAINTENANCE_MODE !== 'true') return next()
+  const write = !['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !MAINTENANCE_ALLOWED_WRITES.has(req.path)
+  const job = /\/cron\/|^\/api\/activity\/cleanup/.test(req.path)
+  if (!write && !job) return next()
+  res.setHeader('Retry-After', '1800')
+  res.status(503).json({ message: 'Hệ thống đang bảo trì để chuyển máy chủ. Bạn vẫn xem được dữ liệu; thao tác lưu tạm khoá, vui lòng thử lại sau ít phút.' })
+})
+
 app.use(activityLogMiddleware)
 app.use(readViewInvalidation)
 
