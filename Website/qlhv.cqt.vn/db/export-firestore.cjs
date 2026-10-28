@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const out = process.argv[2];
-if (!out) throw new Error('Usage: node supabase-migration/export-firestore.cjs /absolute/private/backup-directory');
+if (!out) throw new Error('Usage: node db/export-firestore.cjs /absolute/private/backup-directory');
 const root = path.resolve(out);
 fs.mkdirSync(root, { recursive: true, mode: 0o700 });
 const exportFile = path.join(root, 'firestore.ndjson');

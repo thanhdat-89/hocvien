@@ -1,0 +1,847 @@
+// =============================================================
+// QLHV — PostgreSQL schema (thay thế Firestore)
+// Database riêng `qlhv`, role riêng `qlhv_app` trên VPS. Không dùng chung
+// database/role với hocthemtoan hay nganhang.
+//
+// Quy ước:
+// - ID giữ nguyên ID Firestore (text 20 ký tự) để link phụ huynh, MISA, SePay không đổi.
+// - Tiền: số nguyên VND.
+// - Ngày "YYYY-MM-DD" → @db.Date; giờ "HH:MM" → text 5 ký tự; thời điểm → timestamptz.
+// - Bỏ các trường denormalized (studentName, className, teacherName...) — lấy qua join.
+//   Chỉ giữ "ảnh chụp" khi giá trị lịch sử phải đứng yên (khuyến mãi đã áp, hoá đơn MISA, log).
+// - Học riêng: Firestore dùng classId = "private"; ở đây classId = NULL.
+// - Các ràng buộc Prisma không diễn đạt được nằm ở db/constraints.sql.
+// =============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  TEACHER
+  STAFF
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum Relationship {
+  FATHER
+  MOTHER
+  GUARDIAN
+}
+
+enum StudentStatus {
+  ACTIVE
+  INACTIVE
+  GRADUATED
+  SUSPENDED
+}
+
+enum TeacherStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum ClassStatus {
+  ACTIVE
+  INACTIVE
+  CLOSED
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  DROPPED
+  ON_LEAVE
+}
+
+enum SessionStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+  MAKEUP
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+
+enum TeacherAttendanceStatus {
+  PRESENT
+  ABSENT
+  SUBSTITUTE
+}
+
+enum PromotionType {
+  PERCENTAGE
+  FIXED_AMOUNT
+  FREE_SESSIONS
+}
+
+enum TuitionStatus {
+  PENDING
+  PARTIAL
+  PAID
+  OVERDUE
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  MOMO
+  OTHER
+}
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+// ─── Người dùng & giáo viên ──────────────────────────────────
+
+model User {
+  id           String   @id
+  username     String   @unique
+  passwordHash String
+  role         Role
+  fullName     String
+  email        String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @db.Timestamptz(3)
+
+  teacher            Teacher?
+  paymentsReceived   Payment[]
+  promotionsApproved StudentPromotion[]
+  materials          Material[]
+
+  @@map("users")
+}
+
+model Teacher {
+  id                   String        @id
+  userId               String?       @unique
+  fullName             String
+  phone                String?
+  email                String?
+  address              String?
+  dateOfBirth          DateTime?     @db.Date
+  idCard               String?
+  bankAccount          String?
+  bankName             String?
+  salaryRatePerSession Int           @default(0)
+  status               TeacherStatus @default(ACTIVE)
+  notes                String?
+  createdAt            DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime      @updatedAt @db.Timestamptz(3)
+
+  user               User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+  classes            Class[]
+  sessions           Session[]
+  attendances        TeacherAttendance[] @relation("attendanceTeacher")
+  substituteSessions TeacherAttendance[] @relation("attendanceSubstitute")
+  reviews            StudentReview[]
+
+  @@map("teachers")
+}
+
+// ─── Học viên & phụ huynh ────────────────────────────────────
+
+model Student {
+  id             String        @id
+  fullName       String
+  dateOfBirth    DateTime?     @db.Date
+  gender         Gender?
+  school         String?
+  gradeLevel     Int?
+  address        String?
+  enrollmentDate DateTime      @db.Date
+  status         StudentStatus @default(ACTIVE)
+  avatarUrl      String?
+  notes          String?
+  createdAt      DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime      @updatedAt @db.Timestamptz(3)
+
+  parents         Parent[]
+  enrollments     ClassEnrollment[]
+  privateSessions PrivateSession[]
+  attendances     StudentAttendance[]
+  promotions      StudentPromotion[]
+  tuitionRecords  TuitionRecord[]
+  payments        Payment[]
+  monthlyScores   MonthlyScore[]
+  reviews         StudentReview[]
+
+  @@index([status, gradeLevel])
+  @@index([fullName])
+  @@map("students")
+}
+
+model Parent {
+  id               String        @id
+  studentId        String
+  fullName         String
+  relationship     Relationship?
+  phone            String?
+  zalo             String?
+  email            String?
+  isPrimaryContact Boolean       @default(false)
+  createdAt        DateTime      @default(now()) @db.Timestamptz(3)
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+  @@index([phone])
+  @@map("parents")
+}
+
+/// Firestore: students/{id}/reviews — nhận xét theo tháng.
+model StudentReview {
+  id        String   @id
+  studentId String
+  teacherId String?
+  month     String // "YYYY-MM"
+  content   String
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  student Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  teacher Teacher? @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+
+  @@index([studentId, month])
+  @@map("student_reviews")
+}
+
+// ─── Môn, lớp, ghi danh, lịch ────────────────────────────────
+
+model Subject {
+  id                    String   @id
+  name                  String
+  gradeLevel            Int?
+  tuitionRatePerSession Int      @default(0)
+  description           String?
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now()) @db.Timestamptz(3)
+
+  classes Class[]
+
+  @@map("subjects")
+}
+
+model Class {
+  id                 String      @id
+  name               String
+  subjectId          String?
+  teacherId          String?
+  room               String?
+  maxStudents        Int?
+  /// Đơn giá hiện hành; lịch sử đơn giá ở ClassTuitionRate.
+  tuitionRate        Int?
+  sessionsPerMonth   Int?
+  gradeLevel         Int?
+  startDate          DateTime?   @db.Date
+  endDate            DateTime?   @db.Date
+  status             ClassStatus @default(ACTIVE)
+  notes              String?
+  /// Denorm có chủ đích (đếm nhanh cho danh sách); cập nhật trong cùng transaction ghi danh.
+  activeStudentCount Int         @default(0)
+  createdAt          DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime    @updatedAt @db.Timestamptz(3)
+
+  subject           Subject?            @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  teacher           Teacher?            @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  rateHistory       ClassTuitionRate[]
+  enrollments       ClassEnrollment[]
+  schedules         Schedule[]
+  sessions          Session[]
+  studentAttendance StudentAttendance[]
+  teacherAttendance TeacherAttendance[]
+  promotions        StudentPromotion[]
+  tuitionRecords    TuitionRecord[]
+
+  @@index([status])
+  @@map("classes")
+}
+
+/// Firestore: classes.tuitionRateHistory[] — đơn giá áp dụng từ tháng nào.
+model ClassTuitionRate {
+  classId        String
+  effectiveMonth String // "YYYY-MM"
+  rate           Int
+
+  class Class @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@id([classId, effectiveMonth])
+  @@map("class_tuition_rates")
+}
+
+model ClassEnrollment {
+  id                String           @id
+  classId           String
+  studentId         String
+  enrollmentDate    DateTime         @db.Date
+  dropDate          DateTime?        @db.Date
+  status            EnrollmentStatus @default(ACTIVE)
+  customTuitionRate Int?
+  notes             String?
+  createdAt         DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime?        @updatedAt @db.Timestamptz(3)
+
+  class   Class   @relation(fields: [classId], references: [id], onDelete: Restrict)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  // Một học viên chỉ có 1 ghi danh ACTIVE mỗi lớp: partial unique index trong constraints.sql
+  @@index([classId, status])
+  @@index([studentId, status])
+  @@map("class_enrollments")
+}
+
+model Schedule {
+  id            String    @id
+  classId       String
+  dayOfWeek     DayOfWeek
+  startTime     String    @db.VarChar(5)
+  endTime       String    @db.VarChar(5)
+  effectiveFrom DateTime  @db.Date
+  effectiveTo   DateTime? @db.Date
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+
+  class    Class     @relation(fields: [classId], references: [id], onDelete: Cascade)
+  sessions Session[]
+
+  @@index([classId])
+  @@map("schedules")
+}
+
+model Session {
+  id           String        @id
+  classId      String
+  teacherId    String?
+  scheduleId   String?
+  sessionDate  DateTime      @db.Date
+  startTime    String        @db.VarChar(5)
+  endTime      String        @db.VarChar(5)
+  status       SessionStatus @default(SCHEDULED)
+  cancelReason String?
+  notes        String?
+  createdAt    DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime      @updatedAt @db.Timestamptz(3)
+
+  class              Class               @relation(fields: [classId], references: [id], onDelete: Cascade)
+  teacher            Teacher?            @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  schedule           Schedule?           @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  studentAttendances StudentAttendance[]
+  teacherAttendances TeacherAttendance[]
+
+  @@unique([classId, sessionDate, startTime])
+  @@index([sessionDate])
+  @@map("sessions")
+}
+
+/// Firestore: privateSchedules — buổi học riêng 1-1.
+model PrivateSession {
+  id             String        @id
+  studentId      String
+  sessionDate    DateTime      @db.Date
+  startTime      String?       @db.VarChar(5)
+  endTime        String?       @db.VarChar(5)
+  teacherName    String?
+  ratePerSession Int
+  status         SessionStatus @default(SCHEDULED)
+  notes          String?
+  createdAt      DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime      @updatedAt @db.Timestamptz(3)
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, sessionDate])
+  @@index([sessionDate])
+  @@map("private_sessions")
+}
+
+model Holiday {
+  id          String     @id
+  name        String
+  description String?
+  startDate   DateTime   @db.Date
+  endDate     DateTime   @db.Date
+  /// Danh sách ngày cụ thể (Firestore `dates[]`), dùng khi kỳ nghỉ không liên tục.
+  dates       DateTime[] @db.Date
+  createdAt   DateTime   @default(now()) @db.Timestamptz(3)
+
+  @@map("holidays")
+}
+
+// ─── Điểm danh ───────────────────────────────────────────────
+
+model StudentAttendance {
+  id        String           @id
+  sessionId String
+  classId   String
+  studentId String
+  status    AttendanceStatus
+  notes     String?
+  createdAt DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime         @updatedAt @db.Timestamptz(3)
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  class   Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, studentId])
+  @@index([studentId])
+  @@map("student_attendances")
+}
+
+model TeacherAttendance {
+  id                  String                  @id
+  sessionId           String
+  classId             String
+  teacherId           String
+  status              TeacherAttendanceStatus
+  substituteTeacherId String?
+  checkInTime         String?                 @db.VarChar(5)
+  checkOutTime        String?                 @db.VarChar(5)
+  notes               String?
+  createdAt           DateTime                @default(now()) @db.Timestamptz(3)
+
+  session    Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  class      Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  teacher    Teacher  @relation("attendanceTeacher", fields: [teacherId], references: [id], onDelete: Restrict)
+  substitute Teacher? @relation("attendanceSubstitute", fields: [substituteTeacherId], references: [id], onDelete: SetNull)
+
+  @@unique([sessionId, teacherId])
+  @@index([teacherId])
+  @@map("teacher_attendances")
+}
+
+// ─── Khuyến mãi, học phí, thanh toán ─────────────────────────
+
+model Promotion {
+  id         String        @id
+  name       String
+  type       PromotionType
+  value      Int
+  conditions String?
+  validFrom  DateTime?     @db.Date
+  validTo    DateTime?     @db.Date
+  isActive   Boolean       @default(true)
+  createdAt  DateTime      @default(now()) @db.Timestamptz(3)
+
+  applied StudentPromotion[]
+
+  @@map("promotions")
+}
+
+model StudentPromotion {
+  id           String        @id
+  studentId    String
+  /// NULL = áp cho học riêng (Firestore classId "private").
+  classId      String?
+  promotionId  String
+  /// Ảnh chụp khuyến mãi lúc áp — giữ nguyên dù khuyến mãi gốc bị sửa.
+  promotionName  String
+  promotionType  PromotionType
+  promotionValue Int
+  appliedFrom  DateTime      @db.Date
+  appliedTo    DateTime?     @db.Date
+  approvedById String?
+  notes        String?
+  createdAt    DateTime      @default(now()) @db.Timestamptz(3)
+
+  student    Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  class      Class?    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  promotion  Promotion @relation(fields: [promotionId], references: [id], onDelete: Restrict)
+  approvedBy User?     @relation(fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@index([studentId])
+  @@map("student_promotions")
+}
+
+model TuitionRecord {
+  id              String        @id
+  studentId       String
+  /// NULL = phiếu học riêng (Firestore classId "private").
+  classId         String?
+  billingMonth    Int
+  billingYear     Int
+  totalSessions   Int
+  chargedSessions Int
+  baseAmount      Int
+  discountAmount  Int           @default(0)
+  finalAmount     Int
+  /// Tổng đã thu — phải bằng SUM(payments.amount); kiểm bằng db/verify.sql.
+  paidAmount      Int           @default(0)
+  remainingAmount Int
+  status          TuitionStatus @default(PENDING)
+  dueDate         DateTime?     @db.Date
+  notes           String?
+  createdAt       DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime      @updatedAt @db.Timestamptz(3)
+
+  student  Student   @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  class    Class?    @relation(fields: [classId], references: [id], onDelete: Restrict)
+  payments Payment[]
+
+  // Unique (studentId, COALESCE(classId,'private'), billingYear, billingMonth): constraints.sql
+  @@index([billingYear, billingMonth, status])
+  @@index([studentId])
+  @@map("tuition_records")
+}
+
+model Payment {
+  id              String        @id
+  tuitionRecordId String
+  studentId       String
+  amount          Int
+  paymentDate     DateTime      @db.Date
+  method          PaymentMethod
+  receivedById    String?
+  /// Ảnh chụp tên người thu — giữ cho sổ sách khi tài khoản bị xoá.
+  receivedByName  String?
+  notes           String?
+  createdAt       DateTime      @default(now()) @db.Timestamptz(3)
+
+  tuitionRecord TuitionRecord @relation(fields: [tuitionRecordId], references: [id], onDelete: Restrict)
+  student       Student       @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  receivedBy    User?         @relation(fields: [receivedById], references: [id], onDelete: SetNull)
+
+  @@index([tuitionRecordId])
+  @@index([studentId])
+  @@index([paymentDate])
+  @@map("payments")
+}
+
+/// Webhook SePay — sổ nhật ký, cố ý không có khoá ngoại để không mất dấu vết khi phiếu/thanh toán bị xoá.
+model BankTransaction {
+  id                     String   @id
+  sepayId                BigInt   @unique
+  gateway                String
+  accountNumber          String
+  transferType           String   @db.VarChar(3) // in | out
+  transferAmount         Int
+  accumulated            BigInt
+  content                String
+  referenceCode          String
+  description            String
+  transactionDate        DateTime @db.Timestamp(0) // giờ địa phương do SePay gửi
+  receivedAt             DateTime @db.Timestamptz(3)
+  status                 String // matched | unmatched | duplicate | ignored_outbound
+  matchedStudentId       String?
+  matchedTuitionRecordId String?
+  matchedPaymentId       String?
+  matchReason            String?
+
+  @@index([status])
+  @@map("bank_transactions")
+}
+
+// ─── Điểm, tài liệu ──────────────────────────────────────────
+
+/// 1 dòng = học viên × lớp × tháng. classId không có khoá ngoại vì điểm phải còn khi lớp đã xoá.
+model MonthlyScore {
+  id            String   @id // `${studentId}_${classId|private}_${YYYYMM}`
+  studentId     String
+  classId       String? // NULL = học riêng
+  /// Ảnh chụp tên lớp lúc chấm (lớp có thể đã xoá).
+  className     String
+  year          Int
+  month         Int
+  expectedCount Int
+  /// Mảng điểm có phần tử null (ô chưa chấm) — Prisma list không cho null nên dùng JSONB.
+  scores        Json
+  maxScore      Int      @default(10)
+  notes         String?
+  updatedAt     DateTime @updatedAt @db.Timestamptz(3)
+  updatedBy     String
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([year, month])
+  @@map("monthly_scores")
+}
+
+model Material {
+  id                     String   @id
+  title                  String
+  description            String?
+  type                   String   @db.VarChar(4) // LINK | FILE
+  url                    String?
+  cloudinaryPublicId     String?
+  cloudinaryResourceType String?
+  fileName               String?
+  fileSize               Int?
+  mimeType               String?
+  audienceType           String   @db.VarChar(7) // STUDENT | CLASS
+  audienceIds            String[]
+  uploaderId             String?
+  createdAt              DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt              DateTime @updatedAt @db.Timestamptz(3)
+
+  uploader User? @relation(fields: [uploaderId], references: [id], onDelete: SetNull)
+
+  @@index([audienceIds], type: Gin)
+  @@map("materials")
+}
+
+// ─── Hoá đơn MISA ────────────────────────────────────────────
+// Hoá đơn là chứng từ: giữ nguyên ảnh chụp buyer/source/template dạng JSONB.
+
+model MisaInvoice {
+  id               String   @id
+  refId            String
+  status           String // NOT_CREATED | CREATING | OUTCOME_UNKNOWN | FAILED | DRAFT_CREATED | ISSUED | SENT_TO_TAX | REMOVED_FROM_MISA
+  revision         Int      @default(0)
+  invoiceDate      DateTime @db.Date
+  invoiceNumber    String?
+  invoiceCode      String?
+  transactionId    String?
+  lastErrorMessage String?
+  /// Phiếu học phí được gộp vào hoá đơn này.
+  recordIds        String[]
+  billingPeriods   String[]
+  source           Json
+  sources          Json?
+  template         Json
+  buyer            Json
+  restoredAt       DateTime? @db.Timestamptz(3)
+  createdBy        String
+  createdAt        DateTime @db.Timestamptz(3)
+  updatedAt        DateTime @db.Timestamptz(3)
+
+  @@index([refId])
+  @@index([recordIds], type: Gin)
+  @@map("misa_invoices")
+}
+
+model MisaInvoiceReplacement {
+  id              String   @id
+  recordId        String
+  reason          String
+  requestedBy     String
+  replacedAt      DateTime @db.Timestamptz(3)
+  originalInvoice Json
+  originalFee     Json?
+
+  @@index([recordId])
+  @@map("misa_invoice_replacements")
+}
+
+/// Luồng cũ (meInvoice draft) — còn được worker cũ đọc.
+model InvoiceDraft {
+  id               String    @id
+  refId            String
+  status           String
+  revision         Int       @default(0)
+  invoiceDate      DateTime  @db.Date
+  source           Json
+  template         Json
+  buyer            Json
+  provider         String?
+  syncAttempts     Int?
+  lastErrorCode    String?
+  lastErrorMessage String?
+  createdBy        String
+  updatedBy        String?
+  createdAt        DateTime  @db.Timestamptz(3)
+  updatedAt        DateTime  @db.Timestamptz(3)
+
+  @@map("invoice_drafts")
+}
+
+model InvoiceOutbox {
+  id              String   @id
+  draftId         String
+  tuitionRecordId String
+  operation       String
+  status          String
+  revision        Int
+  attempts        Int      @default(0)
+  idempotencyKey  String   @unique
+  leaseToken      String?
+  leaseUntil      DateTime? @db.Timestamptz(3)
+  nextRetryAt     DateTime? @db.Timestamptz(3)
+  createdAt       DateTime @db.Timestamptz(3)
+  updatedAt       DateTime @db.Timestamptz(3)
+
+  @@index([status, nextRetryAt])
+  @@map("invoice_outbox")
+}
+
+/// Đối soát hoá đơn cuối tháng — 1 dòng mỗi kỳ "YYYY-MM".
+model MonthlyInvoiceRun {
+  id                  String    @id // "YYYY-MM"
+  month               Int
+  year                Int
+  cutoff              DateTime  @db.Timestamptz(3)
+  status              String
+  leaseToken          String?
+  leaseUntil          BigInt?
+  total               Int?
+  excludedAfterCutoff Int?
+  startedAt           DateTime? @db.Timestamptz(3)
+  reconciledAt        DateTime? @db.Timestamptz(3)
+  extra               Json?
+
+  items MonthlyInvoiceRunItem[]
+
+  @@map("monthly_invoice_runs")
+}
+
+model MonthlyInvoiceRunItem {
+  runId           String
+  id              String // = tuitionRecordId
+  studentName     String
+  className       String
+  amount          Int
+  status          String
+  reason          String
+  linkedInvoiceId String
+
+  run MonthlyInvoiceRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@id([runId, id])
+  @@index([runId, status])
+  @@map("monthly_invoice_run_items")
+}
+
+// ─── Zalo, thông báo, lead ───────────────────────────────────
+
+model ZnsTemplate {
+  id        String    @id // templateId Zalo cấp
+  name      String
+  useCase   String    @db.VarChar(4) // A | B | C | TEST
+  paramKeys String[]
+  cost      Int       @default(0)
+  active    Boolean   @default(true)
+  note      String?
+  createdAt DateTime? @db.Timestamptz(3)
+  updatedAt DateTime? @db.Timestamptz(3)
+
+  @@map("zns_templates")
+}
+
+model ZnsLog {
+  id              String    @id
+  studentId       String?
+  parentPhone     String
+  parentPhoneIntl String
+  templateId      String
+  useCase         String    @db.VarChar(4)
+  invoiceId       String?
+  reminderCount   Int?
+  params          Json
+  trackingId      String?   @unique
+  status          String // queued | sent | delivered | failed | phone_invalid
+  msgId           String?
+  error           String?
+  createdAt       DateTime? @db.Timestamptz(3)
+  sentAt          DateTime? @db.Timestamptz(3)
+  deliveredAt     DateTime? @db.Timestamptz(3)
+
+  @@index([invoiceId])
+  @@index([studentId])
+  @@map("zns_logs")
+}
+
+model AdminAlert {
+  id        String   @id
+  type      String
+  read      Boolean  @default(false)
+  message   String
+  /// Chi tiết theo loại cảnh báo (invoiceId, studentId, billingMonth...).
+  data      Json
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([read, createdAt])
+  @@map("admin_alerts")
+}
+
+model Notification {
+  id          String    @id
+  title       String
+  content     String
+  type        String // GENERAL | PAYMENT_DUE | SCHEDULE_CHANGE | EXAM_REMINDER
+  targetType  String // ALL | CLASS | STUDENT
+  targetId    String?
+  sendViaZalo Boolean   @default(false)
+  sentAt      DateTime? @db.Timestamptz(3)
+  createdById String?
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+
+  @@map("notifications")
+}
+
+/// Gộp lead từ chatbot Zalo (camelCase) và cổng CTV cũ (snake_case).
+model Lead {
+  id             String   @id
+  source         String? // zalo | ctv | ...
+  zaloUserId     String?
+  collaboratorId String?
+  parentName     String?
+  parentPhone    String?
+  studentName    String?
+  gradeLevel     String?
+  /// Giá trị gốc giữ nguyên (NEW, COLLECTING..., hoặc "Chờ tư vấn" từ CTV).
+  status         String
+  chatStep       Int      @default(0)
+  note           String?
+  createdAt      DateTime @db.Timestamptz(3)
+  updatedAt      DateTime @db.Timestamptz(3)
+
+  @@index([zaloUserId])
+  @@map("leads")
+}
+
+// ─── Nhật ký & kiểm tra ──────────────────────────────────────
+
+model ActivityLog {
+  id           String   @id
+  userId       String
+  userName     String
+  userRole     String
+  action       String
+  resourceType String
+  resourceId   String?
+  description  String
+  method       String
+  path         String
+  statusCode   Int
+  ip           String
+  after        Json?
+  createdAt    DateTime @db.Timestamptz(3)
+
+  @@index([createdAt])
+  @@index([resourceType, resourceId])
+  @@map("activity_logs")
+}
+
+model ClassIntegrityAudit {
+  id             String   @id
+  period         String
+  checkedClasses Int
+  checkedRows    Int
+  anomalies      Json
+  createdAt      DateTime @db.Timestamptz(3)
+
+  @@map("class_integrity_audits")
+}
