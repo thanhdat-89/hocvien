@@ -10,7 +10,12 @@ cd "$(dirname "$0")/.."
 
 npx tsc --noEmit -p .   # không đẩy mã nguồn lỗi kiểu
 
-rsync -az --delete -e "ssh -i $KEY" \
+# Chỉ đẩy file được git theo dõi: file chưa commit trong thư mục (ví dụ prisma.config.ts cũ) có thể làm hỏng
+# migration hay build trên VPS.
+UNTRACKED=$(mktemp); trap 'rm -f "$UNTRACKED"' EXIT
+{ git ls-files --others --exclude-standard; git ls-files --others --ignored --exclude-standard --directory; } | sed 's#^#/#' > "$UNTRACKED"
+
+rsync -azm --delete -e "ssh -i $KEY" --exclude-from="$UNTRACKED" \
   --exclude node_modules --exclude dist --exclude .env --exclude 'frontend/' --exclude 'test/' \
   --exclude '.playwright-mcp/' --exclude '*.log' --exclude 'scratchpad_*' --exclude 'firebase-service-account.json' \
   ./ "$VPS:/srv/qlhv-api/"
