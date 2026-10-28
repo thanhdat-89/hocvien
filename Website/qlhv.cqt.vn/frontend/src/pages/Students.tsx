@@ -189,7 +189,7 @@ function ImportExcelModal({ onClose, onImported }: { onClose: () => void; onImpo
   const cols = ['fullName', 'gradeLevel', 'className', 'enrollmentDate', 'parentName', 'parentPhone'] as const
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="responsive-dialog fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-inverse-surface/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-3xl bg-surface-container-lowest rounded-2xl shadow-2xl z-10 flex flex-col max-h-[90vh]">
 
@@ -497,7 +497,7 @@ export default function Students() {
   return (
     <div>
       <TopBar title="Quản lý Học viên" onSearch={handleSearch} />
-      <div className="px-8 py-8 space-y-8">
+      <div className="page-content px-8 py-8 space-y-8">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
           <div>
@@ -520,7 +520,7 @@ export default function Students() {
         </div>
 
         {/* Stats + Filters */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="student-summary grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="bg-surface-container-lowest p-6 rounded-2xl shadow-sm border border-outline-variant/10">
             <div className="flex items-center justify-between mb-4">
               <div className="w-10 h-10 rounded-lg bg-primary-container/20 flex items-center justify-center text-primary">
@@ -575,7 +575,7 @@ export default function Students() {
             <span className="text-xs text-slate-500">{totalPages > 1 ? `Trang ${page}/${totalPages}` : `${total} học viên`}</span>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[860px] table-fixed border-collapse text-left text-sm" aria-label="Danh sách học viên">
+            <table role="table" className="student-mobile-table w-full min-w-[860px] table-fixed border-collapse text-left text-sm" aria-label="Danh sách học viên">
               <colgroup>
                 <col style={{ width: '5%' }} />
                 <col style={{ width: '24%' }} />
@@ -594,13 +594,13 @@ export default function Students() {
                   <th scope="col" className="py-3.5 pl-3 pr-5 text-right font-semibold sm:pr-6">Thao tác</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody role="rowgroup" className="divide-y divide-slate-100">
                 {students.map((student, index) => (
-                  <tr key={student.id} className="align-middle hover:bg-slate-50/70 focus-within:bg-slate-50/70">
-                    <td className="py-4 pl-5 pr-2 text-xs tabular-nums text-slate-400 sm:pl-6">
+                  <tr role="row" key={student.id} className="align-middle hover:bg-slate-50/70 focus-within:bg-slate-50/70">
+                    <td role="cell" data-label="STT" className="py-4 pl-5 pr-2 text-xs tabular-nums text-slate-400 sm:pl-6">
                       {(page - 1) * PAGE_SIZE + index + 1}
                     </td>
-                    <td className="px-3 py-4">
+                    <td role="cell" data-label="Học viên" className="px-3 py-4">
                       <div className="flex min-w-0 items-center gap-3">
                         <Avatar name={student.fullName} />
                         <div className="min-w-0">
@@ -609,7 +609,7 @@ export default function Students() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-3 py-4">
+                    <td role="cell" data-label="Lớp học" className="px-3 py-4">
                       {student.enrollments && student.enrollments.length > 0 ? (
                         <div className="flex flex-wrap gap-1.5">
                           {student.enrollments.map((e) => (
@@ -624,7 +624,7 @@ export default function Students() {
                         </span>
                       )}
                     </td>
-                    <td className="px-3 py-4">
+                    <td role="cell" data-label="Khuyến mại" className="px-3 py-4">
                       {student.promotions && student.promotions.length > 0 ? (
                         <div className="flex flex-wrap gap-1.5">
                           {student.promotions.map((p, i) => (
@@ -639,10 +639,10 @@ export default function Students() {
                         </div>
                       ) : <span className="text-slate-400">—</span>}
                     </td>
-                    <td className="px-3 py-4">
+                    <td role="cell" data-label="Trạng thái" className="px-3 py-4">
                       <StatusBadge status={student.status} />
                     </td>
-                    <td className="py-4 pl-3 pr-5 text-right sm:pr-6">
+                    <td role="cell" data-label="Thao tác" className="py-4 pl-3 pr-5 text-right sm:pr-6">
                       <div className="flex items-center justify-end gap-1">
                         <button
                           onClick={() => navigate(`/students/${student.id}`)}

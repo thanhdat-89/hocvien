@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express'
-import { db, C, toDocs } from '../lib/firebase'
+import { db, C, toDocs, admin } from '../lib/firebase'
+import { createError } from '../middleware/errorHandler'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
 
@@ -61,24 +62,40 @@ interface ActivityLogDoc {
 router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { from, to, userId, resourceType, action } = req.query as Record<string, string>
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 50))
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 10))
     const cursor = req.query.cursor as string | undefined
+    let after: [string, string] | [string] | undefined
+    if (cursor) {
+      // Keep old timestamp cursors usable while clients move to the stable pair.
+      if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(cursor) && Number.isFinite(Date.parse(cursor))) after = [cursor]
+      else {
+        try {
+          if (cursor.length > 4096 || !/^[A-Za-z0-9_-]+$/.test(cursor)) throw new Error()
+          const value = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'))
+          if (value.v !== 1 || typeof value.createdAt !== 'string' || !Number.isFinite(Date.parse(value.createdAt))
+            || typeof value.id !== 'string' || !value.id || value.id.includes('/') || Buffer.byteLength(value.id) > 1500) throw new Error()
+          after = [value.createdAt, value.id]
+        } catch { throw createError('Con trỏ phân trang không hợp lệ. Vui lòng tải lại lịch sử.', 400) }
+      }
+    }
 
-    let q: FirebaseFirestore.Query = db.collection(C.ACTIVITY_LOGS).orderBy('createdAt', 'desc')
+    let q: FirebaseFirestore.Query = db.collection(C.ACTIVITY_LOGS)
+      .orderBy('createdAt', 'desc').orderBy(admin.firestore.FieldPath.documentId(), 'desc')
     if (from) q = q.where('createdAt', '>=', from)
     if (to)   q = q.where('createdAt', '<=', to)
     if (userId)       q = q.where('userId', '==', userId)
     if (resourceType) q = q.where('resourceType', '==', resourceType)
     if (action)       q = q.where('action', '==', action)
 
-    if (cursor) q = q.startAfter(cursor)
+    if (after) q = q.startAfter(...after)
     q = q.limit(limit + 1)
 
     const snap = await q.get()
     const docs = toDocs<ActivityLogDoc>(snap)
     const hasMore = docs.length > limit
     const data = hasMore ? docs.slice(0, limit) : docs
-    const nextCursor = hasMore ? data[data.length - 1].createdAt : null
+    const last = data[data.length - 1]
+    const nextCursor = hasMore ? Buffer.from(JSON.stringify({ v: 1, createdAt: last.createdAt, id: last.id })).toString('base64url') : null
 
     res.json({ data, nextCursor })
   } catch (err) { next(err) }

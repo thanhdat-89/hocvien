@@ -1,8 +1,9 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { materialSymbolsSubset } from './tools/materialSymbols'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), materialSymbolsSubset()],
   server: {
     port: 5173,
     proxy: {

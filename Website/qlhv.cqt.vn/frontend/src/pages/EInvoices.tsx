@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import TopBar from '../components/TopBar'
 import EInvoicePreparation, { InvoiceRow } from '../components/EInvoicePreparation'
 import api from '../services/api'
 
 export default function EInvoices() {
   const thisYear = new Date().getFullYear()
-  const [month, setMonth] = useState(new Date().getMonth() + 1)
-  const [year, setYear] = useState(thisYear)
+  const [searchParams] = useSearchParams()
+  const requestedMonth = Number(searchParams.get('month'))
+  const requestedYear = Number(searchParams.get('year'))
+  const [month, setMonth] = useState(requestedMonth >= 1 && requestedMonth <= 12 ? requestedMonth : new Date().getMonth() + 1)
+  const [year, setYear] = useState(requestedYear >= 2026 && requestedYear <= 2100 ? requestedYear : thisYear)
   const [rows, setRows] = useState<InvoiceRow[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -44,7 +48,7 @@ export default function EInvoices() {
   return (
     <div>
       <TopBar title="Hóa đơn điện tử" />
-      <div className="px-8 py-8 space-y-8">
+      <div className="page-content px-8 py-8 space-y-8">
         <div className="flex flex-wrap items-end justify-between gap-6">
           <div>
             <span className="text-[11px] font-bold text-primary tracking-[0.2em] uppercase mb-2 block">Tài chính</span>

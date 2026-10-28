@@ -298,7 +298,7 @@ function EnrollModal({ student, enrollments, onClose, onSaved }: { student: Stud
   }
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-5">
+    <div className="responsive-dialog fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-5">
       <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-[3px]" onClick={onClose} />
       <div role="dialog" aria-modal="true" aria-labelledby="enroll-modal-title" className="relative z-10 flex max-h-[92dvh] w-full max-w-[620px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-7 sm:py-5">
@@ -462,7 +462,7 @@ function PaymentModal({ record, onClose, onSaved }: { record: TuitionRecord; onC
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="responsive-dialog fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-inverse-surface/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-lg bg-surface-container-lowest rounded-2xl shadow-2xl p-8 z-10 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-6">
@@ -490,7 +490,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function ConfirmDialog({ message, onConfirm, onCancel }: { message: string; onConfirm: () => void; onCancel: () => void }) {
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+    <div className="responsive-dialog fixed inset-0 z-[60] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-inverse-surface/40 backdrop-blur-sm" onClick={onCancel} />
       <div className="relative bg-surface-container-lowest rounded-2xl shadow-2xl p-6 w-full max-w-sm z-10">
         <p className="text-on-surface font-medium mb-6">{message}</p>
@@ -649,7 +649,7 @@ function InfoTab({
             ) : (
               <div className="space-y-3">
                 {parents.map(p => (
-                  <div key={p.id} className="p-4 bg-surface-container-low rounded-xl flex items-start gap-4">
+                  <div key={p.id} className="profile-contact p-4 bg-surface-container-low rounded-xl flex items-start gap-4">
                     <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm flex-shrink-0">
                       {p.fullName?.[0]?.toUpperCase() ?? '?'}
                     </div>
@@ -891,7 +891,7 @@ function ReviewsTab({ studentId }: { studentId: string }) {
       {/* Editor */}
       <div className="bg-surface-container-lowest rounded-xl p-6 shadow-sm space-y-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-2">
+          <div className="responsive-toolbar flex items-center gap-2">
             <select value={month} onChange={e => setMonth(Number(e.target.value))} className="input py-2 w-32">
               {months.map(m => <option key={m} value={m}>Tháng {m}</option>)}
             </select>
@@ -1135,7 +1135,7 @@ function PromoModal({ studentId, enrollments, hasPrivate, onClose, onSaved }: Pr
 
   if (allOptions.length === 0) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="responsive-dialog fixed inset-0 z-50 flex items-center justify-center p-4">
         <div className="absolute inset-0 bg-inverse-surface/40 backdrop-blur-sm" onClick={onClose} />
         <div className="relative w-full max-w-md bg-surface-container-lowest rounded-2xl shadow-2xl p-8 z-10">
           <div className="flex items-center justify-between mb-6">
@@ -1152,7 +1152,7 @@ function PromoModal({ studentId, enrollments, hasPrivate, onClose, onSaved }: Pr
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="responsive-dialog fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-inverse-surface/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-md bg-surface-container-lowest rounded-2xl shadow-2xl p-8 z-10">
         <div className="flex items-center justify-between mb-6">
@@ -1364,7 +1364,7 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
       )}
 
       {rows.length > 0 && (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="profile-tuition-summary grid grid-cols-3 gap-4">
           <div className="bg-surface-container-lowest rounded-xl p-4 shadow-sm text-center">
             <p className="text-[10px] uppercase font-bold text-outline tracking-wider mb-1">Tổng học phí</p>
             <p className="text-xl font-bold text-on-surface">{fmtMoney(totalFee)}</p>
@@ -1382,9 +1382,9 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
 
       {/* Promotions section */}
       <div className="bg-surface-container-lowest rounded-xl p-6 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <h3 className="font-headline text-base font-bold text-on-surface">Khuyến mại đang áp dụng</h3>
-          <button onClick={() => setShowPromoModal(true)} className="btn-primary text-xs py-1.5 px-3">
+          <button onClick={() => setShowPromoModal(true)} className="btn-primary shrink-0 text-xs py-1.5 px-3">
             <span className="material-symbols-outlined text-sm">add</span>
             Thêm khuyến mại
           </button>
@@ -1395,14 +1395,14 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
           <div className="space-y-2">
             {promos.map(p => (
               <div key={p.id} className="flex items-center justify-between gap-3 p-3 bg-surface-container-low rounded-xl">
-                <div className="flex items-center gap-2 flex-1 min-w-0">
+                <div className="profile-promotion flex items-center gap-2 flex-1 min-w-0">
                   {promoTypeBadge(p.promotionType)}
-                  <span className="text-sm font-semibold text-on-surface">
+                  <span className="shrink-0 whitespace-nowrap text-sm font-semibold text-on-surface">
                     {p.promotionType === 'PERCENTAGE' ? `${p.promotionValue}%` : fmtMoney(p.promotionValue)}
                   </span>
                   <span className="text-sm text-outline">·</span>
-                  <span className="text-sm text-on-surface-variant truncate">{p.className}</span>
-                  <span className="text-xs text-outline whitespace-nowrap">
+                  <span className="profile-promotion-class text-sm text-on-surface-variant truncate">{p.className}</span>
+                  <span className="profile-promotion-dates text-xs text-outline whitespace-nowrap">
                     {fmt(p.appliedFrom)} → {p.appliedTo ? fmt(p.appliedTo) : 'Không giới hạn'}
                   </span>
                 </div>
@@ -1417,7 +1417,7 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
       </div>
 
       <div className="bg-surface-container-lowest rounded-xl p-6 shadow-sm">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
           <h3 className="font-headline text-lg font-bold text-on-surface">Học phí cá nhân</h3>
           <div className="flex items-center gap-2">
             <select
@@ -1456,7 +1456,7 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left">
+            <table className="profile-tuition-table tuition-mobile-table w-full text-left">
               <thead>
                 <tr className="border-b border-outline-variant/10 text-[10px] uppercase font-bold text-outline tracking-widest">
                   <th className="pb-3 pr-6">Lớp học</th>
@@ -1473,16 +1473,16 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
                   const busy = creatingKey === key
                   return (
                     <tr key={key} className="hover:bg-surface-container-low/30 transition-colors">
-                      <td className="py-3 pr-6 text-sm">{r.className}</td>
-                      <td className="py-3 pr-6 text-sm text-center font-semibold">{r.totalSessions}</td>
-                      <td className="py-3 pr-6 text-sm text-right">{r.ratePerSession ? fmtMoney(r.ratePerSession) : '—'}</td>
-                      <td className="py-3 pr-6 text-sm text-right">
+                      <td data-label="Lớp học" className="py-3 pr-6 text-sm">{r.className}</td>
+                      <td data-label="Số buổi học" className="py-3 pr-6 text-sm text-center font-semibold">{r.totalSessions}</td>
+                      <td data-label="Học phí/buổi" className="py-3 pr-6 text-sm text-right">{r.ratePerSession ? fmtMoney(r.ratePerSession) : '—'}</td>
+                      <td data-label="Khuyến mại & Giảm giá" className="py-3 pr-6 text-sm text-right">
                         {r.discountAmount > 0
                           ? <span className="text-secondary font-medium">-{fmtMoney(r.discountAmount)}</span>
                           : <span className="text-outline">—</span>}
                       </td>
-                      <td className="py-3 pr-6 text-sm font-bold text-right">{fmtMoney(r.finalAmount)}</td>
-                      <td className="py-3 text-center">
+                      <td data-label="Thành tiền" className="py-3 pr-6 text-sm font-bold text-right">{fmtMoney(r.finalAmount)}</td>
+                      <td data-label="Phiếu học phí" className="py-3 text-center">
                         {r.tuitionRecord ? (
                           <div className="flex items-center justify-center gap-2">
                             {r.tuitionRecord.remainingAmount === 0 || r.tuitionRecord.status === 'PAID' ? (
@@ -1712,7 +1712,7 @@ export function PrivateScheduleModal({ studentId, studentName, onClose, onSaved 
   const monthNames = ['Tháng 1','Tháng 2','Tháng 3','Tháng 4','Tháng 5','Tháng 6','Tháng 7','Tháng 8','Tháng 9','Tháng 10','Tháng 11','Tháng 12']
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-5">
+    <div className="responsive-dialog fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-5">
       <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-[3px]" onClick={onClose} />
       <div role="dialog" aria-modal="true" aria-labelledby="private-schedule-title" className="relative z-10 flex max-h-[92dvh] w-full max-w-[680px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-7 sm:py-5">
@@ -1775,7 +1775,7 @@ export function PrivateScheduleModal({ studentId, studentName, onClose, onSaved 
                         title={isExisting ? 'Đã có lịch học' : undefined}
                         aria-label={`${day} ${monthNames[calMonth]} ${calYear}${isExisting ? ', đã có lịch' : ''}`}
                         aria-pressed={isSelected}
-                        className={`relative mx-auto flex h-10 w-10 items-center justify-center rounded-full text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+                        className={`relative mx-auto flex h-10 w-10 max-sm:w-full max-sm:min-w-0 items-center justify-center rounded-full text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
                           isSelected ? 'bg-primary text-on-primary' :
                           isExisting ? 'bg-violet-100 text-violet-700 ring-1 ring-violet-300' :
                           isToday ? 'border border-primary text-primary' :
@@ -1938,7 +1938,7 @@ function PrivateTab({ studentId, studentName }: { studentId: string; studentName
             {years.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-4">
           {sessions.length > 0 && (
             <span className="text-sm font-bold text-on-surface">
               {sessions.length} buổi · <span className="text-primary">{fmtMoney(totalFee)}</span>
@@ -1951,7 +1951,7 @@ function PrivateTab({ studentId, studentName }: { studentId: string; studentName
         </div>
       </div>
 
-      <div className="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
+      <div className="profile-table-container bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
         {loading ? (
           <div className="flex justify-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
@@ -1962,7 +1962,7 @@ function PrivateTab({ studentId, studentName }: { studentId: string; studentName
             <p className="text-sm text-outline">Chưa có lịch học riêng tháng {month}/{year}</p>
           </div>
         ) : (
-          <table className="w-full text-left">
+          <table className="profile-session-table tuition-mobile-table w-full text-left">
             <thead>
               <tr className="border-b border-outline-variant/10 bg-surface-container-low/50">
                 <th className="px-6 py-4 text-[10px] uppercase font-bold text-outline tracking-widest w-24">Thứ</th>
@@ -1979,10 +1979,10 @@ function PrivateTab({ studentId, studentName }: { studentId: string; studentName
                 const cfg = statusCfg[resolvePrivateStatus(s)] ?? { label: s.status, cls: 'bg-surface-container-high text-outline' }
                 return (
                   <tr key={s.id} className="hover:bg-surface-container-low/30 transition-colors group">
-                    <td className="px-6 py-4">
+                    <td data-label="Thứ" className="px-6 py-4">
                       <span className="text-sm font-semibold text-on-surface-variant">{dayOfWeek(s.sessionDate)}</span>
                     </td>
-                    <td className="px-6 py-4">
+                    <td data-label="Ngày học" className="px-6 py-4">
                       <div>
                         <p className="text-sm font-bold text-on-surface">{fmt(s.sessionDate)}</p>
                         {s.startTime && s.endTime && (
@@ -1990,23 +1990,23 @@ function PrivateTab({ studentId, studentName }: { studentId: string; studentName
                         )}
                       </div>
                     </td>
-                    <td className="px-6 py-4">
+                    <td data-label="Lớp học" className="px-6 py-4">
                       <span className="text-sm font-medium text-on-surface">Học riêng</span>
                     </td>
-                    <td className="px-6 py-4">
+                    <td data-label="Giáo viên" className="px-6 py-4">
                       <span className="text-sm text-on-surface-variant">{(s as any).teacherName || '—'}</span>
                     </td>
-                    <td className="px-6 py-4 text-right">
+                    <td data-label="Học phí buổi" className="px-6 py-4 text-right">
                       <span className="text-sm font-bold text-on-surface">
                         {s.ratePerSession ? fmtMoney(s.ratePerSession) : '—'}
                       </span>
                     </td>
-                    <td className="px-6 py-4">
+                    <td data-label="Trạng thái" className="px-6 py-4">
                       <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ${cfg.cls}`}>{cfg.label}</span>
                     </td>
-                    <td className="px-6 py-4">
-                      <button onClick={() => deleteSession(s.id)}
-                        className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-error/10 text-outline hover:text-error rounded-lg transition-all">
+                    <td data-label="Thao tác" className="px-6 py-4">
+                      <button type="button" aria-label={`Xoá buổi học riêng ngày ${fmt(s.sessionDate)}`} onClick={() => deleteSession(s.id)}
+                        className="touch-actions opacity-0 group-hover:opacity-100 max-lg:opacity-100 focus-visible:opacity-100 p-1.5 hover:bg-error/10 text-outline hover:text-error rounded-lg transition-all">
                         <span className="material-symbols-outlined text-sm">delete</span>
                       </button>
                     </td>
@@ -2097,7 +2097,7 @@ function ScheduleTab({ studentId }: { studentId: string }) {
         )}
       </div>
 
-      <div className="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
+      <div className="profile-table-container bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
         {loading ? (
           <div className="flex justify-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
@@ -2108,7 +2108,7 @@ function ScheduleTab({ studentId }: { studentId: string }) {
             <p className="text-sm text-outline">Không có lịch học tháng {month}/{year}</p>
           </div>
         ) : (
-          <table className="w-full text-left">
+          <table className="profile-session-table tuition-mobile-table w-full text-left">
             <thead>
               <tr className="border-b border-outline-variant/10 bg-surface-container-low/50">
                 <th className="px-6 py-4 text-[10px] uppercase font-bold text-outline tracking-widest w-24">Thứ</th>
@@ -2125,10 +2125,10 @@ function ScheduleTab({ studentId }: { studentId: string }) {
                 const isCancelled = s.status === 'CANCELLED'
                 return (
                   <tr key={s.id} className={`hover:bg-surface-container-low/30 transition-colors ${isCancelled ? 'opacity-50' : ''}`}>
-                    <td className="px-6 py-4">
+                    <td data-label="Thứ" className="px-6 py-4">
                       <span className="text-sm font-semibold text-on-surface-variant">{dayOfWeek(s.sessionDate)}</span>
                     </td>
-                    <td className="px-6 py-4">
+                    <td data-label="Ngày học" className="px-6 py-4">
                       <div>
                         <p className="text-sm font-bold text-on-surface">{fmt(s.sessionDate)}</p>
                         {s.startTime && s.endTime && (
@@ -2136,10 +2136,10 @@ function ScheduleTab({ studentId }: { studentId: string }) {
                         )}
                       </div>
                     </td>
-                    <td className="px-6 py-4">
+                    <td data-label="Lớp học" className="px-6 py-4">
                       <span className="text-sm font-medium text-on-surface">{s.className}</span>
                     </td>
-                    <td className="px-6 py-4">
+                    <td data-label="Giáo viên" className="px-6 py-4">
                       <div className="flex items-center gap-2">
                         <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs flex-shrink-0">
                           {s.teacherName?.[0]?.toUpperCase() ?? '?'}
@@ -2147,12 +2147,12 @@ function ScheduleTab({ studentId }: { studentId: string }) {
                         <span className="text-sm text-on-surface-variant">{(s as any).teacherName || '—'}</span>
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-right">
+                    <td data-label="Học phí buổi" className="px-6 py-4 text-right">
                       <span className={`text-sm font-bold ${isCancelled ? 'line-through text-outline' : 'text-on-surface'}`}>
                         {s.ratePerSession ? fmtMoney(s.ratePerSession) : '—'}
                       </span>
                     </td>
-                    <td className="px-6 py-4">
+                    <td data-label="Trạng thái" className="px-6 py-4">
                       <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ${cfg.cls}`}>
                         {cfg.label}
                       </span>
@@ -2268,7 +2268,7 @@ function ShareLinkBox({ studentId }: { studentId: string }) {
   return (
     <section className="bg-primary-container/15 border border-primary/20 rounded-xl p-4 flex items-center gap-3 flex-wrap">
       <span className="material-symbols-outlined text-primary text-2xl flex-shrink-0">share</span>
-      <div className="flex-1 min-w-[240px]">
+      <div className="flex-1 min-w-[240px] max-sm:min-w-0 max-sm:basis-[calc(100%-3rem)]">
         <p className="text-xs uppercase font-bold tracking-wider text-primary mb-1">Link chia sẻ phụ huynh</p>
         <p className="text-sm text-on-surface font-mono break-all">{url}</p>
       </div>
@@ -2307,7 +2307,7 @@ export default function StudentProfile() {
   useEffect(() => { load() }, [id])
 
   if (loading) return (
-    <div className="flex-1 ml-64 flex items-center justify-center min-h-screen">
+    <div className="flex-1 lg:ml-64 flex items-center justify-center min-h-screen">
       <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary" />
     </div>
   )
@@ -2338,7 +2338,7 @@ export default function StudentProfile() {
   return (
     <div>
       <TopBar title="Hồ sơ học viên" />
-      <div className="p-8 space-y-8">
+      <div className="student-profile page-content p-8 space-y-8">
         {/* Breadcrumb */}
         <div className="flex items-center gap-2 text-sm text-outline">
           <button onClick={() => navigate('/students')} className="hover:text-primary transition-colors flex items-center gap-1">
@@ -2393,7 +2393,7 @@ export default function StudentProfile() {
         <ShareLinkBox studentId={student.id} />
 
         {/* Tabs */}
-        <div className="flex gap-1 border-b border-outline-variant/20">
+        <div className="responsive-tabs flex gap-1 border-b border-outline-variant/20">
           {(['info', 'schedule', 'private', 'tuition', 'reviews', 'scores'] as const).filter(t => t !== 'tuition' || canSeeFinance).map(tab => {
             const icons  = { info: 'person', schedule: 'calendar_month', private: 'person_apron', tuition: 'payments', reviews: 'rate_review', scores: 'grade' }
             const labels = { info: 'Thông tin', schedule: 'Lịch học', private: 'Học riêng', tuition: 'Học phí', reviews: 'Nhận xét', scores: 'Điểm KT' }

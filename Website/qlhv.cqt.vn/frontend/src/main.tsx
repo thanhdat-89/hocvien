@@ -5,6 +5,7 @@ import { queryClient } from './services/queryClient'
 import App from './App.tsx'
 import { ConfirmDialogProvider } from './components/ConfirmDialog'
 import './index.css'
+import './responsive.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

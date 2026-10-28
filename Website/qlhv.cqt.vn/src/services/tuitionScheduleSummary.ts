@@ -70,7 +70,16 @@ export async function getTuitionScheduleSummary(month: number, year: number, sou
     promotionMap[key].push(p)
   }
 
-  // 7. Tính từng enrollment
+  // One monthly row per student/class, even after dropping and re-enrolling.
+  const enrollmentGroups = new Map<string, any[]>()
+  for (const enrollment of relevantEnrollments) {
+    const key = `${enrollment.studentId}-${enrollment.classId}`
+    const group = enrollmentGroups.get(key) ?? []
+    group.push(enrollment)
+    enrollmentGroups.set(key, group)
+  }
+
+  // 7. Tính từng học viên/lớp; các khoảng đăng ký có thể chồng ngày.
   const rows: any[] = []
   const buildPrimaryParent = (stu: any) => stu.primaryParentName
     ? {
@@ -80,26 +89,30 @@ export async function getTuitionScheduleSummary(month: number, year: number, sou
       }
     : null
 
-  for (const enrollment of relevantEnrollments) {
+  for (const group of enrollmentGroups.values()) {
+    // Prefer the current enrollment when two enrollment intervals cover a session.
+    group.sort((a, b) => Number(b.status === 'ACTIVE') - Number(a.status === 'ACTIVE')
+      || String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
+      || String(a.id).localeCompare(String(b.id)))
+    const enrollment = group[0]
     const cls = classMap[enrollment.classId]
     const student = studentMap[enrollment.studentId]
     if (!cls || !student) continue
 
-    const ratePerSession: number = (enrollment.customTuitionRate as number) || classRateForMonth(cls, m, y)
-
     const classSessions = sessionsByClass[enrollment.classId] ?? []
-    const sessions = classSessions.filter((sess: any) => {
-      if (!sess.sessionDate || !sess.sessionDate.startsWith(monthStr)) return false
-      if (sess.status === 'CANCELLED') return false
-      if (enrollment.enrollmentDate && sess.sessionDate < enrollment.enrollmentDate) return false
-      if (enrollment.status === 'DROPPED' && enrollment.dropDate && sess.sessionDate > enrollment.dropDate) return false
-      return true
+    const sessions = classSessions.flatMap((sess: any) => {
+      if (!sess.sessionDate || !sess.sessionDate.startsWith(monthStr) || sess.status === 'CANCELLED') return []
+      const covering = group.find(e => (!e.enrollmentDate || sess.sessionDate >= e.enrollmentDate)
+        && (e.status !== 'DROPPED' || !e.dropDate || sess.sessionDate <= e.dropDate))
+      if (!covering) return []
+      return [{ ...sess, rate: Number(covering.customTuitionRate) || classRateForMonth(cls, m, y) }]
     })
 
     const totalSessions = sessions.length
     if (totalSessions === 0) continue
 
-    const baseAmount = totalSessions * ratePerSession
+    const baseAmount = sessions.reduce((sum, session) => sum + session.rate, 0)
+    const ratePerSession = baseAmount / totalSessions
     const promos = promotionMap[`${enrollment.studentId}-${enrollment.classId}`] ?? []
     let discountAmount = 0
     for (const sp of promos) {

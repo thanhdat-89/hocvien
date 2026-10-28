@@ -4,6 +4,7 @@ import { Student } from '../types'
 import { useAuth } from '../hooks/useAuth'
 import { PrivateScheduleModal } from './StudentProfile'
 import TopBar from '../components/TopBar'
+import MobileWeekAgenda from '../components/MobileWeekAgenda'
 import { useConfirm } from '../components/ConfirmDialog'
 import api from '../services/api'
 
@@ -124,7 +125,7 @@ function SessionDetailModal({ session, onClose, onDeleted, onUpdated }: {
   })
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="responsive-dialog fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-inverse-surface/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-sm bg-surface-container-lowest rounded-2xl shadow-2xl z-10 overflow-hidden">
 
@@ -334,7 +335,7 @@ export default function PrivateSchedule() {
   return (
     <div>
       <TopBar title="Lịch học riêng" />
-      <div className="px-8 py-8 space-y-6">
+      <div className="page-content px-8 py-8 space-y-6">
 
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
@@ -345,7 +346,7 @@ export default function PrivateSchedule() {
         </div>
 
         {/* Calendar controls */}
-        <div className="bg-surface-container-lowest p-4 rounded-2xl shadow-sm flex flex-wrap items-center justify-between gap-4">
+        <div className="calendar-controls bg-surface-container-lowest p-4 rounded-2xl shadow-sm flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <h3 className="text-lg font-headline font-bold text-on-surface">
               {weekStart.toLocaleDateString('vi-VN', { month: 'long', year: 'numeric' })}
@@ -375,8 +376,15 @@ export default function PrivateSchedule() {
           </div>
         </div>
 
+        <MobileWeekAgenda days={weekDays} loading={loading}
+          items={sessions.map(s => ({ id: s.id, date: s.sessionDate, title: s.studentName, startTime: s.startTime, endTime: s.endTime, subtitle: s.teacherName, status: s.status }))}
+          onSelect={id => {
+            const session = sessions.find(s => s.id === id)
+            if (session) setSelected(session)
+          }} />
+
         {/* Weekly grid */}
-        <div className="bg-surface-container-lowest rounded-2xl shadow-sm overflow-hidden overflow-x-auto">
+        <div className="hidden md:block bg-surface-container-lowest rounded-2xl shadow-sm overflow-hidden overflow-x-auto">
           <table className="w-full border-collapse min-w-[700px]">
             <thead>
               <tr className="bg-surface-container-low/60">

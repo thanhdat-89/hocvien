@@ -34,8 +34,8 @@ function ToastItem({ toast, onDismiss }: { toast: ToastMessage; onDismiss: (id: 
   return (
     <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border shadow-lg backdrop-blur-sm text-sm font-medium transition-all ${STYLES[toast.type]}`}>
       <span className="material-symbols-outlined text-[18px] shrink-0">{ICONS[toast.type]}</span>
-      <span className="flex-1">{toast.message}</span>
-      <button onClick={() => onDismiss(toast.id)} className="opacity-60 hover:opacity-100 transition-opacity ml-1">
+      <span className="flex-1 max-lg:min-w-0 max-lg:break-words">{toast.message}</span>
+      <button type="button" aria-label="Đóng thông báo" onClick={() => onDismiss(toast.id)} className="opacity-60 hover:opacity-100 transition-opacity ml-1 max-lg:shrink-0">
         <span className="material-symbols-outlined text-[16px]">close</span>
       </button>
     </div>
@@ -46,7 +46,7 @@ export default function Toast({ toasts, onDismiss }: ToastProps) {
   if (!toasts.length) return null
 
   return (
-    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] flex flex-col gap-2 min-w-[300px] max-w-sm">
+    <div role="status" aria-live="polite" className="app-toasts fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] flex flex-col gap-2 min-w-[300px] max-w-sm">
       {toasts.map((t) => (
         <ToastItem key={t.id} toast={t} onDismiss={onDismiss} />
       ))}

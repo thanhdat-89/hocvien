@@ -1,6 +1,7 @@
 import { db, C, toObj } from '../lib/firebase'
 import { getPaymentStatus } from './tuitionCalculator'
 import type { TuitionRecord } from '../types/models'
+import { invoicePeriodEligible, INVOICE_START_MESSAGE } from './invoiceEligibility'
 
 /** Read only: recover a lost response without replaying a payment or creating an invoice. */
 export async function getTuitionWorkflowResult(input: { studentId: string; classId: string; month: number; year: number; recordId?: string }) {
@@ -23,10 +24,11 @@ export async function getTuitionWorkflowResult(input: { studentId: string; class
     getPaymentStatus(doc.id), db.collection('misaInvoices').doc(doc.id).get(),
   ])
   const invoice = invoiceDoc.data()
+  const skipped = !invoice && !invoicePeriodEligible(record.billingMonth, record.billingYear)
   return {
     recordId: doc.id, paid: finalStatus.remaining <= 0, finalStatus,
-    invoiceDraft: { enabled: true, status: invoice?.status || 'OUTCOME_UNKNOWN',
+    invoiceDraft: { enabled: !skipped, status: skipped ? 'SKIPPED_BEFORE_INVOICE_START' : invoice?.status || 'OUTCOME_UNKNOWN',
       refId: invoice?.refId || '', transactionId: invoice?.transactionId || '',
-      message: invoice?.lastErrorMessage || (invoice ? '' : 'Phiếu đã lưu nhưng chưa xác nhận được kết quả hóa đơn. Kiểm tra danh sách hóa đơn trước khi tạo lại.') },
+      message: skipped ? INVOICE_START_MESSAGE : invoice?.lastErrorMessage || (invoice ? '' : 'Phiếu đã lưu nhưng chưa xác nhận được kết quả hóa đơn. Kiểm tra danh sách hóa đơn trước khi tạo lại.') },
   }
 }

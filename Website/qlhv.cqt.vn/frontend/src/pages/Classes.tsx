@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import TopBar from '../components/TopBar'
+import MobileWeekAgenda from '../components/MobileWeekAgenda'
 import Toast, { ToastMessage } from '../components/Toast'
 import { useConfirm, useAlert } from '../components/ConfirmDialog'
 import api from '../services/api'
@@ -122,7 +123,7 @@ function SessionModal({ session, onClose, onDone, onSessionUpdate }: {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="responsive-dialog fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-inverse-surface/40 backdrop-blur-sm" onClick={onClose} />
       <div role="dialog" aria-modal="true" aria-labelledby="session-modal-title" className="relative z-10 w-full max-w-lg overflow-hidden rounded-2xl bg-surface-container-lowest shadow-2xl">
         <div className="border-b border-outline-variant/15 px-6 py-5">
@@ -273,7 +274,7 @@ function ClassModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="responsive-dialog fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-inverse-surface/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-lg bg-surface-container-lowest rounded-2xl shadow-2xl p-8 z-10 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-6">
@@ -307,7 +308,7 @@ function ClassModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
             </p>
 
             {/* Thứ trong tuần */}
-            <div className="flex gap-2">
+            <div className="responsive-toolbar flex gap-2">
               {DAY_OF_WEEK_OPTIONS.map(({ value, label }) => (
                 <button
                   key={value}
@@ -386,7 +387,51 @@ function ClassModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
 
 type ClassEditSection = 'name' | 'schedule' | 'rate'
 
-function EditClassModal({ cls, section, onClose, onSaved }: { cls: Class; section: ClassEditSection; onClose: () => void; onSaved: () => void }) {
+function EditPasswordModal({ onClose, onVerified }: { onClose: () => void; onVerified: (password: string) => void }) {
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [checking, setChecking] = useState(false)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!password) { setError('Vui lòng nhập mật khẩu'); return }
+    setChecking(true); setError('')
+    try {
+      await api.post('/auth/verify-password', { password })
+      onVerified(password)
+    } catch (err: any) {
+      setError(err.response?.data?.message ?? 'Không thể xác nhận mật khẩu')
+    } finally { setChecking(false) }
+  }
+
+  return (
+    <div className="responsive-dialog fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-inverse-surface/45 backdrop-blur-sm" onClick={onClose} />
+      <div role="dialog" aria-modal="true" aria-labelledby="edit-password-title" className="relative z-10 w-full max-w-md rounded-2xl bg-surface-container-lowest p-7 shadow-2xl">
+        <div className="mb-5 flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><span className="material-symbols-outlined">lock</span></div>
+          <div>
+            <h3 id="edit-password-title" className="font-headline text-lg font-bold text-on-surface">Xác nhận trước khi chỉnh sửa</h3>
+            <p className="mt-1 text-sm leading-5 text-on-surface-variant">Thay đổi tên lớp, lịch học hoặc học phí có thể ảnh hưởng đến dữ liệu đã lập. Không nên tự ý thay đổi khi chưa thật sự cần thiết.</p>
+          </div>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label htmlFor="edit-confirm-password" className="mb-1.5 block text-sm font-medium text-on-surface">Nhập lại mật khẩu tài khoản</label>
+            <input id="edit-confirm-password" type="password" value={password} onChange={e => setPassword(e.target.value)} autoFocus autoComplete="current-password" className="w-full rounded-xl border border-outline-variant/25 bg-surface-container-low px-4 py-3 text-sm text-on-surface outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" />
+          </div>
+          {error && <p role="alert" className="text-sm text-error">{error}</p>}
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose} className="flex-1 btn-secondary justify-center">Huỷ</button>
+            <button type="submit" disabled={checking} className="flex-1 btn-primary justify-center disabled:opacity-60">{checking ? 'Đang xác nhận...' : 'Xác nhận'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+function EditClassModal({ cls, section, currentPassword, onClose, onSaved }: { cls: Class; section: ClassEditSection; currentPassword: string; onClose: () => void; onSaved: () => void }) {
   const todayLocal = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` })()
   const tomorrowLocal = (() => { const d = new Date(); d.setDate(d.getDate() + 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` })()
   const nextMonth = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` })()
@@ -442,7 +487,7 @@ function EditClassModal({ cls, section, onClose, onSaved }: { cls: Class; sectio
     setSaving(true); setError('')
     try {
       if (section === 'name') {
-        await api.patch(`/classes/${cls.id}/name`, { name: form.name.trim() })
+        await api.patch(`/classes/${cls.id}/name`, { name: form.name.trim(), currentPassword })
         onSaved()
         return
       }
@@ -451,12 +496,12 @@ function EditClassModal({ cls, section, onClose, onSaved }: { cls: Class; sectio
           days: Object.entries(daySchedules).map(([dayOfWeek, time]) => ({ dayOfWeek, ...time })) }
         : { scope: 'rate' as const, tuitionRate: Number(form.tuitionRate), rateEffectiveMonth: form.rateEffectiveMonth }
       if (!preview) {
-        const result = await api.post(`/classes/${cls.id}/change-preview`, payload)
+        const result = await api.post(`/classes/${cls.id}/change-preview`, { ...payload, currentPassword })
         if (!result.data.scheduleChanged && !result.data.rateChanged) { onClose(); return }
         setPreview(result.data)
         return
       } else {
-        await api.put(`/classes/${cls.id}/change`, { ...payload, previewToken: preview.previewToken })
+        await api.put(`/classes/${cls.id}/change`, { ...payload, currentPassword, previewToken: preview.previewToken })
       }
       onSaved()
     } catch (err: any) {
@@ -467,7 +512,7 @@ function EditClassModal({ cls, section, onClose, onSaved }: { cls: Class; sectio
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="responsive-dialog fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-inverse-surface/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-lg bg-surface-container-lowest rounded-2xl shadow-2xl p-8 z-10 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-6">
@@ -496,7 +541,7 @@ function EditClassModal({ cls, section, onClose, onSaved }: { cls: Class; sectio
               Lịch học
               <span className="text-outline/50 normal-case font-normal ml-1">— click thứ để thêm/bỏ</span>
             </p>
-            <div className="flex gap-2">
+            <div className="responsive-toolbar flex gap-2">
               {DAY_OF_WEEK_OPTIONS.map(({ value, label }) => (
                 <button key={value} type="button" onClick={() => toggleDay(value)}
                   className={`flex-1 h-9 rounded-xl text-xs font-bold transition-all ${daySchedules[value] ? 'bg-primary text-on-primary shadow-sm' : 'bg-surface-container text-outline hover:bg-surface-container-high'}`}>
@@ -587,7 +632,7 @@ function DeleteClassModal({ cls, onClose, onDone }: {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="responsive-dialog fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-inverse-surface/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-md bg-surface-container-lowest rounded-2xl shadow-2xl z-10 overflow-hidden">
 
@@ -732,10 +777,16 @@ export default function Classes() {
   const [selectedSession, setSelectedSession] = useState<Session | null>(null)
   const [showClassModal, setShowClassModal] = useState(false)
   const [editingClass, setEditingClass] = useState<{ cls: Class; section: ClassEditSection } | null>(null)
+  const [passwordPrompt, setPasswordPrompt] = useState<{ cls: Class; section: ClassEditSection } | null>(null)
+  const [editPassword, setEditPassword] = useState<string | null>(null)
   const [deletingClass, setDeletingClass] = useState<Class | null>(null)
   const [loadingSessions, setLoadingSessions] = useState(false)
   const [toasts, setToasts] = useState<ToastMessage[]>([])
   const { canManageClasses } = useAuth()
+  const requestClassEdit = (cls: Class, section: ClassEditSection) => {
+    setEditPassword(null)
+    setPasswordPrompt({ cls, section })
+  }
   const showToast = (message: string, type: ToastMessage['type'] = 'info') =>
     setToasts(prev => [...prev, { id: Date.now(), message, type }])
   const dismissToast = (id: number) => setToasts(prev => prev.filter(t => t.id !== id))
@@ -842,7 +893,7 @@ export default function Classes() {
   return (
     <div>
       <TopBar title="Lịch & Lớp học" />
-      <div className="px-4 sm:px-6 lg:px-8 py-6 lg:py-8 space-y-6">
+      <div className="page-content px-4 sm:px-6 lg:px-8 py-6 lg:py-8 space-y-6">
 
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
@@ -850,7 +901,7 @@ export default function Classes() {
             <span className="text-[11px] font-bold text-primary tracking-[0.2em] uppercase mb-2 block">Lịch Đào Tạo</span>
             <h2 className="text-4xl font-black text-on-surface font-headline tracking-tight">Quản Lý Lịch & Lớp Học</h2>
           </div>
-          <div className="flex gap-2">
+          <div className="responsive-toolbar flex gap-2">
             {canManageClasses && <CompletePastSessionsBtn onDone={() => loadSessions(weekStart)} />}
             {canManageClasses && (
               <button onClick={() => setShowClassModal(true)} className="btn-primary">
@@ -861,7 +912,7 @@ export default function Classes() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 border-b border-outline-variant/20">
+        <div className="responsive-tabs flex gap-1 border-b border-outline-variant/20">
           {[
             { key: 'schedule', label: 'Lịch học', icon: 'calendar_month' },
             { key: 'classes', label: 'Danh sách lớp học', icon: 'school' },
@@ -881,7 +932,7 @@ export default function Classes() {
         {tab === 'schedule' && (
           <div className="space-y-4">
             {/* Calendar controls */}
-            <div className="bg-surface-container-lowest p-4 rounded-2xl shadow-sm flex flex-wrap items-center justify-between gap-4">
+            <div className="calendar-controls bg-surface-container-lowest p-4 rounded-2xl shadow-sm flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-3">
                 <h3 className="text-lg font-headline font-bold text-on-surface">
                   {weekStart.toLocaleDateString('vi-VN', { month: 'long', year: 'numeric' })}
@@ -916,8 +967,15 @@ export default function Classes() {
               </div>
             </div>
 
+            <MobileWeekAgenda days={weekDays} loading={loadingSessions}
+              items={sessions.map(s => ({ id: s.id, date: s.sessionDate, title: classNameById[s.classId] || s.className || 'Lớp học', startTime: s.startTime, endTime: s.endTime, subtitle: s.teacherName, status: s.status }))}
+              onSelect={id => {
+                const session = sessions.find(s => s.id === id)
+                if (session) setSelectedSession({ ...session, className: classNameById[session.classId] || session.className })
+              }} />
+
             {/* Days run vertically; start times run horizontally. Keep the day label visible while scrolling. */}
-            <div className="overflow-hidden rounded-2xl border border-outline-variant/15 bg-surface-container-lowest shadow-sm">
+            <div className="hidden md:block overflow-hidden rounded-2xl border border-outline-variant/15 bg-surface-container-lowest shadow-sm">
               <div className="overflow-x-auto">
                 <table className="w-full table-fixed border-collapse" style={{ minWidth: Math.max(700, 136 + timeSlots.length * 190) }}>
                   <colgroup>
@@ -1033,7 +1091,7 @@ export default function Classes() {
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[950px] table-fixed text-left text-sm">
+                <table role="table" aria-label="Danh sách lớp học" className="class-mobile-table w-full min-w-[950px] table-fixed text-left text-sm">
                   <colgroup>
                     <col className="w-[22%]" /><col className="w-[18%]" /><col className="w-[22%]" />
                     <col className="w-[16%]" /><col className="w-[12%]" /><col className="w-[10%]" />
@@ -1053,26 +1111,26 @@ export default function Classes() {
                       const days = [...(schedulesByClass[cls.id] ?? [])].sort((a, b) => SCHEDULE_DAY_ORDER.indexOf(a) - SCHEDULE_DAY_ORDER.indexOf(b))
                       const grade = gradeOfClass(cls)
                       return (
-                        <tr key={cls.id} className="transition-colors hover:bg-primary/[0.035]">
-                          <td className="px-5 py-4 align-middle">
+                        <tr role="row" key={cls.id} className="transition-colors hover:bg-primary/[0.035]">
+                          <td role="cell" data-label="Tên lớp" className="px-5 py-4 align-middle">
                             <div className="flex items-start gap-1">
                               <span className="min-w-0 font-semibold leading-5 text-on-surface">{cls.name}</span>
-                              {canManageClasses && <button type="button" onClick={() => setEditingClass({ cls, section: 'name' })} className="shrink-0 rounded-lg p-1 text-outline hover:bg-primary/10 hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" title={`Đổi tên ${cls.name}`} aria-label={`Đổi tên ${cls.name}`}><span className="material-symbols-outlined text-base">edit</span></button>}
+                              {canManageClasses && <button type="button" onClick={() => requestClassEdit(cls, 'name')} className="shrink-0 rounded-lg p-1 text-outline hover:bg-primary/10 hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" title={`Đổi tên ${cls.name}`} aria-label={`Đổi tên ${cls.name}`}><span className="material-symbols-outlined text-base">edit</span></button>}
                             </div>
                             <div className="mt-1 text-xs text-outline">{grade ? `Khối ${grade}` : 'Chưa có khối'}{cls.room ? ` · Phòng ${cls.room}` : ''}</div>
                           </td>
-                          <td className="px-4 py-4 align-middle"><code className="break-all text-xs text-on-surface-variant" title={cls.id}>{cls.id}</code></td>
-                          <td className="px-4 py-4 align-middle">
+                          <td role="cell" data-label="ID lớp" className="px-4 py-4 align-middle"><code className="break-all text-xs text-on-surface-variant" title={cls.id}>{cls.id}</code></td>
+                          <td role="cell" data-label="Lịch học" className="px-4 py-4 align-middle">
                             <div className="flex items-start gap-1">
                               <span className={days.length ? 'font-medium text-primary' : 'text-outline'}>{days.length ? days.map(day => SCHEDULE_DAY_LABELS[day] ?? day).join(', ') : 'Chưa có lịch'}</span>
-                              {canManageClasses && cls.status === 'ACTIVE' && <button type="button" onClick={() => setEditingClass({ cls, section: 'schedule' })} className="shrink-0 rounded-lg p-1 text-outline hover:bg-primary/10 hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" title={`Sửa lịch ${cls.name}`} aria-label={`Sửa lịch ${cls.name}`}><span className="material-symbols-outlined text-base">edit</span></button>}
+                              {canManageClasses && cls.status === 'ACTIVE' && <button type="button" onClick={() => requestClassEdit(cls, 'schedule')} className="shrink-0 rounded-lg p-1 text-outline hover:bg-primary/10 hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" title={`Sửa lịch ${cls.name}`} aria-label={`Sửa lịch ${cls.name}`}><span className="material-symbols-outlined text-base">edit</span></button>}
                             </div>
                             {!!cls.sessionsPerMonth && <div className="mt-1 text-xs text-outline">{cls.sessionsPerMonth} buổi/tháng</div>}
                           </td>
-                          <td className="px-4 py-4 align-middle font-semibold tabular-nums text-on-surface">
+                          <td role="cell" data-label="Học phí / buổi" className="px-4 py-4 align-middle font-semibold tabular-nums text-on-surface">
                             <div className="flex items-center gap-1">
                               <span>{displayedClassRate(cls).toLocaleString('vi-VN')}đ</span>
-                              {canManageClasses && cls.status === 'ACTIVE' && <button type="button" onClick={() => setEditingClass({ cls, section: 'rate' })} className="shrink-0 rounded-lg p-1 text-outline hover:bg-primary/10 hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" title={`Sửa học phí ${cls.name}`} aria-label={`Sửa học phí ${cls.name}`}><span className="material-symbols-outlined text-base">edit</span></button>}
+                              {canManageClasses && cls.status === 'ACTIVE' && <button type="button" onClick={() => requestClassEdit(cls, 'rate')} className="shrink-0 rounded-lg p-1 text-outline hover:bg-primary/10 hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" title={`Sửa học phí ${cls.name}`} aria-label={`Sửa học phí ${cls.name}`}><span className="material-symbols-outlined text-base">edit</span></button>}
                             </div>
                             {cls.tuitionRateEffectiveMonth && cls.tuitionRateEffectiveMonth > toISO(new Date()).slice(0, 7) && (
                               <div className="mt-1 text-xs font-normal text-outline">
@@ -1080,13 +1138,13 @@ export default function Classes() {
                               </div>
                             )}
                           </td>
-                          <td className="px-4 py-4 align-middle">
+                          <td role="cell" data-label="Trạng thái" className="px-4 py-4 align-middle">
                             <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${cls.status === 'ACTIVE' ? 'bg-secondary-container/25 text-secondary' : 'bg-surface-container-low text-on-surface-variant'}`}>
                               <span className={`h-1.5 w-1.5 rounded-full ${cls.status === 'ACTIVE' ? 'bg-secondary' : 'bg-outline'}`} />
                               {cls.status === 'ACTIVE' ? 'Đang học' : 'Đã đóng'}
                             </span>
                           </td>
-                          <td className="px-4 py-4 align-middle text-right">
+                          <td role="cell" data-label="Thao tác" className="px-4 py-4 align-middle text-right">
                             {canManageClasses && <div className="flex justify-end gap-1">
                               <button type="button" onClick={() => handleDeleteClass(cls)} className="rounded-lg p-2 text-outline transition-colors hover:bg-error/10 hover:text-error focus-visible:outline focus-visible:outline-2 focus-visible:outline-error" title={`Kết thúc hoặc xóa ${cls.name}`} aria-label={`Kết thúc hoặc xóa ${cls.name}`}><span className="material-symbols-outlined text-xl">more_horiz</span></button>
                             </div>}
@@ -1103,7 +1161,7 @@ export default function Classes() {
                   </tbody>
                 </table>
               </div>
-              <div className="border-t border-outline-variant/10 px-5 py-3 text-xs text-outline sm:hidden">Vuốt ngang để xem đầy đủ bảng và thao tác.</div>
+              <div className="border-t border-outline-variant/10 px-5 py-3 text-xs text-outline hidden md:block lg:hidden">Vuốt ngang để xem đầy đủ bảng và thao tác.</div>
             </section>
           </div>
         )}
@@ -1132,10 +1190,15 @@ export default function Classes() {
           key={`${editingClass.cls.id}-${editingClass.section}`}
           cls={editingClass.cls}
           section={editingClass.section}
-          onClose={() => setEditingClass(null)}
+          currentPassword={editPassword ?? ''}
+          onClose={() => { setEditingClass(null); setEditPassword(null) }}
           onSaved={() => { setEditingClass(null); loadClasses(); loadSchedules(); loadSessions(weekStart) }}
         />
       )}
+      {passwordPrompt && <EditPasswordModal
+        onClose={() => setPasswordPrompt(null)}
+        onVerified={(password) => { setEditPassword(password); setEditingClass(passwordPrompt); setPasswordPrompt(null) }}
+      />}
       {deletingClass && (
         <DeleteClassModal
           cls={deletingClass}

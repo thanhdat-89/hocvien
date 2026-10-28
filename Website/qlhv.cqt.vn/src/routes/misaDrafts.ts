@@ -7,11 +7,32 @@ import { InvoicePreviewError, invoiceSource, listInvoiceTemplates, readMisaInvoi
 import { chooseDefaultInvoiceTemplate, createTuitionMisaInvoice } from '../services/misaAutoDraft'
 import { notifyInvoiceCreated } from '../services/telegramService'
 import { getInvoiceList, invalidateReadView, invoiceBillingPeriods, validPeriod } from '../services/readViews'
+import { invoicePeriodEligible, INVOICE_START_MESSAGE } from '../services/invoiceEligibility'
+import { monthlyInvoiceReconciler } from '../services/monthlyInvoiceReconciliation'
 
 const router = Router()
 router.use(requireRole('ADMIN'))
 router.use((_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next() })
 const draftsCollection = 'misaInvoices'
+router.get('/monthly-reconciliation/preview', async (req, res, next) => {
+  try {
+    const month = Number(req.query.month), year = Number(req.query.year)
+    if (!validPeriod(month, year)) throw new InvoicePreviewError(400, 'Tháng/năm không hợp lệ.')
+    res.json(await monthlyInvoiceReconciler.preview(month, year))
+  } catch (error) { next(error) }
+})
+router.get('/monthly-reconciliation', async (req, res, next) => {
+  try {
+    const month = Number(req.query.month), year = Number(req.query.year)
+    if (!validPeriod(month, year)) throw new InvoicePreviewError(400, 'Tháng/năm không hợp lệ.')
+    const ref = db.collection('monthlyInvoiceRuns').doc(`${year}-${String(month).padStart(2, '0')}`)
+    const run = (await ref.get()).data()
+    if (!run) { res.json({ run: null, items: [] }); return }
+    const { leaseToken, reportMessages, ...summary } = run
+    const items = await ref.collection('items').get()
+    res.json({ run: summary, items: items.docs.map(doc => ({ id: doc.id, ...doc.data() })) })
+  } catch (error) { next(error) }
+})
 const recordId = (value: unknown) => {
   if (typeof value !== 'string' || !value || value.includes('/') || value.length > 150) throw new InvoicePreviewError(400, 'Mã phiếu học phí không hợp lệ.')
   return value
@@ -74,6 +95,7 @@ router.get('/invoices/group', async (req, res, next) => {
     const student = await db.collection(C.STUDENTS).doc(sources[0].studentId).get()
     const data = student.data()
     res.json({ sources, invoice: null, publishingEnabled: false,
+      creationAllowed: sources.every(source => invoicePeriodEligible(source.month, source.year)), creationBlockedReason: INVOICE_START_MESSAGE,
       suggestedBuyer: { fullName: data?.fullName || sources[0].studentName, legalName: '', citizenIdNumber: data?.idCard || '',
         address: data?.address || '', email: data?.studentEmail || '', phone: data?.studentPhone || '' } })
   } catch (error) { next(error) }
@@ -89,6 +111,7 @@ router.get('/invoices/:recordId', async (req, res, next) => {
     const student = await db.collection(C.STUDENTS).doc(source.studentId).get()
     const data = student.data()
     res.json({ source, invoice: invoice.exists ? invoice.data() : null, publishingEnabled: false,
+      creationAllowed: invoicePeriodEligible(source.month, source.year), creationBlockedReason: INVOICE_START_MESSAGE,
       suggestedBuyer: { fullName: data?.fullName || source.studentName, legalName: '', citizenIdNumber: data?.idCard || '',
         address: data?.address || '', email: data?.studentEmail || '', phone: data?.studentPhone || '' } })
   } catch (error) { next(error) }

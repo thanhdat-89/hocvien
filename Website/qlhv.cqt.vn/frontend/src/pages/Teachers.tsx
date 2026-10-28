@@ -86,7 +86,7 @@ export default function Teachers() {
   return (
     <div>
       <TopBar title="Quản lý Giáo viên" />
-      <div className="px-8 py-8 space-y-8">
+      <div className="page-content px-8 py-8 space-y-8">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
           <div>
             <span className="text-[11px] font-bold text-primary tracking-[0.2em] uppercase mb-2 block">Nhân sự</span>
@@ -266,7 +266,7 @@ function TeacherModal({ editing, onClose, onSaved }: { editing: Teacher | null; 
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="responsive-dialog fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="bg-surface rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
         <div className="p-6 border-b border-outline-variant/10 flex items-center justify-between">
           <h3 className="font-headline text-xl font-bold text-on-surface">

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { isAxiosError } from 'axios'
 import api from '../services/api'
+import { syncInvoiceStatuses } from '../services/invoiceStatusSync'
 
 export interface InvoiceRow {
   id: string
@@ -55,6 +56,13 @@ export default function EInvoicePreparation({ rows, counts, total, loading, erro
 }) {
   const [refreshingStatusId, setRefreshingStatusId] = useState<string | null>(null)
   const [message, setMessage] = useState('')
+  const [syncProgress, setSyncProgress] = useState<string | null>(null)
+  const syncRun = useRef(0)
+  const syncBusy = useRef(false)
+  useEffect(() => {
+    setSyncProgress(null); setMessage(''); syncBusy.current = false
+    return () => { syncRun.current++ }
+  }, [month, year])
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const copyTimer = useRef<ReturnType<typeof setTimeout>>()
   useEffect(() => () => { clearTimeout(copyTimer.current) }, [])
@@ -79,6 +87,35 @@ export default function EInvoicePreparation({ rows, counts, total, loading, erro
     } finally { setRefreshingStatusId(null) }
   }
 
+  const refreshMonthStatuses = async () => {
+    if (syncBusy.current || refreshingStatusId) return
+    syncBusy.current = true
+    const run = ++syncRun.current
+    setMessage(''); setSyncProgress('Đang lấy danh sách hóa đơn...')
+    try {
+      const result = await syncInvoiceStatuses({
+        list: async cursor => (await api.get('/tuition/misa/invoices', {
+          params: { month, year, limit: 100, cursor, ...(!cursor ? { force: true } : {}) }, timeout: 30000,
+        })).data,
+        refresh: id => api.post(`/tuition/misa/invoices/${encodeURIComponent(id)}/refresh-status`, {}, { timeout: 60000 }),
+        cancelled: () => syncRun.current !== run,
+        progress: (done, total) => setSyncProgress(`Đang đồng bộ MISA ${done}/${total}`),
+      })
+      if (result) {
+        setMessage(result.failed
+          ? `Đã cập nhật ${result.completed - result.failed}/${result.completed} hóa đơn. ${result.failed} hóa đơn chưa đọc được từ MISA, giữ nguyên trạng thái; vui lòng thử lại.`
+          : `Đã đồng bộ trạng thái ${result.completed} hóa đơn từ MISA.`)
+      }
+    } catch (error) {
+      if (syncRun.current === run) setMessage(isAxiosError(error) && typeof error.response?.data?.message === 'string'
+        ? error.response.data.message : 'Chưa đồng bộ được trạng thái từ MISA. Vui lòng thử lại.')
+    } finally {
+      if (syncRun.current === run) {
+        syncBusy.current = false; setSyncProgress(null); retry()
+      }
+    }
+  }
+
   if (loading) return <div role="status" className="py-16 text-center text-outline">Đang tải trạng thái hóa đơn...</div>
   if (error) return <div role="alert" className="p-6 bg-red-50 text-red-700 rounded-2xl">{error} <button onClick={retry} className="underline font-semibold">Thử lại</button></div>
 
@@ -96,7 +133,7 @@ export default function EInvoicePreparation({ rows, counts, total, loading, erro
       {[
         ['Tổng hóa đơn đã tạo', total],
         ['Chưa phát hành', counts.DRAFT_CREATED || 0],
-        ['Đã phát hành', counts.ISSUED || 0],
+        ['Đã phát hành', (counts.ISSUED || 0) + (counts.SENT_TO_TAX || 0)],
         ['Cần đối chiếu / lỗi', (counts.OUTCOME_UNKNOWN || 0) + (counts.FAILED || 0)],
       ].map(([label, value]) => <div key={label} className="bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10">
         <p className="text-sm text-outline">{label}</p><p className="text-3xl font-black text-primary mt-2">{value}</p>
@@ -109,8 +146,8 @@ export default function EInvoicePreparation({ rows, counts, total, loading, erro
           <h3 id="invoice-table-title" className="text-base font-semibold text-on-surface">Danh sách hóa đơn <span className="ml-2 rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{total}</span></h3>
           <p className="mt-1 text-xs text-slate-500">Kỳ học phí {String(month).padStart(2, '0')}/{year} · Hóa đơn mới tạo hiển thị trước</p>
         </div>
-        <button type="button" onClick={retry} className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-slate-200 text-sm font-semibold text-primary hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-          <span aria-hidden="true" className="material-symbols-outlined text-[18px]">refresh</span>Tải lại trạng thái
+        <button type="button" aria-label="Tải lại trạng thái" onClick={refreshMonthStatuses} disabled={syncProgress !== null || refreshingStatusId !== null} className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-slate-200 text-sm font-semibold text-primary hover:bg-blue-50 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+          <span aria-hidden="true" className="material-symbols-outlined text-[18px]">refresh</span><span role="status">{syncProgress || 'Tải lại trạng thái'}</span>
         </button>
       </div>
       <div className="overflow-x-auto">
@@ -143,7 +180,7 @@ export default function EInvoicePreparation({ rows, counts, total, loading, erro
               </td>
               <td className="px-3 py-5 align-middle text-right">
                 <div className="flex flex-col items-end gap-2">
-                  {canRefresh && <button type="button" title="Cập nhật trạng thái hóa đơn" aria-label={`Cập nhật trạng thái hóa đơn của ${row.studentName} (${row.className})`} disabled={refreshingStatusId === row.id} onClick={() => refreshInvoiceStatus(row.id)} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-blue-100 bg-blue-50/60 px-2.5 py-2 text-xs font-semibold text-primary hover:bg-blue-100 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary whitespace-nowrap">
+                  {canRefresh && <button type="button" title="Cập nhật trạng thái hóa đơn" aria-label={`Cập nhật trạng thái hóa đơn của ${row.studentName} (${row.className})`} disabled={refreshingStatusId !== null || syncProgress !== null} onClick={() => refreshInvoiceStatus(row.id)} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-blue-100 bg-blue-50/60 px-2.5 py-2 text-xs font-semibold text-primary hover:bg-blue-100 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary whitespace-nowrap">
                     <span aria-hidden="true" className={`material-symbols-outlined text-[16px] ${refreshingStatusId === row.id ? 'animate-spin motion-reduce:animate-none' : ''}`}>sync</span>{refreshingStatusId === row.id ? 'Đang tải' : 'Cập nhật'}
                   </button>}
                   {row.invoiceUrl && <a href={row.invoiceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-slate-600 hover:text-primary whitespace-nowrap">Xem MISA<span aria-hidden="true" className="material-symbols-outlined text-[15px]">open_in_new</span></a>}

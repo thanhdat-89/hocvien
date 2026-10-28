@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express'
+import bcrypt from 'bcryptjs'
 import { db, C, s, toDocs, toObj, paginate } from '../lib/firebase'
 import { authenticate, requireRole } from '../middleware/auth'
 import { activityContext } from '../middleware/activityContext'
@@ -8,6 +9,13 @@ import { applyClassChange, prepareClassChange, renameClass } from '../services/c
 import { auditClassTuition } from '../services/classIntegrityAudit'
 
 const router = Router()
+
+async function verifyEditPassword(req: AuthRequest, password?: string) {
+  if (!password || !req.user) return false
+  const userDoc = await db.collection(C.USERS).doc(req.user.userId).get()
+  if (!userDoc.exists) return false
+  return bcrypt.compare(password, String(userDoc.data()?.passwordHash || ''))
+}
 router.get('/cron/audit', async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!process.env.CRON_SECRET || req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -128,22 +136,36 @@ router.post('/', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Re
 // PUT /api/classes/:id
 router.patch('/:id/name', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    if (Object.keys(req.body || {}).some(key => key !== 'name')) {
+    const { name, currentPassword } = req.body || {}
+    if (Object.keys(req.body || {}).some(key => !['name', 'currentPassword'].includes(key))) {
       res.status(400).json({ message: 'Thao tác này chỉ đổi tên hiển thị của lớp' }); return
     }
-    res.json(await renameClass(s(req.params.id), req.body?.name))
+    if (!(await verifyEditPassword(req, currentPassword))) {
+      res.status(403).json({ message: 'Mật khẩu xác nhận không đúng' }); return
+    }
+    res.json(await renameClass(s(req.params.id), name))
   } catch (err) { next(err) }
 })
 
 router.post('/:id/change-preview', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const plan = await prepareClassChange(s(req.params.id), req.body)
+    const { currentPassword: _, ...payload } = req.body || {}
+    if (!(await verifyEditPassword(req, req.body?.currentPassword))) {
+      res.status(403).json({ message: 'Mật khẩu xác nhận không đúng' }); return
+    }
+    const plan = await prepareClassChange(s(req.params.id), payload)
     res.json({ ...plan.summary, previewToken: plan.token })
   } catch (err) { next(err) }
 })
 
 router.put('/:id/change', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try { res.json(await applyClassChange(s(req.params.id), req.body)) }
+  try {
+    const { currentPassword: _, ...payload } = req.body || {}
+    if (!(await verifyEditPassword(req, req.body?.currentPassword))) {
+      res.status(403).json({ message: 'Mật khẩu xác nhận không đúng' }); return
+    }
+    res.json(await applyClassChange(s(req.params.id), payload))
+  }
   catch (err) { next(err) }
 })
 

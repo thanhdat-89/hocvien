@@ -79,6 +79,21 @@ router.get('/me', authenticate, async (req: AuthRequest, res: Response, next: Ne
   }
 })
 
+// POST /api/auth/verify-password — re-authenticate sensitive actions.
+router.post('/verify-password', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { password } = req.body as { password?: string }
+    if (!password) { res.status(400).json({ message: 'Vui lòng nhập mật khẩu' }); return }
+    const doc = await db.collection(C.USERS).doc(req.user!.userId).get()
+    if (!doc.exists) { res.status(404).json({ message: 'Không tìm thấy tài khoản' }); return }
+    const user = toObj<User>(doc)
+    if (!(await bcrypt.compare(password, user.passwordHash))) {
+      res.status(403).json({ message: 'Mật khẩu không đúng' }); return
+    }
+    res.json({ verified: true })
+  } catch (err) { next(err) }
+})
+
 // PUT /api/auth/change-password
 router.put('/change-password', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {

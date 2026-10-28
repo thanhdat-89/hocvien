@@ -1,11 +1,11 @@
 import { Router, Response, NextFunction } from 'express'
 import { db, C, toDocs } from '../lib/firebase'
 import { getCachedTuitionSummary } from '../services/tuitionReadView'
-import { readView } from '../services/readViews'
+import { getMissingPrivateStudents, readView } from '../services/readViews'
 import { getStudentIndex } from '../services/studentReadView'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
-import type { Session, TuitionRecord, Payment, ClassEnrollment, PrivateSession } from '../types/models'
+import type { Session, TuitionRecord, Payment, ClassEnrollment } from '../types/models'
 
 const router = Router()
 router.use(authenticate)
@@ -13,16 +13,10 @@ router.use(authenticate)
 const DASHBOARD_TTL_MS = 5 * 60 * 1000 // 5 phút
 const REVENUE_TTL_MS = 12 * 60 * 60 * 1000 // 12 giờ
 const STUDENTS_BY_GRADE_TTL_MS = 10 * 60 * 1000 // 10 phút
-const DASHBOARD_METRICS_VERSION = 6
+const DASHBOARD_METRICS_VERSION = 7
 
 function dateInVietnam(date = new Date()) {
   return date.toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit' })
-}
-
-function nextMonthStart(monthKey: string) {
-  const [year, month] = monthKey.split('-').map(Number)
-  const next = new Date(Date.UTC(year, month, 1))
-  return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-01`
 }
 
 function monthsFromSeptember2026(throughMonthKey: string) {
@@ -42,10 +36,9 @@ function monthsFromSeptember2026(throughMonthKey: string) {
 }
 
 
-async function computeDashboard() {
+async function computeDashboard(force = false) {
   const today = dateInVietnam()
   const thisMonth = today.slice(0, 7)
-  const nextMonth = nextMonthStart(thisMonth)
 
   const [
     studentsIndex,
@@ -86,17 +79,15 @@ async function computeDashboard() {
   let unpaidStudentsThisMonth: number | null = null
   let unpaidStudentsByMonth: Array<{ year: number; month: number; count: number }> = []
   try {
-    const [enrollmentsSnap, privateSchedulesSnap] = await Promise.all([
+    const [enrollmentsSnap, missingPrivateStudents] = await Promise.all([
       db.collection(C.ENROLLMENTS).where('status', '==', 'ACTIVE').get(),
-      db.collection(C.PRIVATE_SCHEDULES)
-        .where('sessionDate', '>=', `${thisMonth}-01`)
-        .where('sessionDate', '<', nextMonth).get(),
+      getMissingPrivateStudents(Number(thisMonth.slice(5)), Number(thisMonth.slice(0, 4)), undefined, force),
     ])
     const enrolledStudents = new Set(toDocs<ClassEnrollment>(enrollmentsSnap).map(e => e.studentId))
-    const scheduledStudents = new Set(toDocs<PrivateSession>(privateSchedulesSnap).map(p => p.studentId))
     const privateStudents = activeStudents.filter(s => !enrolledStudents.has(s.id))
     totalPrivateStudents = privateStudents.length
-    unscheduledPrivateStudentsThisMonth = privateStudents.filter(s => !scheduledStudents.has(s.id)).length
+    // Count the exact list shown by /students/private-schedule/missing, including its eligibility rules.
+    unscheduledPrivateStudentsThisMonth = missingPrivateStudents.data!.length
 
   } catch (error: any) {
     console.warn('[Dashboard] Firebase monthly metrics unavailable', error?.code ?? error?.name ?? 'unknown')
@@ -149,7 +140,7 @@ router.post('/refresh', async (_req: AuthRequest, res: Response, next: NextFunct
   try {
     const today = dateInVietnam()
     await getCachedTuitionSummary(Number(today.slice(5, 7)), Number(today.slice(0, 4)), true)
-    const view = await readView('dashboard', `v${DASHBOARD_METRICS_VERSION}-${today}`, computeDashboard, undefined, true, DASHBOARD_TTL_MS)
+    const view = await readView('dashboard', `v${DASHBOARD_METRICS_VERSION}-${today}`, () => computeDashboard(true), undefined, true, DASHBOARD_TTL_MS)
     res.json(view.data)
   } catch (err) { next(err) }
 })

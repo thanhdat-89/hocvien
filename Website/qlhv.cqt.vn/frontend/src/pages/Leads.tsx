@@ -124,7 +124,7 @@ export default function Leads() {
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
+    <div className="page-content p-6 max-w-6xl mx-auto space-y-6">
       <Toast toasts={toasts} onDismiss={dismissToast} />
 
       {/* Header */}

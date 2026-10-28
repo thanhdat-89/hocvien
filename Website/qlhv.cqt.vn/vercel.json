@@ -20,6 +20,10 @@
   ],
   "crons": [
     {
+      "path": "/api/tuition/cron/reconcile-monthly-invoices",
+      "schedule": "0 0 * * *"
+    },
+    {
       "path": "/api/classes/cron/audit",
       "schedule": "0 23 * * *"
     },

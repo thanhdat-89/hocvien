@@ -2,6 +2,7 @@ import InvoiceWorkflowResultDialog, { type InvoiceWorkflowResult } from '../comp
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import TopBar from '../components/TopBar'
+import ResponsiveFilters from '../components/ResponsiveFilters'
 import api from '../services/api'
 import { settleWithConcurrency } from '../services/settleWithConcurrency'
 import * as XLSX from 'xlsx'
@@ -53,6 +54,7 @@ export default function Tuition() {
   const latestRequest = useRef(0)
   const [classFilter, setClassFilter] = useState<string | null>(null)
   const [gradeFilter, setGradeFilter] = useState<number | null>(null)
+  const [unpaidOnly, setUnpaidOnly] = useState(false)
 
   const loadData = (force = false) => {
     const request = ++latestRequest.current
@@ -100,6 +102,7 @@ export default function Tuition() {
   const filtered = rows.filter(r => {
     if (gradeFilter != null && r.gradeLevel !== gradeFilter) return false
     if (classFilter && r.classId !== classFilter) return false
+    if (unpaidOnly && (r.tuitionRecord ? r.tuitionRecord.remainingAmount : r.finalAmount) <= 0) return false
     return true
   })
 
@@ -306,6 +309,21 @@ export default function Tuition() {
       updateInvoiceResult(key, { phase: 'complete', recordId: data.id, workflow: responseWorkflow(data) })
       loadData()
     } catch (e: any) {
+      const ambiguous = !e.response || e.response.status >= 500 || e.response.status === 408
+      if (ambiguous) {
+        try {
+          const { data } = await api.get('/tuition/workflow-result', { params: {
+            studentId: row.studentId, classId: row.classId, month, year,
+            recordId: row.tuitionRecord?.id,
+          }, timeout: 10_000 })
+          if (data?.recordId) {
+            updateInvoiceResult(key, { phase: 'complete', recordId: data.recordId, workflow: responseWorkflow(data) })
+            loadData(true)
+            return
+          }
+        } catch { /* Recover by reading only; never repeat the create request. */ }
+        loadData(true)
+      }
       updateInvoiceResult(key, { phase: 'request_failed', error: requestError(e) })
     } finally {
       setCreatingRow(null)
@@ -325,13 +343,14 @@ export default function Tuition() {
     <div>
       {invoiceResults && <InvoiceWorkflowResultDialog results={invoiceResults} onClose={() => setInvoiceResults(null)} />}
       <TopBar title="Quản lý Học phí" />
-      <div className="px-8 py-8 space-y-8">
+      <div className="page-content px-8 py-8 space-y-8">
 
         {/* Header */}
         <div className="flex flex-wrap items-end justify-between gap-6">
           <div>
             <span className="text-[11px] font-bold text-primary tracking-[0.2em] uppercase mb-2 block">Tài chính</span>
             <h2 className="text-4xl font-black text-on-surface font-headline tracking-tight">Quản lý Học phí</h2>
+            <p className="mt-2 text-sm text-outline">Tự động tạo hóa đơn chưa phát hành chỉ áp dụng cho kỳ học phí từ tháng 10/2026.</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <button onClick={() => loadData(true)} disabled={loading}
@@ -362,7 +381,7 @@ export default function Tuition() {
         <div className="space-y-8">
         {loadError && <div role="alert" className="text-red-700">{loadError} <button className="underline" onClick={() => loadData(true)}>Thử lại</button></div>}
         {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="tuition-summary grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="bg-surface-container-lowest p-6 rounded-2xl shadow-sm border border-outline-variant/10">
             <p className="text-sm text-outline font-medium">Tổng phải thu</p>
             <p className="text-3xl font-black text-on-surface mt-2">{(totalAmount / 1_000_000).toFixed(1)}M đ</p>
@@ -372,13 +391,30 @@ export default function Tuition() {
             <p className="text-3xl font-black text-primary mt-2">{uniqueStudents}</p>
           </div>
           <div className="bg-surface-container-lowest p-6 rounded-2xl shadow-sm border border-red-200">
-            <p className="text-sm text-outline font-medium">Chưa thanh toán</p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm text-outline font-medium">Chưa thanh toán</p>
+              <button
+                type="button"
+                aria-pressed={unpaidOnly}
+                onClick={() => setUnpaidOnly(value => !value)}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-700 focus-visible:ring-offset-2 ${
+                  unpaidOnly ? 'border-red-800 bg-red-800 text-white hover:bg-red-900' : 'border-red-200 bg-red-50 text-red-800 hover:bg-red-100'
+                }`}
+              >
+                <span className="material-symbols-outlined text-base">{unpaidOnly ? 'filter_alt_off' : 'filter_alt'}</span>
+                {unpaidOnly ? 'Bỏ lọc' : 'Lọc chưa thanh toán'}
+              </button>
+            </div>
             <p className="text-3xl font-black text-red-700 mt-2">{loading || loadError ? '—' : unpaidStudents}</p>
             <p className="text-xs text-outline mt-2">Học viên còn nợ hoặc chưa có phiếu học phí</p>
           </div>
         </div>
 
         {/* Filter cards */}
+        <ResponsiveFilters summary={[gradeFilter != null ? `Khối ${gradeFilter}` : 'Tất cả khối lớp', classes.find(c => c.id === classFilter)?.name, unpaidOnly ? 'Chưa thanh toán' : '', `${filtered.length} khoản học phí`].filter(Boolean).join(' · ')}
+          resultCount={filtered.length}
+          onApply={() => document.getElementById('tuition-table-title')?.scrollIntoView({ block: 'center', behavior: 'smooth' })}
+          onReset={() => { setGradeFilter(null); setClassFilter(null); setUnpaidOnly(false) }}>
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-4">
           {/* Grade filter card */}
           <div className="bg-surface-container-lowest p-5 rounded-2xl shadow-sm border border-outline-variant/10">
@@ -386,8 +422,15 @@ export default function Tuition() {
               <span className="material-symbols-outlined text-primary text-[18px]">school</span>
               <span className="text-xs font-bold text-outline uppercase tracking-wider">Lọc theo Khối lớp</span>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <select aria-label="Lọc học phí theo khối" value={gradeFilter ?? ''}
+              onChange={event => { setGradeFilter(event.target.value === '' ? null : Number(event.target.value)); setClassFilter(null) }}
+              className="w-full rounded-xl border border-outline-variant/20 bg-white px-3 py-2 text-sm md:hidden">
+              <option value="">Tất cả khối lớp</option>
+              {grades.map(grade => <option key={grade} value={grade}>Lớp {grade}</option>)}
+            </select>
+            <div className="hidden flex-wrap gap-2 md:flex">
               <button
+                aria-pressed={gradeFilter === null}
                 onClick={() => setGradeFilter(null)}
                 className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
                   gradeFilter === null
@@ -400,6 +443,7 @@ export default function Tuition() {
               {grades.map(g => (
                 <button
                   key={g}
+                  aria-pressed={gradeFilter === g}
                   onClick={() => setGradeFilter(g === gradeFilter ? null : g)}
                   className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
                     gradeFilter === g
@@ -419,8 +463,15 @@ export default function Tuition() {
               <span className="material-symbols-outlined text-secondary text-[18px]">class</span>
               <span className="text-xs font-bold text-outline uppercase tracking-wider">Lọc theo Lớp học</span>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <select aria-label="Lọc học phí theo lớp" value={classFilter ?? ''}
+              onChange={event => setClassFilter(event.target.value || null)}
+              className="w-full rounded-xl border border-outline-variant/20 bg-white px-3 py-2 text-sm md:hidden">
+              <option value="">Tất cả lớp học</option>
+              {classes.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+            <div className="hidden flex-wrap gap-2 md:flex">
               <button
+                aria-pressed={classFilter === null}
                 onClick={() => setClassFilter(null)}
                 className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
                   classFilter === null
@@ -433,6 +484,7 @@ export default function Tuition() {
               {classes.map(c => (
                 <button
                   key={c.id}
+                  aria-pressed={classFilter === c.id}
                   onClick={() => setClassFilter(c.id === classFilter ? null : c.id)}
                   className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
                     classFilter === c.id
@@ -446,6 +498,8 @@ export default function Tuition() {
             </div>
           </div>
         </div>
+
+        </ResponsiveFilters>
 
         {/* Table */}
         <div className="bg-white rounded-2xl overflow-hidden shadow-sm border border-slate-200/80">
@@ -463,7 +517,7 @@ export default function Tuition() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table aria-labelledby="tuition-table-title" className="w-full min-w-[1020px] table-fixed text-left border-collapse text-sm text-slate-700">
+              <table role="table" aria-labelledby="tuition-table-title" className="tuition-mobile-table w-full min-w-[1020px] table-fixed text-left border-collapse text-sm text-slate-700">
                 <colgroup><col style={{ width: '4%' }} /><col style={{ width: '18%' }} /><col style={{ width: '15%' }} /><col style={{ width: '14%' }} /><col style={{ width: '16%' }} /><col style={{ width: '11%' }} /><col style={{ width: '12%' }} /><col style={{ width: '10%' }} /></colgroup>
                 <thead className="bg-slate-50/80 border-b border-slate-200/70">
                   <tr>
@@ -471,29 +525,29 @@ export default function Tuition() {
                   </tr>
                 </thead>
                 {studentGroups.map(([studentId, studentRows], studentIndex) => (
-                  <tbody key={studentId}>
+                  <tbody role="rowgroup" key={studentId}>
                     {studentRows.map((r, rowIndex) => {
                       const isFirst = rowIndex === 0
                       const sttCounter = studentIndex + 1
                       const span = studentRows.length
 
                       return (
-                        <tr key={`${r.classId}-${rowIndex}`} className={`hover:bg-slate-50/70 transition-colors ${isFirst && sttCounter > 1 ? 'border-t border-slate-200/80' : !isFirst ? 'border-t border-dashed border-slate-100' : ''}`}>
-                          {isFirst && <td className="px-3 py-5 text-xs text-slate-400 align-top tabular-nums" rowSpan={span}>{sttCounter}</td>}
-                          {isFirst && <td className="px-4 py-5 align-top" rowSpan={span}>
+                        <tr role="row" key={`${r.classId}-${rowIndex}`} className={`hover:bg-slate-50/70 transition-colors ${isFirst && sttCounter > 1 ? 'border-t border-slate-200/80' : !isFirst ? 'border-t border-dashed border-slate-100' : ''}`}>
+                          {isFirst && <td role="cell" data-label="STT" className="px-3 py-5 text-xs text-slate-400 align-top tabular-nums" rowSpan={span}>{sttCounter}</td>}
+                          {isFirst && <td role="cell" data-label="Học viên" className="px-4 py-5 align-top" rowSpan={span}>
                             <p className="font-semibold text-on-surface text-[15px] leading-5 break-words">{r.studentName}</p>
                             <p className="mt-1.5 text-xs text-slate-500">{r.gradeLevel != null ? `Khối ${r.gradeLevel}` : 'Chưa có khối lớp'}</p>
                           </td>}
-                          <td className="px-4 py-5 align-middle text-sm text-slate-600 leading-5 break-words">{r.className}</td>
-                          <td className="px-4 py-5 align-middle text-right tabular-nums">
+                          <td role="cell" data-label="Lớp học" className="px-4 py-5 align-middle text-sm text-slate-600 leading-5 break-words">{r.className}</td>
+                          <td role="cell" data-label="Buổi học / Đơn giá" className="px-4 py-5 align-middle text-right tabular-nums">
                             <p className="font-medium text-slate-700 whitespace-nowrap">{r.totalSessions} <span className="text-xs font-normal text-slate-500">buổi</span></p>
                             <p className="mt-1.5 text-xs text-slate-500 whitespace-nowrap">{r.ratePerSession > 0 ? `${r.ratePerSession.toLocaleString('vi-VN')}đ / buổi` : '—'}</p>
                           </td>
-                          <td className="px-4 py-5 align-middle text-right tabular-nums">
+                          <td role="cell" data-label="Thành tiền" className="px-4 py-5 align-middle text-right tabular-nums">
                             <p className="font-semibold text-on-surface whitespace-nowrap">{r.finalAmount.toLocaleString('vi-VN')}đ</p>
                             {r.discountAmount > 0 && <p className="mt-1.5 text-xs text-emerald-700 whitespace-nowrap" title="Khuyến mãi đã áp dụng">Giảm {r.discountAmount.toLocaleString('vi-VN')}đ</p>}
                           </td>
-                          <td className="px-3 py-5 align-middle text-center">
+                          <td role="cell" data-label="Phiếu học phí" className="px-3 py-5 align-middle text-center">
                             {r.tuitionRecord ? (
                               <div className="inline-flex items-center gap-1 whitespace-nowrap">
                                 <span className="px-2 py-1 rounded-md bg-emerald-50 text-emerald-700 text-xs font-semibold whitespace-nowrap">Đã tạo</span>
@@ -519,7 +573,7 @@ export default function Tuition() {
                               </button>
                             )}
                           </td>
-                          <td className="px-3 py-5 align-middle text-center text-xs">
+                          <td role="cell" data-label="Thanh toán" className="px-3 py-5 align-middle text-center text-xs">
                             {(() => {
                               const isOriginalPaid = !!(
                                 r.tuitionRecord &&
@@ -552,7 +606,7 @@ export default function Tuition() {
                                     )}
                                   </div>
                                   <span className={`text-xs font-bold transition-colors ${
-                                    isPaid ? (isChanged ? 'text-primary' : 'text-emerald-600') : 'text-slate-500 group-hover:text-on-surface'
+                                    isPaid ? (isChanged ? 'text-primary' : 'text-emerald-600') : 'text-red-800 group-hover:text-red-900'
                                   }`}>
                                     {isPaid ? 'Đã đóng' : 'Chưa đóng'}
                                   </span>
@@ -561,7 +615,7 @@ export default function Tuition() {
                             })()}
                           </td>
                           {isFirst && (
-                            <td className="px-2 py-5 text-center align-top" rowSpan={span}>
+                            <td role="cell" data-label="Thao tác" className="px-2 py-5 text-center align-top" rowSpan={span}>
                               <div className="inline-flex items-center justify-center gap-1">
                                 <Link
                                   to={`/students/${r.studentId}`}
@@ -611,7 +665,7 @@ export default function Tuition() {
                   <tbody><tr>
                       <td colSpan={8} className="py-16 text-center text-outline">
                         <span className="material-symbols-outlined text-5xl block mb-3 opacity-30">payments</span>
-                        {classFilter || gradeFilter != null
+                        {classFilter || gradeFilter != null || unpaidOnly
                           ? `Không có dữ liệu cho bộ lọc đang chọn`
                           : `Không có dữ liệu học phí tháng ${month}/${year}`}
                       </td>
@@ -640,7 +694,7 @@ export default function Tuition() {
         </div>
       </div>
       {Object.keys(pendingToggles).length > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-surface-container-highest shadow-xl border border-outline-variant/30 px-6 py-4 rounded-2xl z-50 flex items-center gap-6 animate-in slide-in-from-bottom-5">
+        <div className="tuition-save-bar fixed bottom-6 left-1/2 -translate-x-1/2 bg-surface-container-highest shadow-xl border border-outline-variant/30 px-6 py-4 rounded-2xl z-50 flex items-center gap-6 animate-in slide-in-from-bottom-5">
           <div className="flex items-center gap-2">
             <span className="material-symbols-outlined text-primary text-[20px]">info</span>
             <span className="text-sm font-semibold text-on-surface">

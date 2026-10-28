@@ -112,7 +112,7 @@ function TemplatesPanel({ onTest }: { onTest: (t: ZnsTemplate) => void }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="responsive-toolbar flex items-center justify-between max-lg:gap-3">
         <p className="text-sm text-slate-600">
           Sau khi Zalo duyệt template trên ZCA portal, copy <span className="font-mono">templateId</span> + danh sách biến vào đây để hệ thống dùng được.
         </p>
@@ -127,7 +127,7 @@ function TemplatesPanel({ onTest }: { onTest: (t: ZnsTemplate) => void }) {
 
       {err && <div className="bg-rose-50 text-rose-700 px-4 py-3 rounded-lg text-sm">{err}</div>}
 
-      <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+      <div className="responsive-table-container bg-white rounded-2xl shadow-sm overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-slate-50">
             <tr className="text-left">
@@ -245,7 +245,7 @@ function TemplateFormModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center">
+    <div className="responsive-dialog fixed inset-0 z-[100] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 space-y-4">
         <h3 className="text-lg font-semibold">{isEdit ? 'Sửa template' : 'Thêm template'}</h3>
@@ -387,7 +387,7 @@ function TestSendModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center">
+    <div className="responsive-dialog fixed inset-0 z-[100] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 space-y-4 max-h-[90vh] overflow-y-auto">
         <h3 className="text-lg font-semibold">Test gửi ZNS</h3>
@@ -515,7 +515,7 @@ function LogsPanel() {
 
       {err && <div className="bg-rose-50 text-rose-700 px-4 py-3 rounded-lg text-sm">{err}</div>}
 
-      <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+      <div className="responsive-table-container bg-white rounded-2xl shadow-sm overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-slate-50">
             <tr className="text-left">
@@ -555,7 +555,7 @@ function LogsPanel() {
 
 function LogDetailModal({ log, onClose }: { log: ZnsLog; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center">
+    <div className="responsive-dialog fixed inset-0 z-[100] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-xl mx-4 p-6 space-y-3 max-h-[90vh] overflow-y-auto">
         <h3 className="text-lg font-semibold">Chi tiết log ZNS</h3>
@@ -662,8 +662,8 @@ export default function Zns() {
   return (
     <>
       <TopBar title="Thông báo Zalo (ZNS)" />
-      <main className="px-8 py-6 space-y-6">
-        <div className="flex items-center gap-2 border-b border-slate-200">
+      <main className="page-content px-8 py-6 space-y-6">
+        <div className="responsive-tabs flex items-center gap-2 border-b border-slate-200">
           {tabs.map(t => (
             <button
               key={t.value}

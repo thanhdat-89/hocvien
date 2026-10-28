@@ -1,10 +1,6 @@
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
-  PieChart, Pie, Cell, Legend,
-} from 'recharts'
 import TopBar from '../components/TopBar'
 import api from '../services/api'
 import { useAuth } from '../hooks/useAuth'
@@ -44,29 +40,6 @@ interface DashboardData {
   }>
 }
 
-interface GradeData {
-  gradeLevel: number
-  count: number
-}
-
-interface RevenueMonth {
-  year: number
-  month: number
-  revenue: number
-}
-
-const GRADE_COLORS = ['#0050d4', '#006947', '#8e3a8a', '#b31b25', '#c77700', '#0e7490', '#6d28d9']
-
-function formatVND(n: number) {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`
-  return n.toString()
-}
-
-function formatFullVND(n: number) {
-  return n.toLocaleString('vi-VN') + 'đ'
-}
-
 export default function Dashboard() {
   const navigate = useNavigate()
   const { canSeeFinance } = useAuth()
@@ -75,39 +48,15 @@ export default function Dashboard() {
   const monthLabel = `${Number(monthKey.slice(5))}/${monthKey.slice(0, 4)}`
 
   const dashQuery = useQuery<DashboardData>({
-    queryKey: ['dashboard'],
+    queryKey: ['dashboard', monthKey],
     queryFn: () => api.get('/dashboard').then(r => r.data),
+    refetchOnWindowFocus: true,
   })
-  const revenueQuery = useQuery<RevenueMonth[]>({
-    queryKey: ['dashboard', 'revenue'],
-    queryFn: () => api.get('/dashboard/revenue').then(r => r.data),
-    enabled: canSeeFinance,
-    staleTime: 5 * 60_000, // revenue ít thay đổi, cache 5 phút
-  })
-  const gradeQuery = useQuery<GradeData[]>({
-    queryKey: ['dashboard', 'students-by-grade'],
-    queryFn: () => api.get('/dashboard/students-by-grade').then(r => r.data),
-    staleTime: 5 * 60_000,
-  })
-
-
   const data = dashQuery.data ?? null
-  const revenue = revenueQuery.data ?? []
-  const grades = gradeQuery.data ?? []
   const loading = dashQuery.isLoading
 
   const stats = data?.stats
   const unpaidMonths = (stats?.unpaidStudentsByMonth ?? []).filter(item => item.count > 0)
-
-  const revenueChartData = revenue.map(r => ({
-    label: `T${r.month}`,
-    revenue: r.revenue,
-  }))
-
-  const gradeChartData = grades.map(g => ({
-    name: `Lớp ${g.gradeLevel}`,
-    value: g.count,
-  }))
 
   const dateDisplay = today.toLocaleDateString('vi-VN', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })
 
@@ -115,7 +64,7 @@ export default function Dashboard() {
     return (
       <div>
         <TopBar title="Math Center" />
-        <div className="p-8 max-w-7xl mx-auto flex items-center justify-center h-[60vh]">
+        <div className="page-content p-8 max-w-7xl mx-auto flex items-center justify-center h-[60vh]">
           <div className="text-center space-y-3">
             <span className="material-symbols-outlined text-5xl text-primary animate-spin">progress_activity</span>
             <p className="text-on-surface-variant text-sm">Đang tải dữ liệu...</p>
@@ -128,7 +77,7 @@ export default function Dashboard() {
   return (
     <div>
       <TopBar title="Math Center" />
-      <div className="p-8 max-w-7xl mx-auto space-y-8">
+      <div className="page-content p-8 max-w-7xl mx-auto space-y-6">
         {/* Header */}
         <section className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
@@ -150,7 +99,7 @@ export default function Dashboard() {
         </section>
 
         {/* Stats Cards */}
-        <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <section className="grid grid-cols-2 xl:grid-cols-4 gap-6">
           <StatCard
             icon="groups"
             iconColor="text-primary"
@@ -188,125 +137,58 @@ export default function Dashboard() {
           <button
             type="button"
             onClick={() => navigate('/private-schedule')}
-            className="group w-full text-left bg-surface-container-lowest rounded-2xl p-6 border border-error/25 hover:border-error/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error transition-colors"
+            className="group flex min-w-0 w-full flex-col items-stretch text-left bg-surface-container-lowest rounded-2xl p-6 border border-error/25 hover:border-error/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error transition-colors"
           >
             <div className="flex items-start justify-between gap-4">
-              <div className="p-3 rounded-xl bg-error/10 text-error">
+              <div className="p-3 rounded-xl bg-error/10 text-error shrink-0 flex">
                 <span className="material-symbols-outlined">event_busy</span>
               </div>
               <span className="text-xs font-semibold text-on-surface-variant bg-surface-container-low px-3 py-1.5 rounded-full">tháng {monthLabel}</span>
             </div>
-            <div className="mt-5 flex items-end justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-headline font-bold text-on-surface">Học viên học riêng chưa xếp lịch — tháng {monthLabel}</h2>
-                <p className="text-sm text-on-surface-variant mt-1">Chưa có buổi học riêng trong tháng này</p>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <span className="text-4xl font-headline font-black text-error">{stats?.unscheduledPrivateStudentsThisMonth ?? '—'}</span>
-                <span className="material-symbols-outlined text-outline group-hover:text-error transition-colors">chevron_right</span>
-              </div>
+            <h2 className="mt-5 text-lg font-headline font-bold text-on-surface">Học viên học riêng chưa xếp lịch</h2>
+            <p className="text-sm text-on-surface-variant mt-1">Chưa có buổi học riêng trong tháng {monthLabel}</p>
+            <div className="flex items-baseline gap-2 py-6">
+              <span className="text-4xl font-headline font-black text-error">{stats?.unscheduledPrivateStudentsThisMonth ?? '—'}</span>
+              <span className="text-sm text-on-surface-variant">học viên</span>
+            </div>
+            <div className="mt-auto flex items-center justify-between gap-3 border-t border-outline-variant/15 pt-4 text-sm font-semibold text-primary">
+              <span>Xem danh sách và xếp lịch</span>
+              <span className="material-symbols-outlined shrink-0">chevron_right</span>
             </div>
           </button>
 
-          {canSeeFinance && unpaidMonths.map(({ year, month, count }) => {
-            const unpaidMonthLabel = `${month}/${year}`
-            return (
-            <button
-              key={`${year}-${month}`}
-              type="button"
-              onClick={() => navigate(`/tuition?month=${month}&year=${year}`)}
-              className="group w-full text-left bg-surface-container-lowest rounded-2xl p-6 border border-outline-variant/15 hover:border-secondary/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-secondary transition-colors"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="p-3 rounded-xl bg-secondary/10 text-secondary">
-                  <span className="material-symbols-outlined">payments</span>
-                </div>
-                <span className="text-xs font-semibold text-on-surface-variant bg-surface-container-low px-3 py-1.5 rounded-full">tháng {unpaidMonthLabel}</span>
-              </div>
-              <div className="mt-5 flex items-end justify-between gap-4">
-                <div>
-                  <h2 className="text-lg font-headline font-bold text-on-surface">Học viên chưa thanh toán học phí — tháng {unpaidMonthLabel}</h2>
-                  <p className="text-sm text-on-surface-variant mt-1">Học viên phát sinh học phí trong tháng và còn tiền phải trả, kể cả chưa có phiếu</p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-4xl font-headline font-black text-on-surface">{count}</span>
-                  <span className="material-symbols-outlined text-outline group-hover:text-secondary transition-colors">chevron_right</span>
-                </div>
-              </div>
-            </button>
-            )
-          })}
-        </section>
-
-        {/* Charts */}
-        <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {canSeeFinance && (
-            <div className="lg:col-span-2 bg-surface-container-lowest rounded-2xl p-6">
-              <div className="flex justify-between items-center mb-6">
-                <h3 className="text-lg font-headline font-bold text-on-surface">Doanh thu theo tháng</h3>
-                <span className="text-xs text-on-surface-variant">12 tháng gần nhất</span>
+            <div className="min-w-0 w-full bg-surface-container-lowest rounded-2xl p-6 border border-outline-variant/15">
+              <div className="p-3 rounded-xl bg-secondary/10 text-secondary w-fit flex">
+                <span className="material-symbols-outlined">payments</span>
               </div>
-              <div className="h-56">
-                {revenueChartData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={revenueChartData} barSize={20}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e7e6ff" vertical={false} />
-                      <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#555881' }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fontSize: 11, fill: '#555881' }} axisLine={false} tickLine={false} tickFormatter={(v) => formatVND(v)} />
-                      <Tooltip
-                        formatter={(v: number) => [formatFullVND(v), 'Doanh thu']}
-                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }}
-                      />
-                      <Bar dataKey="revenue" fill="#0050d4" radius={[6, 6, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="h-full flex items-center justify-center text-outline text-sm">Chưa có dữ liệu doanh thu</div>
+              <h2 className="mt-5 text-lg font-headline font-bold text-on-surface">Học viên chưa thanh toán học phí</h2>
+              <p className="text-sm text-on-surface-variant mt-1">Học viên còn học phí phải trả theo từng tháng, kể cả chưa có phiếu</p>
+              <div className="mt-4 divide-y divide-outline-variant/15">
+                {unpaidMonths.map(({ year, month, count }) => (
+                  <button
+                    key={`${year}-${month}`}
+                    type="button"
+                    onClick={() => navigate(`/tuition?month=${month}&year=${year}`)}
+                    className="group flex w-full items-center justify-between gap-4 rounded-lg px-3 py-3 text-left hover:bg-secondary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-secondary transition-colors"
+                  >
+                    <span className="text-sm font-semibold text-on-surface-variant">Tháng {month}/{year}</span>
+                    <span className="flex items-center gap-2 shrink-0">
+                      <span className="text-2xl font-headline font-black text-on-surface">{count}</span>
+                      <span className="material-symbols-outlined text-outline group-hover:text-secondary transition-colors">chevron_right</span>
+                    </span>
+                  </button>
+                ))}
+                {unpaidMonths.length === 0 && (
+                  <p className="py-3 text-sm text-on-surface-variant">
+                    {stats?.unpaidStudentsThisMonth == null ? 'Chưa có dữ liệu học phí' : 'Không có học viên chưa thanh toán học phí'}
+                  </p>
                 )}
               </div>
             </div>
           )}
-
-            {/* Students by grade */}
-            <div className={`${canSeeFinance ? 'lg:col-span-1' : 'lg:col-span-3'} bg-surface-container-lowest rounded-2xl p-6`}>
-              <h3 className="text-lg font-headline font-bold text-on-surface mb-4">Phân bố theo khối</h3>
-              {gradeChartData.length > 0 ? (
-                <>
-                  <div className="h-48">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={gradeChartData}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={40}
-                          outerRadius={70}
-                          dataKey="value"
-                          paddingAngle={3}
-                        >
-                          {gradeChartData.map((_, i) => (
-                            <Cell key={i} fill={GRADE_COLORS[i % GRADE_COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip formatter={(v: number) => [`${v} HV`, 'Số lượng']} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 mt-2">
-                    {gradeChartData.map((g, i) => (
-                      <div key={i} className="flex items-center gap-2 text-xs">
-                        <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: GRADE_COLORS[i % GRADE_COLORS.length] }} />
-                        <span className="text-on-surface-variant">{g.name}</span>
-                        <span className="font-bold text-on-surface ml-auto">{g.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <div className="text-center py-8 text-outline text-sm">Chưa có dữ liệu</div>
-              )}
-            </div>
         </section>
+
       </div>
     </div>
   )
@@ -323,10 +205,10 @@ function StatCard({ icon, iconColor, iconBg, value, label, sub, onClick }: {
 }) {
   return (
     <div
-      className={`bg-surface-container-lowest p-5 rounded-2xl flex flex-col gap-4 ${onClick ? 'cursor-pointer hover:shadow-md transition-all' : ''}`}
+      className={`min-w-0 bg-surface-container-lowest p-6 rounded-2xl flex flex-col gap-4 ${onClick ? 'cursor-pointer hover:shadow-md transition-all' : ''}`}
       onClick={onClick}
     >
-      <div className={`p-3 ${iconBg} rounded-xl w-fit`}>
+      <div className={`p-3 ${iconBg} rounded-xl w-fit flex`}>
         <span className={`material-symbols-outlined ${iconColor}`}>{icon}</span>
       </div>
       <div>

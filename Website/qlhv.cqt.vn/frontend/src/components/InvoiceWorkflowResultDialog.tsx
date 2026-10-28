@@ -11,6 +11,7 @@ export function invoiceWorkflowLabel(result: InvoiceWorkflowResult) {
   if (result.phase === 'request_failed') return result.error || 'Không nhận được kết quả. Kiểm tra phiếu đã lưu trước khi thử lại.'
   const workflow = result.workflow
   if (!workflow) return 'Hệ thống chưa trả trạng thái hóa đơn. Chưa xác nhận đã tạo hóa đơn chưa phát hành trên MISA.'
+  if (workflow.status === 'SKIPPED_BEFORE_INVOICE_START') return `Phiếu học phí đã lưu. ${workflow.message || 'Chỉ tạo hóa đơn cho kỳ học phí từ tháng 10/2026.'}`
   if (workflow.enabled === false) return 'Phiếu đã lưu. Tự động tạo hóa đơn MISA đang tắt.'
   const labels: Record<string, string> = {
     MISA_XML_PREPARED: 'MISA đã trả kết quả chuẩn bị XML chưa ký. Chưa xác nhận hóa đơn đã được lưu trong danh sách Chưa phát hành.',
@@ -36,6 +37,7 @@ function resultPresentation(result: InvoiceWorkflowResult): { tone: ResultTone; 
   if (result.phase === 'queued') return { tone: 'pending', label: 'Chờ đến lượt', icon: 'schedule' }
   if (result.phase === 'processing') return { tone: 'pending', label: 'Đang xử lý', icon: 'progress_activity' }
   if (result.phase === 'request_failed') return { tone: 'review', label: 'Chưa nhận được kết quả', icon: 'help' }
+  if (result.workflow?.status === 'SKIPPED_BEFORE_INVOICE_START') return { tone: 'success', label: 'Đã lưu phiếu, không tạo hóa đơn', icon: 'check_circle' }
   if (result.workflow?.enabled === false) return { tone: 'review', label: 'Đã lưu phiếu học phí', icon: 'info' }
   const status = result.workflow?.status || ''
   if (['DRAFT_CREATED', 'MISA_DRAFT_CREATED'].includes(status)) return { tone: 'success', label: 'Đã tạo hóa đơn chưa phát hành', icon: 'check_circle' }
@@ -61,7 +63,7 @@ export default function InvoiceWorkflowResultDialog({ results, onClose }: { resu
     document.body.style.overflow = 'hidden'; closeRef.current?.focus()
     return () => { document.body.style.overflow = overflow; previous?.focus() }
   }, [])
-  return <div className="fixed inset-0 z-[100] bg-slate-950/45 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6" onKeyDown={event => {
+  return <div className="responsive-dialog fixed inset-0 z-[100] bg-slate-950/45 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6" onKeyDown={event => {
     if (event.key === 'Escape' && !running) onClose()
     if (event.key === 'Tab') { event.preventDefault(); closeRef.current?.focus() }
   }}>

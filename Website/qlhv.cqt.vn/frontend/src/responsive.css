@@ -1,0 +1,162 @@
+/* Preserve desktop styling; contain overflowing tabs at any viewport width. */
+.responsive-tabs { max-width: 100%; overflow-x: auto; }
+.student-profile { overflow-wrap: anywhere; }
+.student-profile table { overflow-wrap: normal; }
+
+/* A large tablet can use desktop layout while still having no mouse hover. */
+@media (hover: none) and (pointer: coarse) {
+  .touch-actions { opacity: 1; }
+}
+
+@media (max-width: 1023px) {
+  .app-content .page-content { padding: 1.5rem; }
+  .page-content :is(h1, h2, h3) { overflow-wrap: anywhere; }
+  .page-content :is(h1, h2).text-4xl { font-size: 1.75rem; line-height: 2.25rem; }
+  .page-content .grid > * { min-width: 0; }
+  .responsive-toolbar { flex-wrap: wrap; }
+  .responsive-tabs { max-width: 100%; overflow-x: auto; }
+  .responsive-tabs > button { flex-shrink: 0; white-space: nowrap; }
+  .activity-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .profile-table-container { overflow-x: auto; }
+  .profile-table-container > table { min-width: 640px; }
+  .responsive-table-container { overflow-x: auto; }
+  .responsive-table-container > table { min-width: 640px; }
+  .student-mobile-table td[data-label='Thao tác'] > div,
+  .tuition-mobile-table td:is([data-label='Thao tác'], [data-label='Phiếu học phí']) > div {
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+  .app-toasts {
+    width: calc(100% - 24px);
+    min-width: 0;
+    bottom: max(12px, env(safe-area-inset-bottom));
+  }
+
+  .app-shell :where(button, a[aria-label]), .responsive-dialog button { min-height: 44px; }
+  .app-shell :where(button, a[aria-label]):has(> .material-symbols-outlined:only-child) { min-width: 44px; }
+  .app-shell :where(input:not([type='checkbox']):not([type='radio']), select) { min-height: 44px; min-width: 0; max-width: 100%; }
+  .responsive-dialog { padding: 12px; }
+  .responsive-dialog > :is(div, form, section):not(.absolute):not(.fixed) {
+    min-width: 0;
+    max-height: calc(100dvh - 24px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .tuition-save-bar {
+    width: calc(100% - 24px);
+    max-width: 600px;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 12px;
+    bottom: max(12px, env(safe-area-inset-bottom));
+    padding: 12px 16px;
+  }
+}
+
+@media (max-width: 767px) {
+  .app-content .page-content { padding: 1rem; }
+  .page-content :is(h1, h2).text-3xl { font-size: 1.5rem; line-height: 2rem; }
+  .page-content .student-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .student-summary > :last-child { grid-column: 1 / -1; }
+  .page-content .tuition-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .tuition-summary > * { padding: 16px; }
+  .tuition-summary > :last-child { grid-column: 1 / -1; }
+  .page-content .profile-tuition-summary { grid-template-columns: minmax(0, 1fr); }
+  .profile-contact { flex-wrap: wrap; gap: 12px; }
+  .profile-contact > div:nth-child(2) { flex-basis: calc(100% - 52px); }
+  .profile-contact > div:last-child { margin-left: auto; }
+  .profile-promotion { flex-wrap: wrap; }
+  .profile-promotion-class { flex: 1; min-width: 0; white-space: normal; }
+  .profile-promotion-dates { flex-basis: 100%; white-space: normal; }
+  .activity-filters { grid-template-columns: minmax(0, 1fr); }
+  .calendar-controls > div { width: 100%; flex-wrap: wrap; gap: 12px; }
+  .calendar-controls > div > h3 { font-size: 1rem; line-height: 1.5rem; }
+  .calendar-controls > div > div { flex-shrink: 0; max-width: 100%; }
+  .calendar-controls > div:last-child > div { flex-wrap: wrap; gap: 8px 12px; }
+  .calendar-controls :is(button, .material-symbols-outlined),
+  .calendar-controls > div > span,
+  .calendar-controls > div:last-child > div > span { flex-shrink: 0; white-space: nowrap; }
+  .app-shell :where(input:not([type='checkbox']):not([type='radio']), select, textarea),
+  .responsive-dialog :where(input:not([type='checkbox']):not([type='radio']), select, textarea),
+  .login-page input { font-size: 16px; }
+
+  /* Reflow existing rows rather than duplicate payment/student actions. */
+  :is(.student-mobile-table, .tuition-mobile-table, .class-mobile-table) { display: block; min-width: 0; width: 100%; }
+  :is(.student-mobile-table, .tuition-mobile-table, .class-mobile-table) colgroup { display: none; }
+  :is(.student-mobile-table, .tuition-mobile-table, .class-mobile-table) thead {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+  :is(.student-mobile-table, .tuition-mobile-table, .class-mobile-table) tbody { display: block; }
+  :is(.student-mobile-table, .tuition-mobile-table, .class-mobile-table) tbody tr {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px; padding: 16px;
+  }
+  :is(.student-mobile-table, .tuition-mobile-table, .class-mobile-table) td {
+    display: block; min-width: 0; padding: 0; text-align: left; overflow-wrap: anywhere;
+  }
+  :is(.student-mobile-table, .tuition-mobile-table, .class-mobile-table) td[data-label]::before {
+    content: attr(data-label); display: block; margin-bottom: 6px;
+    font-size: 11px; line-height: 16px; font-weight: 500; color: #71749e;
+  }
+  :is(.student-mobile-table, .tuition-mobile-table, .class-mobile-table) td[data-label='STT'] {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%);
+  }
+  :is(.student-mobile-table, .tuition-mobile-table, .class-mobile-table) td:is([data-label='Học viên'], [data-label='Tên lớp'], [data-label='ID lớp'], [data-label='Lớp học'], [data-label='Thao tác'], [colspan]) { grid-column: 1 / -1; }
+  :is(.student-mobile-table, .tuition-mobile-table, .class-mobile-table) td[data-label='Học viên']::before { display: none; }
+  :is(.student-mobile-table, .tuition-mobile-table, .class-mobile-table) td[data-label='Thao tác'] > div { justify-content: flex-start; flex-wrap: wrap; }
+  .tuition-mobile-table tbody + tbody { border-top: 4px solid #f1efff; }
+  .tuition-mobile-table tfoot { display: block; padding: 16px; }
+  .tuition-mobile-table tfoot tr { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+  .tuition-mobile-table tfoot td:empty { display: none; }
+  .profile-tuition-table td[data-label='Phiếu học phí'] { grid-column: 1 / -1; }
+  .profile-tuition-table td[data-label='Phiếu học phí'] > div { justify-content: flex-start; }
+  .profile-tuition-table td:not([data-label='Lớp học']) { overflow-wrap: normal; }
+  .profile-tuition-table tfoot td[colspan] { padding: 0; }
+  .profile-table-container > .profile-session-table { min-width: 0; }
+  .profile-session-table td { overflow-wrap: normal; }
+  .profile-session-table tfoot td[colspan] { padding: 0; }
+  :is(.student-mobile-table, .tuition-mobile-table, .class-mobile-table) td[colspan] { padding: 24px 0; }
+}
+
+@media (prefers-reduced-motion: reduce) and (max-width: 1023px) {
+  .app-shell *, .app-shell *::before, .app-shell *::after { scroll-behavior: auto; transition-duration: 0.01ms; }
+}
+
+/* Desktop icon rail reserves 72px even while its labels overlay the content. */
+@media (min-width: 1024px) {
+  .app-sidebar { height: 100dvh; }
+  .app-sidebar > nav { min-height: 0; overflow-y: auto; overflow-x: hidden; }
+  .app-shell[data-compact-sidebar='true'] > .app-content { margin-left: 72px; }
+  [data-compact-sidebar='true'] .app-sidebar {
+    width: 72px;
+    overflow: hidden;
+    transition: width 180ms ease;
+    background-color: #f1efff;
+  }
+  [data-compact-sidebar='true'] .app-sidebar[data-expanded='true'] {
+    width: 256px;
+    box-shadow: 12px 0 28px rgb(40 43 81 / 14%);
+  }
+  [data-compact-sidebar='true'] .sidebar-expand { display: inline-flex; flex-shrink: 0; }
+  [data-compact-sidebar='true'] .sidebar-brand { padding-inline: 16px; flex-shrink: 0; }
+  [data-compact-sidebar='true'] .sidebar-brand-icon { flex-shrink: 0; }
+  [data-compact-sidebar='true'] :is(.sidebar-link, .sidebar-logout) {
+    margin-inline: 0;
+    padding-inline: 16px;
+    white-space: nowrap;
+  }
+  [data-compact-sidebar='true'] :is(.sidebar-link, .sidebar-logout) > .material-symbols-outlined {
+    width: 24px;
+    flex-shrink: 0;
+    text-align: center;
+  }
+  [data-compact-sidebar='true'] .sidebar-label { white-space: nowrap; transition: opacity 120ms ease; }
+  [data-compact-sidebar='true'] .app-sidebar:not([data-expanded='true']) .sidebar-label { visibility: hidden; opacity: 0; }
+  [data-compact-sidebar='true'] .sidebar-footer { padding-inline: 8px; flex-shrink: 0; }
+  [data-compact-sidebar='true'] .sidebar-user { display: flex; gap: 12px; align-items: center; padding: 8px; }
+  [data-compact-sidebar='true'] .sidebar-avatar { display: inline-flex; flex-shrink: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-sidebar, .app-sidebar .sidebar-label { transition: none !important; }
+}

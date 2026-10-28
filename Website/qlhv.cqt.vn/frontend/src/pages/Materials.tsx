@@ -147,7 +147,7 @@ export default function Materials() {
   return (
     <div>
       <TopBar title="Tài liệu học tập" />
-      <div className="px-8 py-8 space-y-6">
+      <div className="page-content px-8 py-8 space-y-6">
         <div className="flex items-end justify-between gap-3 flex-wrap">
           <div>
             <span className="text-[11px] font-bold text-primary tracking-[0.2em] uppercase mb-2 block">Kho học liệu</span>
@@ -250,7 +250,7 @@ export default function Materials() {
                     <td className="table-cell text-sm text-outline">{m.uploaderName}</td>
                     <td className="table-cell text-sm text-outline">{fmtDate(m.createdAt)}</td>
                     <td className="table-cell text-right">
-                      <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center justify-end gap-2 touch-actions opacity-0 group-hover:opacity-100 max-lg:opacity-100 focus-within:opacity-100 transition-opacity">
                         <button onClick={() => handleDownload(m)} className="p-2 text-outline hover:text-primary hover:bg-primary-container/10 rounded-lg transition-all" title="Tải về / Mở">
                           <span className="material-symbols-outlined text-[20px]">{m.type === 'FILE' ? 'download' : 'open_in_new'}</span>
                         </button>
@@ -442,7 +442,7 @@ function MaterialModal({ editing, students, classes, onClose, onSaved }: {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="responsive-dialog fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="bg-surface rounded-2xl shadow-xl w-full max-w-2xl max-h-[92vh] flex flex-col">
         <div className="p-6 border-b border-outline-variant/10 flex items-center justify-between">
           <h3 className="font-headline text-xl font-bold text-on-surface">{editing ? 'Sửa tài liệu' : 'Tải lên tài liệu mới'}</h3>

@@ -24,7 +24,7 @@ export default function ConfirmDialog({
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center">
+    <div className="responsive-dialog fixed inset-0 z-[100] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onCancel} />
       <div className="relative bg-surface-container-lowest rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6 space-y-4">
         <div className="flex items-start gap-3">
@@ -183,7 +183,7 @@ export function ConfirmDialogProvider({ children }: { children: React.ReactNode 
     <DialogContext.Provider value={{ confirm, alert, prompt }}>
       {children}
       {state.open && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center">
+        <div className="responsive-dialog fixed inset-0 z-[100] flex items-center justify-center">
           <div
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             onClick={() => state.mode !== 'alert' && handleClose(false)}

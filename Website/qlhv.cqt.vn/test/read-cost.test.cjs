@@ -51,7 +51,7 @@ test('tuition and dashboard reuse summaries; financial writes invalidate before 
   async function request(fn, query={}) { let result, error; await fn({query},{json:data=>{result=data}},err=>{error=err}); if(error)throw error; return result }
   try {
     const {getCachedTuitionSummary}=require('../dist/services/tuitionReadView')
-    const {invalidateReadView,readView}=require('../dist/services/readViews')
+    const {invalidateReadView,readView,getMissingPrivateStudents}=require('../dist/services/readViews')
     const {readViewInvalidation}=require('../dist/middleware/readViewInvalidation')
     const first=await getCachedTuitionSummary(10,2026)
     assert.equal(first.unpaidStudents,1)
@@ -61,11 +61,19 @@ test('tuition and dashboard reuse summaries; financial writes invalidate before 
     const dashboardRead=handler(dashboard,'/')
     const firstDashboard = await request(dashboardRead)
     assert.equal(firstDashboard.stats.unpaidStudentsThisMonth,1)
-    assert.deepEqual(firstDashboard.stats.unpaidStudentsByMonth, [
-      {year:2026,month:9,count:1},
-      {year:2026,month:10,count:1},
-    ])
-    assert.equal(calculations,2,'dashboard must reuse the current month and calculate each earlier month once')
+    const currentMonth = new Date().toLocaleDateString('en-CA', {timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit'}).slice(0,7)
+    const [currentYear, currentMonthNumber] = currentMonth.split('-').map(Number)
+    const missingPrivate = await getMissingPrivateStudents(currentMonthNumber, currentYear)
+    assert.ok(missingPrivate.data.some(student => student.id === 's44'), 'preserve the schedule page eligibility for inactive students')
+    assert.equal(firstDashboard.stats.unscheduledPrivateStudentsThisMonth, missingPrivate.data.length,
+      'dashboard must count exactly the students listed on the private schedule page')
+    const monthCount = (currentYear - 2026) * 12 + currentMonthNumber - 9 + 1
+    const expectedMonths = Array.from({length:Math.max(0,monthCount)}, (_, index) => {
+      const date = new Date(Date.UTC(2026, 8 + index, 1))
+      return {year:date.getUTCFullYear(),month:date.getUTCMonth()+1,count:1}
+    })
+    assert.deepEqual(firstDashboard.stats.unpaidStudentsByMonth, expectedMonths)
+    assert.equal(calculations,expectedMonths.length,'dashboard must reuse the current month and calculate each earlier month once')
     const beforeScans=scans.length
     await request(dashboardRead)
     assert.equal(scans.length,beforeScans,'warm dashboard must not scan business collections')
@@ -78,15 +86,31 @@ test('tuition and dashboard reuse summaries; financial writes invalidate before 
       response.json({saved:true})
     })
     assert.equal((await request(dashboardRead)).stats.unpaidStudentsThisMonth,0)
-    assert.equal(calculations,4)
+    assert.equal(calculations,expectedMonths.length * 2)
     assert.deepEqual((await getCachedTuitionSummary(10,2026)).rows,summaryRows)
     await getCachedTuitionSummary(10,2026,true)
-    assert.equal(calculations,5,'manual refresh forces original calculation')
+    assert.equal(calculations,expectedMonths.length * 2 + 1,'manual refresh forces original calculation')
     let builds=0
     await readView('dashboard','expiry',async()=>++builds,undefined,false,100)
     tables.get('readViews').get('dashboard-expiry').generatedAt=Date.now()-101
     await readView('dashboard','expiry',async()=>++builds,undefined,false,100)
     assert.equal(builds,2,'expiry rebuilds a missed invalidation')
+
+    tables.set('privateSchedules', new Map([['p1', {studentId:'s44',sessionDate:`${currentMonth}-14`,status:'SCHEDULED'}]]))
+    await new Promise(resolve=>{
+      const response={statusCode:200,json:resolve}
+      readViewInvalidation({method:'POST',path:'/api/students/s44/private-schedule'},response,()=>{})
+      response.json({saved:true})
+    })
+    const updatedMissing = await getMissingPrivateStudents(currentMonthNumber, currentYear)
+    assert.equal(updatedMissing.data.length, missingPrivate.data.length - 1)
+    assert.equal((await request(dashboardRead)).stats.unscheduledPrivateStudentsThisMonth, updatedMissing.data.length,
+      'saving a private session must refresh the list and dashboard together')
+    tables.get('privateSchedules').clear()
+    const refreshDashboard = dashboard.stack.find(layer=>layer.route?.path==='/refresh').route.stack.at(-1).handle
+    assert.equal((await request(refreshDashboard)).stats.unscheduledPrivateStudentsThisMonth, missingPrivate.data.length,
+      'manual dashboard refresh must also rebuild the shared private schedule list')
+    assert.equal((await getMissingPrivateStudents(currentMonthNumber, currentYear)).data.length, missingPrivate.data.length)
 
     for (const [method,path] of [['POST','/api/webhooks/sepay'],['PUT','/api/students/s1/private-schedule/p1'],['POST','/api/classes/c1/enroll'],['POST','/api/tuition/student-promotions'],['PUT','/api/sessions/session1'],['DELETE','/api/holidays/h1'],['GET','/api/schedules/cron/generate-monthly']]) {
       const previous=tables.get('readViewRevisions').get('tuition').revision

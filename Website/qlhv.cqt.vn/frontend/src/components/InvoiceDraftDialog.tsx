@@ -23,6 +23,8 @@ export default function InvoiceDraftDialog({ recordId, recordIds, onClose, onCre
   const [error, setError] = useState('')
   const [invoice, setInvoice] = useState<Invoice | null>(null)
   const [templatesError, setTemplatesError] = useState('')
+  const [creationAllowed, setCreationAllowed] = useState(false)
+  const [creationBlockedReason, setCreationBlockedReason] = useState('')
   useEffect(() => {
     let active = true
     const path = grouped
@@ -31,6 +33,8 @@ export default function InvoiceDraftDialog({ recordId, recordIds, onClose, onCre
     api.get(path).then(({ data }) => {
       if (!active) return
       setSources(data.sources || [data.source]); setBuyer(data.suggestedBuyer)
+      setCreationAllowed(data.creationAllowed === true)
+      setCreationBlockedReason(data.creationBlockedReason || 'Chỉ tạo hóa đơn cho kỳ học phí từ tháng 10/2026.')
       if (['CREATING', 'OUTCOME_UNKNOWN', 'DRAFT_CREATED', 'ISSUED', 'SENT_TO_TAX'].includes(data.invoice?.status)) {
         setInvoice(data.invoice)
       }
@@ -49,6 +53,7 @@ export default function InvoiceDraftDialog({ recordId, recordIds, onClose, onCre
     return () => { active = false }
   }, [invoiceDate])
   const create = async () => {
+    if (!creationAllowed) return
     setBusy(true); setError('')
     try {
       const path = grouped ? '/tuition/misa/invoices/group' : `/tuition/misa/invoices/${encodeURIComponent(recordId!)}`
@@ -57,7 +62,7 @@ export default function InvoiceDraftDialog({ recordId, recordIds, onClose, onCre
     } catch (error) { setError(failure(error)) } finally { setBusy(false) }
   }
   const fields = [['fullName', 'Người mua (phụ huynh / học viên)'], ['legalName', 'Tên đơn vị (nếu lấy hóa đơn cho đơn vị)'], ['citizenIdNumber', 'CCCD'], ['address', 'Địa chỉ người mua'], ['email', 'Email người mua'], ['phone', 'Số điện thoại']] as const
-  return <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+  return <div className="responsive-dialog fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
     <div role="dialog" aria-modal="true" aria-labelledby="invoice-draft-title" className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6 space-y-5">
       <div className="flex justify-between gap-4 items-start"><div><h2 id="invoice-draft-title" className="text-xl font-bold text-on-surface">Tạo hóa đơn nháp trên MISA</h2>
         <p className="text-sm text-outline mt-1">Website gửi hóa đơn trực tiếp sang MISA. Thao tác này chỉ tạo bản nháp, chưa ký hoặc phát hành.</p></div>
@@ -72,7 +77,8 @@ export default function InvoiceDraftDialog({ recordId, recordIds, onClose, onCre
           <label className="text-sm block">Ngày hóa đơn<input type="date" value={invoiceDate} onChange={event => setInvoiceDate(event.target.value)} className="block mt-1 border border-outline-variant rounded-lg p-3" /></label>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{fields.map(([key, label]) => <label key={key} className="text-sm">{label}<input type={key === 'email' ? 'email' : 'text'} inputMode={key === 'citizenIdNumber' ? 'numeric' : undefined} value={buyer[key]} onChange={event => setBuyer(previous => ({ ...previous, [key]: event.target.value }))} className="block w-full mt-1 border border-outline-variant rounded-lg p-3" /></label>)}</div>
           <div className="rounded-xl border border-outline-variant/20 p-4 text-sm space-y-1"><p className="font-semibold mb-2">Xem trước trên website</p>{sources.map(source => <p key={source.recordId || source.className}>Học phí {source.className} · Khuyến mãi: {money(source.discountAmount)} · Thành tiền: <strong>{money(source.finalAmount)}</strong></p>)}<p>Đơn vị tính: Tháng · Số lượng: {sources.length}</p><p>Tổng thanh toán: <strong>{money(sources.reduce((sum, source) => sum + source.finalAmount, 0))}</strong> · Thanh toán: TM/Chuyển khoản</p></div>
-          <button type="button" disabled={busy || !templateId || !buyer.fullName && !buyer.legalName} onClick={create} className="bg-primary text-on-primary px-4 py-2 rounded-lg font-semibold disabled:opacity-40">{busy ? 'Đang tạo trên MISA...' : 'Tạo hóa đơn nháp trên MISA'}</button>
+          {!creationAllowed && <p role="status" className="text-sm text-amber-800">{creationBlockedReason}</p>}
+          <button type="button" disabled={!creationAllowed || busy || !templateId || !buyer.fullName && !buyer.legalName} onClick={create} className="bg-primary text-on-primary px-4 py-2 rounded-lg font-semibold disabled:opacity-40">{busy ? 'Đang tạo trên MISA...' : 'Tạo hóa đơn nháp trên MISA'}</button>
         </>}
       </>}
       {error && <p role="alert" className="text-red-700 bg-red-50 rounded-lg p-3 text-sm">{error}</p>}

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import TopBar from '../components/TopBar'
 import api from '../services/api'
 
@@ -58,10 +58,16 @@ const fmtDateTime = (iso: string): string => {
 const startOfDayIso = (yyyymmdd: string) => yyyymmdd ? new Date(`${yyyymmdd}T00:00:00`).toISOString() : ''
 const endOfDayIso   = (yyyymmdd: string) => yyyymmdd ? new Date(`${yyyymmdd}T23:59:59.999`).toISOString() : ''
 
+interface ActivityPage { data: ActivityLog[]; nextCursor: string | null }
+const PAGE_SIZE = 10
+
 export default function Activity() {
   const [logs, setLogs] = useState<ActivityLog[]>([])
   const [loading, setLoading] = useState(true)
-  const [loadingMore, setLoadingMore] = useState(false)
+  const [pageIndex, setPageIndex] = useState(0)
+  const pages = useRef<ActivityPage[]>([])
+  const latestRequest = useRef(0)
+  const activeRequest = useRef<AbortController | null>(null)
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -75,44 +81,60 @@ export default function Activity() {
   // Detail modal
   const [detail, setDetail] = useState<ActivityLog | null>(null)
 
-  const fetchPage = async (cursor?: string) => {
-    const params = new URLSearchParams({ limit: '50' })
+  const fetchPage = async (cursor: string | undefined, signal: AbortSignal) => {
+    const params = new URLSearchParams({ limit: String(PAGE_SIZE) })
     if (cursor) params.set('cursor', cursor)
     if (from) params.set('from', startOfDayIso(from))
     if (to) params.set('to', endOfDayIso(to))
     if (action) params.set('action', action)
     if (resourceType) params.set('resourceType', resourceType)
-    const res = await api.get(`/activity?${params.toString()}`)
-    return res.data as { data: ActivityLog[]; nextCursor: string | null }
+    const res = await api.get(`/activity?${params.toString()}`, { signal, timeout: 15_000 })
+    return res.data as ActivityPage
   }
 
-  const load = async () => {
-    setLoading(true)
+  const showPage = (index: number, result: ActivityPage) => {
+    setLogs(result.data)
+    setNextCursor(result.nextCursor)
+    setPageIndex(index)
+  }
+
+  const loadPage = async (index: number, refresh = false) => {
+    const request = ++latestRequest.current
+    activeRequest.current?.abort()
     setError(null)
+    if (refresh) {
+      pages.current = []
+      setLogs([])
+      setNextCursor(null)
+      setPageIndex(0)
+    }
+    const cached = pages.current[index]
+    if (cached) { showPage(index, cached); setLoading(false); return }
+    const controller = new AbortController()
+    activeRequest.current = controller
+    setLoading(true)
     try {
-      const r = await fetchPage()
-      setLogs(r.data)
-      setNextCursor(r.nextCursor)
+      const result = await fetchPage(index === 0 ? undefined : pages.current[index - 1]?.nextCursor ?? undefined, controller.signal)
+      if (request !== latestRequest.current) return
+      pages.current[index] = result
+      showPage(index, result)
     } catch (e: any) {
-      setError(e?.response?.data?.message ?? 'Không tải được lịch sử')
+      if (request === latestRequest.current && !controller.signal.aborted) {
+        setError(e?.response?.data?.message ?? 'Không tải được lịch sử. Vui lòng thử lại.')
+      }
     } finally {
-      setLoading(false)
+      if (request === latestRequest.current) setLoading(false)
     }
   }
 
-  const loadMore = async () => {
-    if (!nextCursor) return
-    setLoadingMore(true)
-    try {
-      const r = await fetchPage(nextCursor)
-      setLogs(prev => [...prev, ...r.data])
-      setNextCursor(r.nextCursor)
-    } catch { /* keep */ } finally {
-      setLoadingMore(false)
-    }
-  }
-
-  useEffect(() => { load() }, [from, to, action, resourceType])
+  useEffect(() => {
+    setLogs([])
+    setNextCursor(null)
+    setPageIndex(0)
+    setDetail(null)
+    void loadPage(0, true)
+    return () => { latestRequest.current++; activeRequest.current?.abort() }
+  }, [from, to, action, resourceType])
 
   const visible = search.trim()
     ? logs.filter(l => {
@@ -128,32 +150,32 @@ export default function Activity() {
     <div className="space-y-6">
       <TopBar title="Lịch sử hoạt động" />
 
-      <div className="bg-surface rounded-3xl p-6 md:p-8 shadow-sm">
+      <div className="page-content bg-surface rounded-3xl p-6 md:p-8 shadow-sm">
         <p className="text-[10px] uppercase tracking-widest text-primary font-bold mb-1">Audit log</p>
         <h2 className="font-headline text-2xl font-bold text-on-surface mb-6">
           Toàn bộ thay đổi trên hệ thống
         </h2>
 
         {/* Filter bar */}
-        <div className="grid grid-cols-1 md:grid-cols-[auto_auto_1fr_1fr_auto] gap-3 mb-6 items-end">
+        <div className="activity-filters grid grid-cols-1 md:grid-cols-[auto_auto_1fr_1fr_auto] gap-3 mb-6 items-end">
           <div>
             <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1">Từ ngày</label>
-            <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="input" />
+            <input aria-label="Từ ngày" type="date" value={from} onChange={e => setFrom(e.target.value)} className="input" />
           </div>
           <div>
             <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1">Đến ngày</label>
-            <input type="date" value={to} onChange={e => setTo(e.target.value)} className="input" />
+            <input aria-label="Đến ngày" type="date" value={to} onChange={e => setTo(e.target.value)} className="input" />
           </div>
           <div>
             <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1">Loại</label>
-            <select value={resourceType} onChange={e => setResourceType(e.target.value)} className="input">
+            <select aria-label="Loại hoạt động" value={resourceType} onChange={e => setResourceType(e.target.value)} className="input">
               {RESOURCE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
           <div>
             <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1">Tìm kiếm</label>
-            <input type="text" value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Tên người / nội dung..." className="input" />
+            <input aria-label="Tìm trong trang hiện tại" type="text" value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Tìm tên / nội dung trong trang này..." className="input" />
           </div>
           {hasFilter && (
             <button onClick={resetFilters}
@@ -177,8 +199,9 @@ export default function Activity() {
           ))}
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+        <p aria-live="polite" className="mb-3 text-xs text-outline">Mỗi trang tối đa 10 thay đổi mới nhất. Tìm kiếm áp dụng trong trang hiện tại.</p>
+        <div className="overflow-x-auto" aria-busy={loading}>
+          <table aria-label="Lịch sử hoạt động" className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-surface-container-low/50">
                 <th className="table-header w-44">Ngày tháng</th>
@@ -201,7 +224,7 @@ export default function Activity() {
                 <tr>
                   <td colSpan={3} className="py-16 text-center text-outline">
                     <span className="material-symbols-outlined text-5xl block mb-3 opacity-30">history</span>
-                    {hasFilter ? 'Không có hoạt động khớp với bộ lọc' : 'Chưa có hoạt động nào được ghi nhận'}
+                    {search.trim() ? 'Không có kết quả tìm kiếm trong trang này' : hasFilter ? 'Không có hoạt động khớp với bộ lọc' : 'Chưa có hoạt động nào được ghi nhận'}
                   </td>
                 </tr>
               ) : visible.map(log => {
@@ -231,14 +254,21 @@ export default function Activity() {
           </table>
         </div>
 
-        {nextCursor && !loading && (
-          <div className="mt-6 flex justify-center">
-            <button onClick={loadMore} disabled={loadingMore}
-              className="px-6 py-2.5 rounded-xl bg-primary/10 text-primary font-semibold text-sm hover:bg-primary/20 transition-colors disabled:opacity-50">
-              {loadingMore ? 'Đang tải...' : 'Tải thêm'}
-            </button>
+        <nav aria-label="Phân trang lịch sử" className="mt-6 flex flex-wrap items-center justify-between gap-3">
+          <p aria-live="polite" className="text-sm text-outline">
+            Trang {pageIndex + 1} · {visible.length}{search.trim() ? `/${logs.length}` : ''} thay đổi
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={() => { setSearch(''); void loadPage(0, true) }} disabled={loading}
+              className="rounded-xl px-3 py-2 text-sm font-semibold text-primary hover:bg-primary/10 disabled:opacity-40">Tải mới nhất</button>
+            <button onClick={() => void loadPage(pageIndex - 1)} disabled={loading || pageIndex === 0}
+              className="rounded-xl bg-primary/10 px-4 py-2 text-sm font-semibold text-primary hover:bg-primary/20 disabled:opacity-40">Trang trước</button>
+            <button onClick={() => void loadPage(pageIndex + 1)} disabled={loading || !nextCursor}
+              className="rounded-xl bg-primary/10 px-4 py-2 text-sm font-semibold text-primary hover:bg-primary/20 disabled:opacity-40">Trang sau</button>
+            {error && <button onClick={() => void loadPage(0, true)} disabled={loading}
+              className="rounded-xl px-3 py-2 text-sm font-semibold text-error">Thử lại từ đầu</button>}
           </div>
-        )}
+        </nav>
       </div>
 
       {detail && <ActivityDetailModal log={detail} onClose={() => setDetail(null)} />}
@@ -253,7 +283,7 @@ function ActivityDetailModal({ log, onClose }: { log: ActivityLog; onClose: () =
     try { return JSON.stringify(v, null, 2) } catch { return String(v) }
   }
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="responsive-dialog fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
       <div onClick={e => e.stopPropagation()}
         className="bg-surface rounded-2xl shadow-xl w-full max-w-3xl max-h-[92vh] flex flex-col">
         <div className="p-6 border-b border-outline-variant/10 flex items-start justify-between gap-3">

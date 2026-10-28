@@ -12,6 +12,7 @@ import classRoutes from './routes/classes'
 import scheduleRoutes from './routes/schedules'
 import sessionRoutes from './routes/sessions'
 import tuitionRoutes from './routes/tuition'
+import misaInvoiceCron from './routes/misaInvoiceCron'
 import teacherRoutes from './routes/teachers'
 import dashboardRoutes from './routes/dashboard'
 import { notificationRouter, webhookRouter } from './routes/notifications'
@@ -67,6 +68,7 @@ app.use('/api/subjects',   subjectRoutes)
 app.use('/api/classes',    classRoutes)
 app.use('/api/schedules',  scheduleRoutes)
 app.use('/api/sessions',   sessionRoutes)
+app.use('/api/tuition',    misaInvoiceCron)
 app.use('/api/tuition',    tuitionRoutes)
 app.use('/api/teachers',       teacherRoutes)
 app.use('/api/notifications',  notificationRouter)

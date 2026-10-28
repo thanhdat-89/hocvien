@@ -23,7 +23,12 @@ test('lost-response reconciliation reads canonical fee, payments and invoice wit
   assert.equal(result.invoiceDraft.status,'DRAFT_CREATED');assert.equal(result.invoiceDraft.refId,'ref1')
   values.delete('misaInvoices/f1')
   result=await getTuitionWorkflowResult(input)
-  assert.equal(result.invoiceDraft.status,'OUTCOME_UNKNOWN','absence of metadata is not confirmation of a failed invoice')
+  assert.equal(result.invoiceDraft.status,'SKIPPED_BEFORE_INVOICE_START')
+  assert.equal(result.invoiceDraft.enabled,false)
+  fee.billingMonth=10
+  result=await getTuitionWorkflowResult({...input,month:10})
+  assert.equal(result.invoiceDraft.status,'OUTCOME_UNKNOWN','eligible fees without metadata still need reconciliation')
+  fee.billingMonth=7
   await assert.rejects(getTuitionWorkflowResult({...input,month:10,recordId:'f1'}),e=>e.status===409)
   duplicates=true;await assert.rejects(getTuitionWorkflowResult(input),e=>e.status===409)
   duplicates=false;values.delete('tuitionRecords/f1');assert.equal(await getTuitionWorkflowResult(input),null)

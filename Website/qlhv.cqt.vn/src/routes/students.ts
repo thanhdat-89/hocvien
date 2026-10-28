@@ -614,18 +614,21 @@ router.get('/:id/schedule', async (req: AuthRequest, res: Response, next: NextFu
     sessionsByClass.forEach((sessions, idx) => {
       const cid = classIds[idx]
       const cls = classMap[cid] || {}
-      const enroll = enrollments.find(e => e.classId === cid)
+      // A student can leave and rejoin the same class. Match each session to
+      // an enrollment covering its date, rather than the first stored record.
+      const classEnrollments = enrollments.filter(e => e.classId === cid)
+        .sort((a, b) => Number(b.status === 'ACTIVE') - Number(a.status === 'ACTIVE')
+          || (b.enrollmentDate || '').localeCompare(a.enrollmentDate || '')
+          || a.id.localeCompare(b.id))
 
       sessions
-        .filter((s: any) => {
-          if (!s.sessionDate || !s.sessionDate.startsWith(monthStr)) return false
-          // Không hiển thị buổi trước ngày đăng ký
-          if (enroll?.enrollmentDate && s.sessionDate < enroll.enrollmentDate) return false
-          // Không hiển thị buổi sau ngày nghỉ (với enrollment đã drop)
-          if (enroll?.status === 'DROPPED' && enroll.dropDate && s.sessionDate > enroll.dropDate) return false
-          return true
-        })
         .forEach((s: any) => {
+          if (!s.sessionDate || !s.sessionDate.startsWith(monthStr)) return
+          const enroll = classEnrollments.find(e =>
+            (!e.enrollmentDate || s.sessionDate >= e.enrollmentDate)
+            && (e.status !== 'DROPPED' || !e.dropDate || s.sessionDate <= e.dropDate)
+          )
+          if (!enroll) return
           // Học phí buổi: ưu tiên customTuitionRate của enrollment, fallback về class tuitionRate
           const rate = (enroll?.customTuitionRate as number) || classRateForMonth(cls, month, year)
           allSessions.push({

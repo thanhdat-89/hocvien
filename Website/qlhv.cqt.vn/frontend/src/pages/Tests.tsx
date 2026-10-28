@@ -143,7 +143,7 @@ export default function Tests() {
     <div className="space-y-6">
       <TopBar title="Điểm kiểm tra" />
 
-      <div className="bg-surface rounded-3xl p-6 md:p-8 shadow-sm">
+      <div className="page-content bg-surface rounded-3xl p-6 md:p-8 shadow-sm">
         <div className="flex items-start justify-between gap-3 mb-1 flex-wrap">
           <div>
             <p className="text-[10px] uppercase tracking-widest text-primary font-bold mb-1">Đánh giá theo tháng</p>
@@ -283,7 +283,7 @@ export default function Tests() {
         const row = rows.find(r => r.id === notesOpen)
         if (!row) return null
         return (
-          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setNotesOpen(null)}>
+          <div className="responsive-dialog fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setNotesOpen(null)}>
             <div onClick={e => e.stopPropagation()} className="bg-surface rounded-2xl shadow-xl w-full max-w-md">
               <div className="p-5 border-b border-outline-variant/10">
                 <h3 className="font-bold text-base text-on-surface">Ghi chú tháng {month}/{year}</h3>

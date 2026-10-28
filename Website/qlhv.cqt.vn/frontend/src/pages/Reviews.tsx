@@ -221,7 +221,7 @@ export default function Reviews() {
     <div className="space-y-6">
       <TopBar title="Nhận xét học viên" />
 
-      <div className="bg-surface rounded-3xl p-6 md:p-8 shadow-sm">
+      <div className="page-content bg-surface rounded-3xl p-6 md:p-8 shadow-sm">
         <p className="text-[10px] uppercase tracking-widest text-primary font-bold mb-1">Đánh giá định kỳ</p>
         <h2 className="font-headline text-3xl font-black text-on-surface mb-6">Nhận xét học viên</h2>
 
@@ -439,7 +439,7 @@ export default function Reviews() {
                       >
                         {r.saving ? 'progress_activity' : 'edit'}
                       </span>
-                      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center gap-2 touch-actions opacity-0 group-hover:opacity-100 max-lg:opacity-100 focus-within:opacity-100 transition-opacity">
                         <button
                           onClick={() => navigate(`/students/${r.studentId}`)}
                           className="p-2 text-outline hover:text-primary hover:bg-primary-container/10 rounded-lg transition-all"
