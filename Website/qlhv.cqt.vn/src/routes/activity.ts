@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express'
-import { db, C, toDocs, admin } from '../lib/firebase'
+import type { Prisma } from '@prisma/client'
+import { prisma, api } from '../lib/db'
 import { createError } from '../middleware/errorHandler'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
@@ -18,22 +19,9 @@ router.get('/cleanup', async (req: Request, res: Response, next: NextFunction) =
 
     const cutoff = new Date()
     cutoff.setMonth(cutoff.getMonth() - 12)
-    const cutoffIso = cutoff.toISOString()
 
-    let totalDeleted = 0
-    while (true) {
-      const snap = await db.collection(C.ACTIVITY_LOGS)
-        .where('createdAt', '<', cutoffIso)
-        .limit(400)
-        .get()
-      if (snap.empty) break
-      const batch = db.batch()
-      snap.docs.forEach(d => batch.delete(d.ref))
-      await batch.commit()
-      totalDeleted += snap.size
-      if (snap.size < 400) break
-    }
-    res.json({ deleted: totalDeleted, cutoff: cutoffIso })
+    const { count } = await prisma.activityLog.deleteMany({ where: { createdAt: { lt: cutoff } } })
+    res.json({ deleted: count, cutoff: cutoff.toISOString() })
   } catch (err) { next(err) }
 })
 
@@ -79,19 +67,21 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
       }
     }
 
-    let q: FirebaseFirestore.Query = db.collection(C.ACTIVITY_LOGS)
-      .orderBy('createdAt', 'desc').orderBy(admin.firestore.FieldPath.documentId(), 'desc')
-    if (from) q = q.where('createdAt', '>=', from)
-    if (to)   q = q.where('createdAt', '<=', to)
-    if (userId)       q = q.where('userId', '==', userId)
-    if (resourceType) q = q.where('resourceType', '==', resourceType)
-    if (action)       q = q.where('action', '==', action)
+    const where: Prisma.ActivityLogWhereInput = { AND: [] }
+    const and = where.AND as Prisma.ActivityLogWhereInput[]
+    if (from) and.push({ createdAt: { gte: new Date(from) } })
+    if (to)   and.push({ createdAt: { lte: new Date(to) } })
+    if (userId)       and.push({ userId })
+    if (resourceType) and.push({ resourceType })
+    if (action)       and.push({ action })
+    // Keyset: sau (createdAt, id) theo thứ tự giảm dần; con trỏ cũ chỉ có createdAt.
+    if (after) {
+      const at = new Date(after[0])
+      and.push(after[1] ? { OR: [{ createdAt: { lt: at } }, { createdAt: at, id: { lt: after[1] } }] } : { createdAt: { lt: at } })
+    }
 
-    if (after) q = q.startAfter(...after)
-    q = q.limit(limit + 1)
-
-    const snap = await q.get()
-    const docs = toDocs<ActivityLogDoc>(snap)
+    const rows = await prisma.activityLog.findMany({ where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: limit + 1 })
+    const docs: ActivityLogDoc[] = api(rows)
     const hasMore = docs.length > limit
     const data = hasMore ? docs.slice(0, limit) : docs
     const last = data[data.length - 1]
@@ -105,10 +95,9 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
 router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
-    const doc = await db.collection(C.ACTIVITY_LOGS).doc(id).get()
-    if (!doc.exists) { res.status(404).json({ message: 'Không tìm thấy' }); return }
-    const data = doc.data() ?? {}
-    res.json({ id: doc.id, ...data })
+    const log = await prisma.activityLog.findUnique({ where: { id } })
+    if (!log) { res.status(404).json({ message: 'Không tìm thấy' }); return }
+    res.json(api(log))
   } catch (err) { next(err) }
 })
 

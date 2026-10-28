@@ -1,25 +1,16 @@
 import { Router, Response, NextFunction } from 'express'
-import { db, C, s, toDocs } from '../lib/firebase'
+import { prisma, api } from '../lib/db'
+import { s } from '../lib/params'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
-import { currentClassNames } from '../lib/classDisplayNames'
 
 const router = Router()
 router.use(authenticate)
 
-const now = () => new Date().toISOString()
-
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/
 
-interface StudentReview {
-  id: string
-  month: string
-  content: string
-  teacherId?: string
-  teacherName?: string
-  createdAt: string
-  updatedAt: string
-}
+// API cũ dùng tháng làm id nhận xét (Firestore: students/{id}/reviews/{YYYY-MM}).
+const toApi = <T extends { month: string; studentId: string }>({ studentId: _, ...r }: T) => api({ ...r, id: r.month })
 
 // GET /api/reviews?month=YYYY-MM — bảng nhận xét cho toàn bộ học viên đang học
 router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -30,38 +21,23 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
       return
     }
 
-    const [studentsSnap, enrollSnap, reviewsSnap] = await Promise.all([
-      db.collection(C.STUDENTS).where('status', '==', 'ACTIVE').get(),
-      db.collection(C.ENROLLMENTS).where('status', '==', 'ACTIVE').get(),
-      db.collectionGroup('reviews').where('month', '==', month).get(),
-    ])
-    const classNames = await currentClassNames(enrollSnap.docs.map(doc => String(doc.data().classId || '')))
-
-    const enrollByStudent = new Map<string, { classId: string; className: string }[]>()
-    enrollSnap.docs.forEach(d => {
-      const e = d.data() as any
-      if (!e.studentId || !e.classId) return
-      const list = enrollByStudent.get(e.studentId) ?? []
-      list.push({ classId: e.classId, className: classNames.get(e.classId) || e.className || '' })
-      enrollByStudent.set(e.studentId, list)
+    const students = await prisma.student.findMany({
+      where: { status: 'ACTIVE' },
+      select: {
+        id: true, fullName: true, gradeLevel: true,
+        enrollments: { where: { status: 'ACTIVE' }, select: { classId: true, class: { select: { name: true } } } },
+        reviews: { where: { month }, select: { content: true, teacherName: true, updatedAt: true } },
+      },
     })
 
-    const reviewByStudent = new Map<string, any>()
-    reviewsSnap.docs.forEach(d => {
-      const sid = d.ref.parent.parent?.id
-      if (sid) reviewByStudent.set(sid, { id: d.id, ...d.data() })
-    })
-
-    const rows = studentsSnap.docs.map(d => {
-      const stu = d.data() as any
-      const classes = enrollByStudent.get(d.id) ?? []
-      const r = reviewByStudent.get(d.id)
+    const rows = students.map(stu => {
+      const r = stu.reviews[0]
       return {
-        studentId: d.id,
+        studentId: stu.id,
         studentName: stu.fullName,
         gradeLevel: stu.gradeLevel ?? null,
-        classes,
-        review: r ? { content: r.content ?? '', teacherName: r.teacherName ?? '', updatedAt: r.updatedAt ?? '' } : null,
+        classes: stu.enrollments.map(e => ({ classId: e.classId, className: e.class.name })),
+        review: r ? { content: r.content ?? '', teacherName: r.teacherName ?? '', updatedAt: r.updatedAt.toISOString() } : null,
       }
     }).sort((a, b) => {
       const ga = a.gradeLevel ?? 99
@@ -77,10 +53,8 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
 // GET /api/reviews/:studentId — danh sách nhận xét của 1 học viên (mới nhất trước)
 router.get('/:studentId', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const studentId = s(req.params.studentId)
-    const snap = await db.collection(C.STUDENTS).doc(studentId)
-      .collection('reviews').orderBy('month', 'desc').get()
-    res.json(toDocs<StudentReview>(snap))
+    const reviews = await prisma.studentReview.findMany({ where: { studentId: s(req.params.studentId) }, orderBy: { month: 'desc' } })
+    res.json(reviews.map(toApi))
   } catch (err) { next(err) }
 })
 
@@ -93,10 +67,9 @@ router.get('/:studentId/:month', async (req: AuthRequest, res: Response, next: N
       res.status(400).json({ message: 'Tháng không hợp lệ (YYYY-MM)' })
       return
     }
-    const doc = await db.collection(C.STUDENTS).doc(studentId)
-      .collection('reviews').doc(month).get()
-    if (!doc.exists) { res.status(404).json({ message: 'Chưa có nhận xét' }); return }
-    res.json({ id: doc.id, ...doc.data() })
+    const review = await prisma.studentReview.findUnique({ where: { studentId_month: { studentId, month } } })
+    if (!review) { res.status(404).json({ message: 'Chưa có nhận xét' }); return }
+    res.json(toApi(review))
   } catch (err) { next(err) }
 })
 
@@ -116,22 +89,15 @@ router.put('/:studentId/:month', requireRole('ADMIN', 'STAFF', 'TEACHER'), async
       return
     }
 
-    const ref = db.collection(C.STUDENTS).doc(studentId)
-      .collection('reviews').doc(month)
-    const existing = await ref.get()
     const teacherId = req.user?.role === 'TEACHER' ? req.user.userId : (req.body?.teacherId || undefined)
     const teacherName = req.body?.teacherName || undefined
 
-    const data = {
-      month,
-      content,
-      teacherId,
-      teacherName,
-      updatedAt: now(),
-      ...(existing.exists ? {} : { createdAt: now() }),
-    }
-    await ref.set(data, { merge: true })
-    res.json({ id: month, ...data })
+    const review = await prisma.studentReview.upsert({
+      where: { studentId_month: { studentId, month } },
+      create: { id: `${studentId}_${month}`, studentId, month, content, teacherId, teacherName },
+      update: { content, teacherId, teacherName },
+    })
+    res.json(toApi(review))
   } catch (err) { next(err) }
 })
 
@@ -144,8 +110,7 @@ router.delete('/:studentId/:month', requireRole('ADMIN', 'STAFF', 'TEACHER'), as
       res.status(400).json({ message: 'Tháng không hợp lệ (YYYY-MM)' })
       return
     }
-    await db.collection(C.STUDENTS).doc(studentId)
-      .collection('reviews').doc(month).delete()
+    await prisma.studentReview.deleteMany({ where: { studentId, month } })
     res.json({ message: 'Đã xoá nhận xét' })
   } catch (err) { next(err) }
 })

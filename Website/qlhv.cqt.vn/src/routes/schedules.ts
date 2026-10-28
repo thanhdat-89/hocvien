@@ -1,12 +1,15 @@
 import { Router, Request, Response, NextFunction } from 'express'
-import { db, C, s, toDocs, toObj } from '../lib/firebase'
+import { prisma, api, newId, toDay } from '../lib/db'
+import { s } from '../lib/params'
 import { authenticate, requireRole } from '../middleware/auth'
-import { currentClassNames, displayClassName } from '../lib/classDisplayNames'
 import { AuthRequest } from '../types'
-import type { Schedule } from '../types/models'
 import { generateSessionsFromSchedule, generateSessionsForClassMonth } from '../services/sessionGenerator'
 
 const router = Router()
+
+// className lấy theo lớp hiện tại (trước đây là bản denorm + currentClassNames).
+const withClassName = { class: { select: { name: true } } } as const
+const toApi = <T extends { class: { name: string } }>({ class: cls, ...row }: T) => api({ ...row, className: cls.name })
 
 // Cron: sinh buổi học cho tháng hiện tại + tháng kế tiếp cho mọi lớp ACTIVE.
 // Đăng ký TRƯỚC authenticate để Vercel Cron (Authorization: Bearer <CRON_SECRET>) gọi được.
@@ -18,8 +21,8 @@ router.get('/cron/generate-monthly', async (req: Request, res: Response, next: N
       res.status(401).json({ message: 'Unauthorized' }); return
     }
 
-    const classesSnap = await db.collection(C.CLASSES).where('status', '==', 'ACTIVE').get()
-    const classIds = classesSnap.docs.map(d => d.id)
+    const classes = await prisma.class.findMany({ where: { status: 'ACTIVE' }, select: { id: true } })
+    const classIds = classes.map(c => c.id)
 
     const now = new Date()
     const cur = { year: now.getFullYear(), month: now.getMonth() + 1 }
@@ -43,17 +46,12 @@ router.get('/cron/generate-monthly', async (req: Request, res: Response, next: N
 })
 
 router.use(authenticate)
-const now = () => new Date().toISOString()
 
 router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { classId } = req.query as Record<string, string>
-    let query = db.collection(C.SCHEDULES) as FirebaseFirestore.Query
-    if (classId) query = query.where('classId', '==', classId)
-    const snap = await query.get()
-    const schedules = toDocs<Schedule>(snap)
-    const classNames = await currentClassNames(schedules.map(schedule => schedule.classId))
-    res.json(schedules.map(schedule => displayClassName(schedule, classNames)))
+    const schedules = await prisma.schedule.findMany({ where: classId ? { classId } : {}, include: withClassName })
+    res.json(schedules.map(toApi))
   } catch (err) { next(err) }
 })
 
@@ -61,41 +59,40 @@ router.post('/', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Re
   try {
     const { classId, dayOfWeek, startTime, endTime, effectiveFrom, effectiveTo } = req.body
 
-    const classDoc = await db.collection(C.CLASSES).doc(classId).get()
-    if (!classDoc.exists) { res.status(404).json({ message: 'Không tìm thấy lớp' }); return }
+    const cls = await prisma.class.findUnique({ where: { id: classId }, select: { id: true } })
+    if (!cls) { res.status(404).json({ message: 'Không tìm thấy lớp' }); return }
 
-    const data: Record<string, unknown> = {
-      classId, className: classDoc.data()!.name as string,
-      dayOfWeek, startTime, endTime,
-      effectiveFrom,
-      createdAt: now(),
-    }
-    if (effectiveTo) data.effectiveTo = effectiveTo
-
-    const ref = await db.collection(C.SCHEDULES).add(data)
-    res.status(201).json({ id: ref.id, ...data })
+    const schedule = await prisma.schedule.create({
+      data: {
+        id: newId(), classId, dayOfWeek, startTime, endTime,
+        effectiveFrom: toDay(effectiveFrom)!, effectiveTo: toDay(effectiveTo),
+      },
+      include: withClassName,
+    })
+    res.status(201).json(toApi(schedule))
   } catch (err) { next(err) }
 })
 
 router.put('/:id', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { dayOfWeek, startTime, endTime, effectiveFrom, effectiveTo } = req.body
-    const updates: Record<string, unknown> = {}
-    if (dayOfWeek !== undefined) updates.dayOfWeek = dayOfWeek
-    if (startTime !== undefined) updates.startTime = startTime
-    if (endTime !== undefined) updates.endTime = endTime
-    if (effectiveFrom !== undefined) updates.effectiveFrom = effectiveFrom
-    if (effectiveTo !== undefined) updates.effectiveTo = effectiveTo
-
-    await db.collection(C.SCHEDULES).doc(s(req.params.id)).update(updates)
-    const updated = toObj<Schedule>(await db.collection(C.SCHEDULES).doc(s(req.params.id)).get())
-    res.json(updated)
+    const updated = await prisma.schedule.update({
+      where: { id: s(req.params.id) },
+      data: {
+        dayOfWeek, startTime, endTime,
+        effectiveFrom: effectiveFrom === undefined ? undefined : toDay(effectiveFrom)!,
+        effectiveTo: effectiveTo === undefined ? undefined : toDay(effectiveTo),
+      },
+      include: withClassName,
+    })
+    res.json(toApi(updated))
   } catch (err) { next(err) }
 })
 
 router.delete('/:id', requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    await db.collection(C.SCHEDULES).doc(s(req.params.id)).delete()
+    // Buổi đã sinh vẫn giữ lại; khoá ngoại scheduleId tự về NULL.
+    await prisma.schedule.delete({ where: { id: s(req.params.id) } })
     res.json({ message: 'Đã xoá lịch học' })
   } catch (err) { next(err) }
 })

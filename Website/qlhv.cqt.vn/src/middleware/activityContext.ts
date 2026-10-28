@@ -1,6 +1,6 @@
 import { Response, NextFunction } from 'express'
 import { AuthRequest } from '../types'
-import { db, C } from '../lib/firebase'
+import { prisma, fromClassId } from '../lib/db'
 import { ActivityHint } from './activityLog'
 
 type Data = Record<string, any>
@@ -8,10 +8,26 @@ const object = (value: unknown): Data => value && typeof value === 'object' && !
 const text = (value: unknown) => typeof value === 'string' ? value.trim() : ''
 const reserved = new Set(['calculate', 'calculate-bulk', 'toggle-paid', 'bulk', 'bulk-delete', 'student-promotions', 'promotions', 'payment', 'misa'])
 
-async function read(collection: string, id: unknown): Promise<Data> {
+// Đọc đủ trường nhận diện (tên học viên/lớp, tháng) cho mô tả nhật ký; trả {} khi không có.
+const names = { student: { select: { fullName: true } }, class: { select: { name: true } } } as const
+const readers: Record<'students' | 'classes' | 'tuition' | 'payment' | 'studentPromotion', (id: string) => Promise<Data | null>> = {
+  students: id => prisma.student.findUnique({ where: { id }, select: { id: true, fullName: true } }),
+  classes: id => prisma.class.findUnique({ where: { id }, select: { id: true, name: true } }),
+  tuition: async id => {
+    const r = await prisma.tuitionRecord.findUnique({ where: { id }, include: names })
+    return r && { id: r.id, studentId: r.studentId, classId: fromClassId(r.classId), billingMonth: r.billingMonth, billingYear: r.billingYear,
+      studentName: r.student.fullName, className: r.class?.name ?? 'Học riêng' }
+  },
+  payment: id => prisma.payment.findUnique({ where: { id }, select: { id: true, tuitionRecordId: true, studentId: true } }),
+  studentPromotion: async id => {
+    const p = await prisma.studentPromotion.findUnique({ where: { id }, include: names })
+    return p && { id: p.id, studentId: p.studentId, classId: fromClassId(p.classId), studentName: p.student.fullName, className: p.class?.name ?? '' }
+  },
+}
+
+async function read(kind: keyof typeof readers, id: unknown): Promise<Data> {
   if (!text(id) || text(id).includes('/')) return {}
-  const doc = await db.collection(collection).doc(text(id)).get()
-  return doc.exists ? { ...doc.data(), id: doc.id } : {}
+  return (await readers[kind](text(id))) ?? {}
 }
 
 export function describeActivity(resource: string, path: string, method: string, body: Data, context: Data): ActivityHint {
@@ -52,18 +68,18 @@ export async function activityContext(req: AuthRequest, res: Response, next: Nex
   const body = object(req.body)
   let context: Data = { studentName: text(body.studentName), className: text(body.className), month: body.month, year: body.year }
   try {
-    const collection = resource === 'students' ? C.STUDENTS : resource === 'classes' ? C.CLASSES : C.TUITION_RECORDS
+    const kind = resource === 'students' ? 'students' : resource === 'classes' ? 'classes' : 'tuition'
     let entity: Data = {}
-    if (first && !reserved.has(first)) entity = await read(collection, first)
-    else if (resource === 'tuition' && first === 'payment' && second) entity = await read(C.PAYMENTS, second)
-    else if (resource === 'tuition' && first === 'student-promotions' && second && second !== 'direct') entity = await read(C.STUDENT_PROMOTIONS, second)
-    if (entity.tuitionRecordId) entity = { ...await read(C.TUITION_RECORDS, entity.tuitionRecordId), ...entity }
+    if (first && !reserved.has(first)) entity = await read(kind, first)
+    else if (resource === 'tuition' && first === 'payment' && second) entity = await read('payment', second)
+    else if (resource === 'tuition' && first === 'student-promotions' && second && second !== 'direct') entity = await read('studentPromotion', second)
+    if (entity.tuitionRecordId) entity = { ...await read('tuition', entity.tuitionRecordId), ...entity }
     const studentId = resource === 'students' ? entity.id : entity.studentId || body.studentId
     const classId = resource === 'classes' ? entity.id : entity.classId || body.classId
     const studentName = resource === 'students' ? text(entity.fullName || body.fullName) : text(entity.studentName) || context.studentName
     const className = resource === 'classes' ? text(entity.name || body.name) : text(entity.className) || context.className
-    context = { studentName: studentName || text((await read(C.STUDENTS, studentId)).fullName),
-      className: className || text((await read(C.CLASSES, classId)).name),
+    context = { studentName: studentName || text((await read('students', studentId)).fullName),
+      className: className || text((await read('classes', classId)).name),
       month: entity.billingMonth || body.month, year: entity.billingYear || body.year, resourceId: entity.id }
   } catch (error) {
     console.error('[activityContext] lookup failed')

@@ -1,4 +1,5 @@
-import { db, C } from './firebase'
+import { Prisma } from '@prisma/client'
+import { prisma, newId } from './db'
 
 export type ActivityAction = 'CREATE' | 'UPDATE' | 'DELETE'
 
@@ -43,8 +44,8 @@ async function getUserName(userId: string): Promise<string> {
   const cached = userNameCache.get(userId)
   if (cached && cached.until > now) return cached.name
   try {
-    const doc = await db.collection(C.USERS).doc(userId).get()
-    const name = doc.exists ? ((doc.data() as { fullName?: string }).fullName ?? 'N/A') : 'Đã xoá'
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { fullName: true } })
+    const name = user ? (user.fullName ?? 'N/A') : 'Đã xoá'
     userNameCache.set(userId, { name, until: now + NAME_TTL })
     return name
   } catch {
@@ -52,22 +53,27 @@ async function getUserName(userId: string): Promise<string> {
   }
 }
 
+const toJson = (value: unknown) => value === undefined ? Prisma.JsonNull : sanitize(value) as Prisma.InputJsonValue
+
 export async function logActivity(input: ActivityLogInput): Promise<void> {
   const userName = await getUserName(input.userId)
-  await db.collection(C.ACTIVITY_LOGS).add({
-    createdAt: new Date().toISOString(),
-    userId: input.userId,
-    userName,
-    userRole: input.userRole,
-    action: input.action,
-    resourceType: input.resourceType,
-    resourceId: input.resourceId,
-    description: input.description,
-    method: input.method,
-    path: input.path,
-    statusCode: input.statusCode,
-    ip: input.ip,
-    before: sanitize(input.before),
-    after: sanitize(input.after),
+  await prisma.activityLog.create({
+    data: {
+      id: newId(),
+      createdAt: new Date(),
+      userId: input.userId,
+      userName,
+      userRole: input.userRole,
+      action: input.action,
+      resourceType: input.resourceType,
+      resourceId: input.resourceId,
+      description: input.description,
+      method: input.method,
+      path: input.path,
+      statusCode: input.statusCode,
+      ip: input.ip,
+      before: toJson(input.before),
+      after: toJson(input.after),
+    },
   })
 }

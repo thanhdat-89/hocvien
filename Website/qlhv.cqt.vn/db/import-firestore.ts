@@ -167,9 +167,10 @@ async function main() {
     await insert('parents', parentRows, rows => tx.parent.createMany({ data: rows }))
 
     await insert('student_reviews', coll('*/reviews').map(d => {
-      const x = pick('*/reviews', d, ['teacherId', 'month', 'content', 'createdAt', 'updatedAt'])
-      return { id: d.document_id, studentId: d.path.split('/')[1], teacherId: optFk(teachers, x.teacherId, 'reviews.teacherId', d.document_id),
-        month: x.month, content: x.content, createdAt: ts(x.createdAt), updatedAt: ts(x.updatedAt) ?? ts(x.createdAt) }
+      const x = pick('*/reviews', d, ['teacherId', 'teacherName', 'month', 'content', 'createdAt', 'updatedAt'])
+      const studentId = d.path.split('/')[1]
+      return { id: `${studentId}_${x.month ?? d.document_id}`, studentId, month: x.month ?? d.document_id, content: x.content ?? '',
+        teacherId: str(x.teacherId), teacherName: str(x.teacherName), createdAt: ts(x.createdAt), updatedAt: ts(x.updatedAt) ?? ts(x.createdAt) }
     }), rows => tx.studentReview.createMany({ data: rows }))
 
     await insert('promotions', coll('promotions').map(d => {
@@ -220,9 +221,9 @@ async function main() {
 
     await insert('private_sessions', coll('privateSchedules').map(d => {
       const x = pick('privateSchedules', d, ['studentId', 'studentName', 'sessionDate', 'startTime', 'endTime', 'teacherName', 'ratePerSession',
-        'status', 'notes', 'createdAt', 'updatedAt'])
+        'status', 'cancelReason', 'notes', 'createdAt', 'updatedAt'])
       return { id: d.document_id, studentId: x.studentId, sessionDate: day(x.sessionDate), startTime: str(x.startTime), endTime: str(x.endTime),
-        teacherName: str(x.teacherName), ratePerSession: int(x.ratePerSession), status: x.status ?? 'SCHEDULED', notes: str(x.notes),
+        teacherName: str(x.teacherName), ratePerSession: int(x.ratePerSession), status: x.status ?? 'SCHEDULED', cancelReason: str(x.cancelReason), notes: str(x.notes),
         createdAt: ts(x.createdAt), updatedAt: ts(x.updatedAt) ?? ts(x.createdAt) }
     }), rows => tx.privateSession.createMany({ data: rows }))
 
@@ -375,9 +376,11 @@ async function main() {
     }), rows => tx.adminAlert.createMany({ data: rows }))
 
     await insert('notifications', coll('notifications').map(d => {
-      const x = pick('notifications', d, ['title', 'content', 'type', 'targetType', 'targetId', 'sendViaZalo', 'sentAt', 'createdById', 'createdAt'])
+      const x = pick('notifications', d, ['title', 'content', 'type', 'targetType', 'targetId', 'sendViaZalo', 'zaloQueued', 'zaloSentCount',
+        'zaloTotalTargets', 'sentAt', 'createdById', 'createdAt'])
       return { id: d.document_id, title: x.title, content: x.content, type: x.type, targetType: x.targetType, targetId: str(x.targetId),
-        sendViaZalo: !!x.sendViaZalo, sentAt: ts(x.sentAt), createdById: str(x.createdById), createdAt: ts(x.createdAt) }
+        sendViaZalo: !!x.sendViaZalo, zaloQueued: !!x.zaloQueued, zaloSentCount: x.zaloSentCount ?? null, zaloTotalTargets: x.zaloTotalTargets ?? null,
+        sentAt: ts(x.sentAt), createdById: str(x.createdById), createdAt: ts(x.createdAt) }
     }), rows => tx.notification.createMany({ data: rows }))
 
     // Lead: chatbot Zalo (camelCase) và cổng CTV cũ (snake_case).
@@ -387,17 +390,17 @@ async function main() {
       const ctv = 'collaborator_id' in x || 'parent_name' in x
       const created = ts(x.createdAt) ?? ts(x.created_at)
       return { id: d.document_id, source: str(x.source) ?? (ctv ? 'ctv' : 'zalo'), zaloUserId: str(x.zaloUserId), collaboratorId: str(x.collaborator_id),
-        parentName: str(x.parentName) ?? str(x.parent_name), parentPhone: str(x.phone) ?? str(x.parent_phone),
+        parentName: str(x.parentName) ?? str(x.parent_name), phone: str(x.phone) ?? str(x.parent_phone),
         studentName: str(x.studentName) ?? str(x.student_name), gradeLevel: str(x.gradeLevel), status: x.status ?? 'NEW', chatStep: int(x.chatStep),
         note: str(x.note), createdAt: created, updatedAt: ts(x.updatedAt) ?? ts(x.updated_at) ?? created }
     }), rows => tx.lead.createMany({ data: rows }))
 
     await insert('activity_logs', coll('activityLogs').map(d => {
       const x = pick('activityLogs', d, ['userId', 'userName', 'userRole', 'action', 'resourceType', 'resourceId', 'description', 'method', 'path',
-        'statusCode', 'ip', 'after', 'createdAt'])
+        'statusCode', 'ip', 'before', 'after', 'createdAt'])
       return { id: d.document_id, userId: x.userId ?? '', userName: x.userName ?? '', userRole: x.userRole ?? '', action: x.action,
         resourceType: x.resourceType ?? '', resourceId: str(x.resourceId), description: x.description ?? '', method: x.method ?? '', path: x.path ?? '',
-        statusCode: int(x.statusCode), ip: x.ip ?? '', after: json(x.after), createdAt: ts(x.createdAt) }
+        statusCode: int(x.statusCode), ip: str(x.ip) ?? null, before: json(x.before), after: json(x.after), createdAt: ts(x.createdAt) }
     }), rows => tx.activityLog.createMany({ data: rows }))
 
     await insert('class_integrity_audits', coll('classIntegrityAudits').map(d => {

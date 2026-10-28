@@ -1,51 +1,35 @@
-import { db, C, toDocs } from '../lib/firebase'
-import type { Schedule } from '../types/models'
+import { prisma, newId, toDay } from '../lib/db'
 
 const DAY_OF_WEEK_MAP: Record<string, number> = {
   SUNDAY: 0, MONDAY: 1, TUESDAY: 2, WEDNESDAY: 3,
   THURSDAY: 4, FRIDAY: 5, SATURDAY: 6,
 }
 
-const now = () => new Date().toISOString()
+const ymd = (d: Date) => d.toISOString().slice(0, 10)
+
+/** Tập ngày nghỉ lễ "YYYY-MM-DD" (theo danh sách `dates`, hoặc khoảng startDate–endDate). */
+async function holidayDates(): Promise<Set<string>> {
+  const set = new Set<string>()
+  for (const h of await prisma.holiday.findMany()) {
+    if (h.dates.length) { h.dates.forEach(d => set.add(ymd(d))); continue }
+    for (const cur = new Date(h.startDate); cur <= h.endDate; cur.setUTCDate(cur.getUTCDate() + 1)) set.add(ymd(cur))
+  }
+  return set
+}
 
 /**
  * Generate sessions từ 1 schedule cho khoảng [fromDate, toDate]
- * Bỏ qua ngày lễ, dùng skipDuplicates qua Firestore batch
+ * Bỏ qua ngày lễ; buổi đã có (cùng lớp, ngày, giờ bắt đầu) được unique index bỏ qua.
  */
 export async function generateSessionsFromSchedule(
   scheduleId: string,
   fromDate: Date,
   toDate: Date
 ): Promise<number> {
-  const scheduleDoc = await db.collection(C.SCHEDULES).doc(scheduleId).get()
-  if (!scheduleDoc.exists) throw new Error('Không tìm thấy lịch học')
+  const schedule = await prisma.schedule.findUnique({ where: { id: scheduleId }, include: { class: true } })
+  if (!schedule) throw new Error('Không tìm thấy lịch học')
 
-  const schedule = { id: scheduleDoc.id, ...scheduleDoc.data() } as Schedule
-
-  // Lấy thông tin class
-  const classDoc = await db.collection(C.CLASSES).doc(schedule.classId).get()
-  if (!classDoc.exists) throw new Error('Không tìm thấy lớp học')
-  const cls = classDoc.data()!
-
-  // Lấy tất cả ngày lễ
-  const holidaysSnap = await db.collection(C.HOLIDAYS).get()
-  const holidaySet = new Set<string>()
-  holidaysSnap.docs.forEach(d => {
-    const data = d.data()
-    if (Array.isArray(data.dates)) {
-      data.dates.forEach((dt: string) => holidaySet.add(dt))
-    } else if (data.startDate && data.endDate) {
-      let cur = new Date(data.startDate + 'T00:00:00Z')
-      const end = new Date(data.endDate + 'T00:00:00Z')
-      while (cur <= end) {
-        holidaySet.add(cur.toISOString().slice(0, 10))
-        cur.setUTCDate(cur.getUTCDate() + 1)
-      }
-    } else if (data.date) {
-      holidaySet.add(data.date)
-    }
-  })
-
+  const holidaySet = await holidayDates()
   const targetDow = DAY_OF_WEEK_MAP[schedule.dayOfWeek]
   const sessionDates: string[] = []
 
@@ -53,53 +37,27 @@ export async function generateSessionsFromSchedule(
   while (current.getUTCDay() !== targetDow) current.setUTCDate(current.getUTCDate() + 1)
 
   while (current <= toDate) {
-    const dateStr = current.toISOString().slice(0, 10)
+    const dateStr = ymd(current)
     if (!holidaySet.has(dateStr)) sessionDates.push(dateStr)
     current.setUTCDate(current.getUTCDate() + 7)
   }
 
   if (sessionDates.length === 0) return 0
 
-  // Kiểm tra sessions đã tồn tại (tránh trùng)
-  const existing = await db.collection(C.SESSIONS)
-    .where('classId', '==', schedule.classId)
-    .where('startTime', '==', schedule.startTime)
-    .get()
-  const existingDates = new Set(existing.docs.map(d => d.data().sessionDate as string))
-
-  const toCreate = sessionDates.filter(d => !existingDates.has(d))
-  if (toCreate.length === 0) return 0
-
-  // Batch write (Firestore giới hạn 500 operations/batch)
-  const BATCH_SIZE = 490
-  let created = 0
-
-  for (let i = 0; i < toCreate.length; i += BATCH_SIZE) {
-    const batch = db.batch()
-    const chunk = toCreate.slice(i, i + BATCH_SIZE)
-
-    for (const dateStr of chunk) {
-      const ref = db.collection(C.SESSIONS).doc()
-      const sessionData: Record<string, unknown> = {
-        classId: schedule.classId,
-        className: cls.name as string,
-        scheduleId: schedule.id,
-        sessionDate: dateStr,
-        startTime: schedule.startTime,
-        endTime: schedule.endTime,
-        status: 'SCHEDULED',
-        createdAt: now(),
-        updatedAt: now(),
-      }
-      if (cls.teacherId) { sessionData.teacherId = cls.teacherId; sessionData.teacherName = cls.teacherName ?? '' }
-      batch.set(ref, sessionData)
-    }
-
-    await batch.commit()
-    created += chunk.length
-  }
-
-  return created
+  const { count } = await prisma.session.createMany({
+    data: sessionDates.map(dateStr => ({
+      id: newId(),
+      classId: schedule.classId,
+      teacherId: schedule.class.teacherId,
+      scheduleId: schedule.id,
+      sessionDate: toDay(dateStr)!,
+      startTime: schedule.startTime,
+      endTime: schedule.endTime,
+      status: 'SCHEDULED' as const,
+    })),
+    skipDuplicates: true,
+  })
+  return count
 }
 
 /**
@@ -113,21 +71,18 @@ export async function generateSessionsForClassMonth(
   const fromDate = new Date(Date.UTC(year, month - 1, 1))
   const toDate = new Date(Date.UTC(year, month, 0))
 
-  const fromStr = fromDate.toISOString().slice(0, 10)
-  const toStr = toDate.toISOString().slice(0, 10)
-
-  const schedulesSnap = await db.collection(C.SCHEDULES)
-    .where('classId', '==', classId)
-    .get()
-
-  const schedules = toDocs<Schedule>(schedulesSnap).filter(s =>
-    s.effectiveFrom <= toStr && (!s.effectiveTo || s.effectiveTo >= fromStr)
-  )
+  const schedules = await prisma.schedule.findMany({
+    where: {
+      classId,
+      effectiveFrom: { lte: toDate },
+      OR: [{ effectiveTo: null }, { effectiveTo: { gte: fromDate } }],
+    },
+  })
 
   let total = 0
   for (const s of schedules) {
-    const start = s.effectiveFrom > fromStr ? new Date(s.effectiveFrom) : fromDate
-    const end = s.effectiveTo && s.effectiveTo < toStr ? new Date(s.effectiveTo) : toDate
+    const start = s.effectiveFrom > fromDate ? s.effectiveFrom : fromDate
+    const end = s.effectiveTo && s.effectiveTo < toDate ? s.effectiveTo : toDate
     total += await generateSessionsFromSchedule(s.id, start, end)
   }
   return total

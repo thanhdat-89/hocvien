@@ -159,7 +159,6 @@ model Teacher {
   sessions           Session[]
   attendances        TeacherAttendance[] @relation("attendanceTeacher")
   substituteSessions TeacherAttendance[] @relation("attendanceSubstitute")
-  reviews            StudentReview[]
 
   @@map("teachers")
 }
@@ -214,20 +213,21 @@ model Parent {
   @@map("parents")
 }
 
-/// Firestore: students/{id}/reviews — nhận xét theo tháng.
+/// Firestore: students/{id}/reviews/{YYYY-MM} — một nhận xét mỗi học viên mỗi tháng.
 model StudentReview {
-  id        String   @id
-  studentId String
-  teacherId String?
-  month     String // "YYYY-MM"
-  content   String
-  createdAt DateTime @default(now()) @db.Timestamptz(3)
-  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+  id          String   @id
+  studentId   String
+  month       String // "YYYY-MM"
+  content     String
+  /// ID người viết: userId khi giáo viên tự viết, hoặc giá trị client gửi — không có khoá ngoại.
+  teacherId   String?
+  teacherName String?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
 
-  student Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  teacher Teacher? @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
-  @@index([studentId, month])
+  @@unique([studentId, month])
   @@map("student_reviews")
 }
 
@@ -367,6 +367,7 @@ model PrivateSession {
   teacherName    String?
   ratePerSession Int
   status         SessionStatus @default(SCHEDULED)
+  cancelReason   String?
   notes          String?
   createdAt      DateTime      @default(now()) @db.Timestamptz(3)
   updatedAt      DateTime      @updatedAt @db.Timestamptz(3)
@@ -784,6 +785,10 @@ model Notification {
   targetType  String // ALL | CLASS | STUDENT
   targetId    String?
   sendViaZalo Boolean   @default(false)
+  /// Đánh dấu chờ gửi khi Zalo OA chưa cấu hình; thống kê lần gửi gần nhất.
+  zaloQueued       Boolean @default(false)
+  zaloSentCount    Int?
+  zaloTotalTargets Int?
   sentAt      DateTime? @db.Timestamptz(3)
   createdById String?
   createdAt   DateTime  @default(now()) @db.Timestamptz(3)
@@ -795,10 +800,11 @@ model Notification {
 model Lead {
   id             String   @id
   source         String? // zalo | ctv | ...
-  zaloUserId     String?
+  /// Một lead mỗi người dùng Zalo (chatbot tìm-hoặc-tạo theo trường này).
+  zaloUserId     String?  @unique
   collaboratorId String?
   parentName     String?
-  parentPhone    String?
+  phone          String?
   studentName    String?
   gradeLevel     String?
   /// Giá trị gốc giữ nguyên (NEW, COLLECTING..., hoặc "Chờ tư vấn" từ CTV).
@@ -808,7 +814,6 @@ model Lead {
   createdAt      DateTime @db.Timestamptz(3)
   updatedAt      DateTime @db.Timestamptz(3)
 
-  @@index([zaloUserId])
   @@map("leads")
 }
 
@@ -826,7 +831,9 @@ model ActivityLog {
   method       String
   path         String
   statusCode   Int
-  ip           String
+  ip           String?
+  /// Dữ liệu trước/sau khi sửa (đã lọc khoá nhạy cảm) cho màn hình diff.
+  before       Json?
   after        Json?
   createdAt    DateTime @db.Timestamptz(3)
 

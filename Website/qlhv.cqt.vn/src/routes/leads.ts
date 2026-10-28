@@ -1,8 +1,8 @@
 import { Router, Response, NextFunction } from 'express'
-import { db, C, toDocs, paginate, s } from '../lib/firebase'
+import { prisma, api } from '../lib/db'
+import { s } from '../lib/params'
 import { authenticate } from '../middleware/auth'
 import { AuthRequest } from '../types'
-import type { Lead } from '../types/models'
 
 const router = Router()
 router.use(authenticate)
@@ -13,29 +13,29 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
     const page   = Math.max(1, parseInt(req.query.page   as string) || 1)
     const limit  = Math.min(50, parseInt(req.query.limit  as string) || 20)
     const status = req.query.status as string | undefined
+    const where = status ? { status } : {}
 
-    let query: FirebaseFirestore.Query = db.collection(C.LEADS).orderBy('createdAt', 'desc')
-    if (status) query = query.where('status', '==', status)
-
-    const snap = await query.get()
-    const all = toDocs<Lead>(snap)
-    res.json(paginate(all, page, limit))
+    const [total, data] = await prisma.$transaction([
+      prisma.lead.count({ where }),
+      prisma.lead.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit }),
+    ])
+    res.json({ data: api(data), total, page, limit, totalPages: Math.ceil(total / limit) })
   } catch (err) { next(err) }
 })
 
 // GET /api/leads/stats — Thống kê nhanh
 router.get('/stats', async (_req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const snap = await db.collection(C.LEADS).get()
-    const leads = snap.docs.map(d => d.data() as Lead)
+    const groups = await prisma.lead.groupBy({ by: ['status'], _count: { _all: true } })
+    const count = (...statuses: string[]) => groups.filter(g => statuses.includes(g.status)).reduce((n, g) => n + g._count._all, 0)
 
     const stats = {
-      total: leads.length,
-      new: leads.filter(l => l.status === 'NEW' || l.status === 'COLLECTING').length,
-      completed: leads.filter(l => l.status === 'COMPLETED').length,
-      contacted: leads.filter(l => l.status === 'CONTACTED').length,
-      enrolled: leads.filter(l => l.status === 'ENROLLED').length,
-      lost: leads.filter(l => l.status === 'LOST').length,
+      total: groups.reduce((n, g) => n + g._count._all, 0),
+      new: count('NEW', 'COLLECTING'),
+      completed: count('COMPLETED'),
+      contacted: count('CONTACTED'),
+      enrolled: count('ENROLLED'),
+      lost: count('LOST'),
     }
     res.json(stats)
   } catch (err) { next(err) }
@@ -44,33 +44,30 @@ router.get('/stats', async (_req: AuthRequest, res: Response, next: NextFunction
 // PATCH /api/leads/:id — Cập nhật trạng thái / ghi chú
 router.patch('/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const ref = db.collection(C.LEADS).doc(s(req.params.id))
-    const doc = await ref.get()
-    if (!doc.exists) {
+    const id = s(req.params.id)
+    const existing = await prisma.lead.findUnique({ where: { id }, select: { id: true } })
+    if (!existing) {
       res.status(404).json({ message: 'Không tìm thấy lead' })
       return
     }
 
     const { status, note } = req.body
-    const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() }
-    if (status) updates.status = status
-    if (note !== undefined) updates.note = note
-
-    await ref.update(updates)
-    res.json({ id: doc.id, ...doc.data(), ...updates })
+    const updated = await prisma.lead.update({
+      where: { id },
+      data: { status: status || undefined, note, updatedAt: new Date() },
+    })
+    res.json(api(updated))
   } catch (err) { next(err) }
 })
 
 // DELETE /api/leads/:id
 router.delete('/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const ref = db.collection(C.LEADS).doc(s(req.params.id))
-    const doc = await ref.get()
-    if (!doc.exists) {
+    const { count } = await prisma.lead.deleteMany({ where: { id: s(req.params.id) } })
+    if (!count) {
       res.status(404).json({ message: 'Không tìm thấy lead' })
       return
     }
-    await ref.delete()
     res.json({ message: 'Đã xoá' })
   } catch (err) { next(err) }
 })

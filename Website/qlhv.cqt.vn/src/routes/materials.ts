@@ -1,5 +1,7 @@
 import { Router, Response, NextFunction } from 'express'
-import { db, C, s, toDocs, toObj } from '../lib/firebase'
+import type { Prisma } from '@prisma/client'
+import { prisma, api, newId } from '../lib/db'
+import { s } from '../lib/params'
 import { cloudinary } from '../lib/cloudinary'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
@@ -7,8 +9,6 @@ import type { Material } from '../types/models'
 
 const router = Router()
 router.use(authenticate)
-
-const now = () => new Date().toISOString()
 
 const ALLOWED_MIME = new Set([
   'application/pdf',
@@ -27,7 +27,12 @@ const ALLOWED_MIME = new Set([
 ])
 const MAX_FILE_BYTES = 25 * 1024 * 1024 // 25MB
 
-function canMutate(material: Material, user: AuthRequest['user']): boolean {
+// uploaderName lấy theo tài khoản hiện tại (trước đây là bản denorm lúc tải lên).
+const withUploader = { uploader: { select: { fullName: true } } } as const
+type MaterialRow = Prisma.MaterialGetPayload<{ include: typeof withUploader }>
+const toApi = ({ uploader, ...m }: MaterialRow) => api({ ...m, uploaderName: uploader?.fullName ?? 'Giáo viên' })
+
+function canMutate(material: { uploaderId: string | null }, user: AuthRequest['user']): boolean {
   if (!user) return false
   if (user.role === 'ADMIN' || user.role === 'STAFF') return true
   return user.userId === material.uploaderId
@@ -43,7 +48,7 @@ router.post('/upload-signature', requireRole('ADMIN', 'STAFF', 'TEACHER'), async
       res.status(400).json({ message: `File quá ${Math.floor(MAX_FILE_BYTES / 1024 / 1024)}MB` }); return
     }
 
-    const id = db.collection(C.MATERIALS).doc().id
+    const id = newId()
     const folder = 'materials'
     const publicId = `${folder}/${id}`
     const timestamp = Math.floor(Date.now() / 1000)
@@ -72,13 +77,12 @@ router.post('/upload-signature', requireRole('ADMIN', 'STAFF', 'TEACHER'), async
 router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { studentId, classId, audienceType } = req.query as Record<string, string>
-    let q: FirebaseFirestore.Query = db.collection(C.MATERIALS)
-    if (audienceType) q = q.where('audienceType', '==', audienceType)
-    if (studentId) q = q.where('audienceType', '==', 'STUDENT').where('audienceIds', 'array-contains', studentId)
-    else if (classId) q = q.where('audienceType', '==', 'CLASS').where('audienceIds', 'array-contains', classId)
-    const snap = await q.get()
-    const materials = toDocs<Material>(snap).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    res.json(materials)
+    const where: Prisma.MaterialWhereInput = {}
+    if (audienceType) where.audienceType = audienceType
+    if (studentId) Object.assign(where, { audienceType: 'STUDENT', audienceIds: { has: studentId } })
+    else if (classId) Object.assign(where, { audienceType: 'CLASS', audienceIds: { has: classId } })
+    const materials = await prisma.material.findMany({ where, include: withUploader, orderBy: { createdAt: 'desc' } })
+    res.json(materials.map(toApi))
   } catch (err) { next(err) }
 })
 
@@ -101,79 +105,73 @@ router.post('/', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthReque
       }
     }
 
-    const userDoc = await db.collection(C.USERS).doc(req.user!.userId).get()
-    const uploaderName = userDoc.exists ? ((userDoc.data() as any).fullName ?? 'Giáo viên') : 'Giáo viên'
-
-    const id = (b.id && typeof b.id === 'string') ? b.id : db.collection(C.MATERIALS).doc().id
-    const data: Omit<Material, 'id'> = {
-      title,
-      description: b.description ? String(b.description).trim() : undefined,
-      type: b.type,
-      url: b.url,
-      ...(b.type === 'FILE' ? {
-        cloudinaryPublicId: b.cloudinaryPublicId,
-        cloudinaryResourceType: b.cloudinaryResourceType,
-        fileName: b.fileName,
-        fileSize: typeof b.fileSize === 'number' ? b.fileSize : undefined,
-        mimeType: b.mimeType,
-      } : {}),
-      audienceType: b.audienceType,
-      audienceIds,
-      uploaderId: req.user!.userId,
-      uploaderName,
-      createdAt: now(),
-      updatedAt: now(),
-    }
-    await db.collection(C.MATERIALS).doc(id).set(data)
-    res.status(201).json({ id, ...data })
+    const material = await prisma.material.create({
+      data: {
+        id: (b.id && typeof b.id === 'string') ? b.id : newId(),
+        title,
+        description: b.description ? String(b.description).trim() : undefined,
+        type: b.type,
+        url: b.url,
+        ...(b.type === 'FILE' ? {
+          cloudinaryPublicId: b.cloudinaryPublicId,
+          cloudinaryResourceType: b.cloudinaryResourceType,
+          fileName: b.fileName,
+          fileSize: typeof b.fileSize === 'number' ? b.fileSize : undefined,
+          mimeType: b.mimeType,
+        } : {}),
+        audienceType: b.audienceType,
+        audienceIds,
+        uploaderId: req.user!.userId,
+      },
+      include: withUploader,
+    })
+    res.status(201).json(toApi(material))
   } catch (err) { next(err) }
 })
 
 // PUT /api/materials/:id
 router.put('/:id', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const ref = db.collection(C.MATERIALS).doc(s(req.params.id))
-    const doc = await ref.get()
-    if (!doc.exists) { res.status(404).json({ message: 'Không tìm thấy tài liệu' }); return }
-    const existing = toObj<Material>(doc)
+    const id = s(req.params.id)
+    const existing = await prisma.material.findUnique({ where: { id } })
+    if (!existing) { res.status(404).json({ message: 'Không tìm thấy tài liệu' }); return }
     if (!canMutate(existing, req.user)) { res.status(403).json({ message: 'Không có quyền sửa tài liệu này' }); return }
 
     const b = req.body as Partial<Material>
-    const updates: Record<string, unknown> = { updatedAt: now() }
-    if (typeof b.title === 'string') updates.title = b.title.trim()
-    if (typeof b.description === 'string') updates.description = b.description.trim()
-    if (b.audienceType === 'STUDENT' || b.audienceType === 'CLASS') updates.audienceType = b.audienceType
-    if (Array.isArray(b.audienceIds)) updates.audienceIds = b.audienceIds.filter(x => typeof x === 'string')
+    const data: Prisma.MaterialUpdateInput = {}
+    if (typeof b.title === 'string') data.title = b.title.trim()
+    if (typeof b.description === 'string') data.description = b.description.trim()
+    if (b.audienceType === 'STUDENT' || b.audienceType === 'CLASS') data.audienceType = b.audienceType
+    if (Array.isArray(b.audienceIds)) data.audienceIds = b.audienceIds.filter(x => typeof x === 'string')
     if (typeof b.url === 'string' && existing.type === 'LINK') {
       if (!/^https?:\/\//.test(b.url)) { res.status(400).json({ message: 'URL không hợp lệ' }); return }
-      updates.url = b.url
+      data.url = b.url
     }
 
-    await ref.update(updates)
-    res.json({ ...existing, ...updates, id: ref.id })
+    const updated = await prisma.material.update({ where: { id }, data, include: withUploader })
+    res.json(toApi(updated))
   } catch (err) { next(err) }
 })
 
 // DELETE /api/materials/:id
 router.delete('/:id', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const ref = db.collection(C.MATERIALS).doc(s(req.params.id))
-    const doc = await ref.get()
-    if (!doc.exists) { res.status(404).json({ message: 'Không tìm thấy tài liệu' }); return }
-    const existing = toObj<Material>(doc)
+    const id = s(req.params.id)
+    const existing = await prisma.material.findUnique({ where: { id } })
+    if (!existing) { res.status(404).json({ message: 'Không tìm thấy tài liệu' }); return }
     if (!canMutate(existing, req.user)) { res.status(403).json({ message: 'Không có quyền xoá tài liệu này' }); return }
 
     if (existing.type === 'FILE' && existing.cloudinaryPublicId) {
       try {
         await cloudinary.uploader.destroy(existing.cloudinaryPublicId, {
-          resource_type: existing.cloudinaryResourceType ?? 'raw',
+          resource_type: (existing.cloudinaryResourceType as 'image' | 'raw' | 'video' | null) ?? 'raw',
           invalidate: true,
         })
       } catch (e) {
         console.warn('[materials] không xoá được file Cloudinary', existing.cloudinaryPublicId, e)
       }
     }
-    await ref.delete()
+    await prisma.material.delete({ where: { id } })
     res.json({ message: 'Đã xoá tài liệu' })
   } catch (err) { next(err) }
 })
@@ -181,28 +179,19 @@ router.delete('/:id', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: Auth
 export default router
 
 // ─── Helper: lấy danh sách material hiển thị cho 1 học viên ──────────────
-export async function listMaterialsForStudent(studentId: string): Promise<Material[]> {
-  const enrollSnap = await db.collection(C.ENROLLMENTS)
-    .where('studentId', '==', studentId)
-    .where('status', '==', 'ACTIVE')
-    .get()
-  const classIds = [...new Set(enrollSnap.docs.map(d => (d.data() as any).classId).filter((x): x is string => !!x))]
+export async function listMaterialsForStudent(studentId: string) {
+  const enrollments = await prisma.classEnrollment.findMany({ where: { studentId, status: 'ACTIVE' }, select: { classId: true } })
+  const classIds = [...new Set(enrollments.map(e => e.classId))]
 
-  const personalSnap = await db.collection(C.MATERIALS)
-    .where('audienceType', '==', 'STUDENT')
-    .where('audienceIds', 'array-contains', studentId)
-    .get()
-
-  const classSnaps = await Promise.all(classIds.map(cid =>
-    db.collection(C.MATERIALS)
-      .where('audienceType', '==', 'CLASS')
-      .where('audienceIds', 'array-contains', cid)
-      .get()
-  ))
-
-  const map = new Map<string, Material>()
-  toDocs<Material>(personalSnap).forEach(m => map.set(m.id, m))
-  classSnaps.forEach(s => toDocs<Material>(s).forEach(m => { if (!map.has(m.id)) map.set(m.id, m) }))
-
-  return [...map.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const materials = await prisma.material.findMany({
+    where: {
+      OR: [
+        { audienceType: 'STUDENT', audienceIds: { has: studentId } },
+        ...(classIds.length ? [{ audienceType: 'CLASS', audienceIds: { hasSome: classIds } }] : []),
+      ],
+    },
+    include: withUploader,
+    orderBy: { createdAt: 'desc' },
+  })
+  return materials.map(toApi)
 }

@@ -1,9 +1,10 @@
 import { Router, Request, Response, NextFunction } from 'express'
-import { db, C, toDocs, paginate, serverTimestamp, s } from '../lib/firebase'
+import type { Prisma } from '@prisma/client'
+import { prisma, api, newId } from '../lib/db'
+import { s } from '../lib/params'
 import { authenticate } from '../middleware/auth'
 import { AuthRequest } from '../types'
-import { ZALO_ENABLED, sendMessage, sendTuitionReminder, verifyWebhook, verifyWebhookSignature } from '../services/zaloService'
-import type { Notification, Lead } from '../types/models'
+import { ZALO_ENABLED, sendMessage, verifyWebhook, verifyWebhookSignature } from '../services/zaloService'
 
 // ─── Webhook router (không yêu cầu xác thực — Zalo gọi vào) ──
 export const webhookRouter = Router()
@@ -66,27 +67,17 @@ function parseStudentInfo(text: string): { name: string; grade?: string } {
   return { name: text }
 }
 
-async function getOrCreateLead(zaloUserId: string): Promise<Lead & { docId: string }> {
-  const snap = await db.collection(C.LEADS)
-    .where('zaloUserId', '==', zaloUserId).limit(1).get()
-
-  if (!snap.empty) {
-    const doc = snap.docs[0]
-    return { id: doc.id, docId: doc.id, ...doc.data() } as Lead & { docId: string }
-  }
-
-  const ref = db.collection(C.LEADS).doc()
-  const lead: Omit<Lead, 'id'> = {
-    zaloUserId,
-    status: 'NEW',
-    chatStep: 0,
-    source: 'zalo_oa',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  }
-  await ref.set(lead)
-  return { id: ref.id, docId: ref.id, ...lead }
+// zaloUserId là unique: hai sự kiện đến cùng lúc không tạo hai lead.
+async function getOrCreateLead(zaloUserId: string) {
+  const now = new Date()
+  return prisma.lead.upsert({
+    where: { zaloUserId },
+    create: { id: newId(), zaloUserId, status: 'NEW', chatStep: 0, source: 'zalo_oa', createdAt: now, updatedAt: now },
+    update: {},
+  })
 }
+
+const updateLead = (id: string, data: Prisma.LeadUpdateInput) => prisma.lead.update({ where: { id }, data: { ...data, updatedAt: new Date() } })
 
 // POST /api/zalo/webhook — Nhận sự kiện từ Zalo
 webhookRouter.post('/webhook', async (req: Request, res: Response) => {
@@ -113,9 +104,7 @@ webhookRouter.post('/webhook', async (req: Request, res: Response) => {
       const lead = await getOrCreateLead(zaloUserId)
 
       if (lead.chatStep === 0 || lead.status === 'NEW') {
-        await db.collection(C.LEADS).doc(lead.docId).update({
-          chatStep: 1, status: 'COLLECTING', updatedAt: new Date().toISOString(),
-        })
+        await updateLead(lead.id, { chatStep: 1, status: 'COLLECTING' })
         await sendMessage(zaloUserId, CHAT_MESSAGES.welcome)
       }
     }
@@ -125,21 +114,19 @@ webhookRouter.post('/webhook', async (req: Request, res: Response) => {
       const zaloUserId = event.sender.id
       const text = event.message.text.trim()
       const lead = await getOrCreateLead(zaloUserId)
-      const docRef = db.collection(C.LEADS).doc(lead.docId)
-      const now = new Date().toISOString()
 
       switch (lead.chatStep) {
         case 0:
         case 1: {
           // Bước 1: nhận tên phụ huynh → hỏi tên con
-          await docRef.update({ parentName: text, chatStep: 2, updatedAt: now })
+          await updateLead(lead.id, { parentName: text, chatStep: 2 })
           await sendMessage(zaloUserId, `Cảm ơn anh/chị ${text}! 🙏\n\n📚 Cho em xin tên và lớp (khối) của con ạ?\n\nVí dụ: Nguyễn Văn A - Lớp 9`)
           break
         }
         case 2: {
           // Bước 2: nhận tên con + lớp → hỏi SĐT
           const { name, grade } = parseStudentInfo(text)
-          await docRef.update({ studentName: name, gradeLevel: grade, chatStep: 3, updatedAt: now })
+          await updateLead(lead.id, { studentName: name, gradeLevel: grade, chatStep: 3 })
           await sendMessage(zaloUserId, CHAT_MESSAGES.askPhone)
           break
         }
@@ -150,7 +137,7 @@ webhookRouter.post('/webhook', async (req: Request, res: Response) => {
             await sendMessage(zaloUserId, `SĐT chưa đúng ạ. Vui lòng nhập lại (10 chữ số).\n\nVí dụ: 0987011289`)
             break
           }
-          await docRef.update({ phone, chatStep: 4, status: 'COMPLETED', updatedAt: now })
+          await updateLead(lead.id, { phone, chatStep: 4, status: 'COMPLETED' })
 
           // Tự động liên kết với parent record nếu tìm thấy SĐT
           await tryLinkParent(phone, zaloUserId)
@@ -180,60 +167,33 @@ webhookRouter.post('/webhook', async (req: Request, res: Response) => {
 // ─── Helper: tự động liên kết SĐT với parent record ─────────
 
 async function tryLinkParent(phone: string, zaloUserId: string) {
-  const studentsSnap = await db.collection(C.STUDENTS).get()
-  for (const studentDoc of studentsSnap.docs) {
-    const parentsSnap = await studentDoc.ref.collection('parents')
-      .where('phone', '==', phone).limit(1).get()
-    if (!parentsSnap.empty) {
-      await parentsSnap.docs[0].ref.update({ zalo: zaloUserId })
-      console.log(`[Zalo] Tự động liên kết ${phone} → ${zaloUserId}`)
-      return
-    }
+  const parent = await prisma.parent.findFirst({ where: { phone }, select: { id: true } })
+  if (parent) {
+    await prisma.parent.update({ where: { id: parent.id }, data: { zalo: zaloUserId } })
+    console.log(`[Zalo] Tự động liên kết ${phone} → ${zaloUserId}`)
   }
 }
 
 // ─── Helpers: lấy danh sách Zalo user ID theo đối tượng ──────
 
-async function getZaloRecipients(targetType: string, targetId?: string): Promise<string[]> {
-  const zaloIds: string[] = []
+async function getZaloRecipients(targetType: string, targetId?: string | null): Promise<string[]> {
+  // Phụ huynh chính của: 1 học viên / mọi học viên trong lớp / mọi học viên ACTIVE
+  const student: Prisma.StudentWhereInput =
+    targetType === 'STUDENT' && targetId ? { id: targetId }
+    : targetType === 'CLASS' && targetId ? { enrollments: { some: { classId: targetId } } }
+    : { status: 'ACTIVE' }
 
-  if (targetType === 'STUDENT' && targetId) {
-    // Gửi cho phụ huynh chính của 1 học viên
-    const snap = await db.collection(C.STUDENTS).doc(targetId)
-      .collection('parents').where('isPrimaryContact', '==', true).limit(1).get()
-    snap.docs.forEach(d => { if (d.data().zalo) zaloIds.push(d.data().zalo) })
-
-  } else if (targetType === 'CLASS' && targetId) {
-    // Gửi cho phụ huynh của tất cả học viên trong lớp
-    const enrollSnap = await db.collection(C.ENROLLMENTS)
-      .where('classId', '==', targetId).get()
-    for (const doc of enrollSnap.docs) {
-      const studentId = doc.data().studentId
-      const parentSnap = await db.collection(C.STUDENTS).doc(studentId)
-        .collection('parents').where('isPrimaryContact', '==', true).limit(1).get()
-      parentSnap.docs.forEach(d => { if (d.data().zalo) zaloIds.push(d.data().zalo) })
-    }
-
-  } else {
-    // ALL: lấy tất cả phụ huynh có Zalo user ID
-    const studentsSnap = await db.collection(C.STUDENTS)
-      .where('status', '==', 'ACTIVE').get()
-    for (const studentDoc of studentsSnap.docs) {
-      const parentSnap = await db.collection(C.STUDENTS).doc(studentDoc.id)
-        .collection('parents').where('isPrimaryContact', '==', true).limit(1).get()
-      parentSnap.docs.forEach(d => { if (d.data().zalo) zaloIds.push(d.data().zalo) })
-    }
-  }
-
+  const parents = await prisma.parent.findMany({
+    where: { isPrimaryContact: true, zalo: { not: null }, student },
+    select: { zalo: true },
+  })
   // Loại bỏ trùng lặp
-  return [...new Set(zaloIds)]
+  return [...new Set(parents.map(p => p.zalo!).filter(Boolean))]
 }
 
 // ─── Notification router (yêu cầu xác thực) ─────────────────
 export const notificationRouter = Router()
 notificationRouter.use(authenticate)
-
-const now = () => new Date().toISOString()
 
 // POST /api/notifications — Tạo thông báo mới, tùy chọn gửi qua Zalo
 notificationRouter.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -245,25 +205,23 @@ notificationRouter.post('/', async (req: AuthRequest, res: Response, next: NextF
       return
     }
 
-    const ref = db.collection(C.NOTIFICATIONS).doc()
-    const notification: Omit<Notification, 'id'> = {
-      title,
-      content,
-      type,
-      targetType,
-      targetId: targetId ?? undefined,
-      sendViaZalo: Boolean(sendViaZalo),
-      sentAt: undefined,
-      createdById: req.user?.userId,
-      createdAt: now(),
-    }
-
-    await ref.set(notification)
+    let notification = await prisma.notification.create({
+      data: {
+        id: newId(),
+        title,
+        content,
+        type,
+        targetType,
+        targetId: targetId ?? null,
+        sendViaZalo: Boolean(sendViaZalo),
+        createdById: req.user?.userId,
+      },
+    })
 
     // Gửi qua Zalo nếu được yêu cầu
     if (sendViaZalo) {
       if (!ZALO_ENABLED) {
-        await ref.update({ zaloQueued: true })
+        notification = await prisma.notification.update({ where: { id: notification.id }, data: { zaloQueued: true } })
         console.warn('[Zalo] Thông báo được đánh dấu zaloQueued — điền env vars để kích hoạt')
       } else {
         const zaloMessage = `[Math Center]\n${title}\n\n${content}`
@@ -276,15 +234,17 @@ notificationRouter.post('/', async (req: AuthRequest, res: Response, next: NextF
         }
 
         if (sentCount > 0) {
-          await ref.update({ sentAt: now(), zaloSentCount: sentCount, zaloTotalTargets: zaloUserIds.length })
-          notification.sentAt = now()
+          notification = await prisma.notification.update({
+            where: { id: notification.id },
+            data: { sentAt: new Date(), zaloSentCount: sentCount, zaloTotalTargets: zaloUserIds.length },
+          })
         }
 
         console.log(`[Zalo] Đã gửi ${sentCount}/${zaloUserIds.length} tin nhắn`)
       }
     }
 
-    res.status(201).json({ id: ref.id, ...notification })
+    res.status(201).json(api(notification))
   } catch (err) {
     next(err)
   }
@@ -293,14 +253,11 @@ notificationRouter.post('/', async (req: AuthRequest, res: Response, next: NextF
 // GET /api/notifications/targets — Lấy danh sách lớp & học viên cho dropdown
 notificationRouter.get('/targets', async (_req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const [classesSnap, studentsSnap] = await Promise.all([
-      db.collection(C.CLASSES).where('status', '==', 'ACTIVE').get(),
-      db.collection(C.STUDENTS).where('status', '==', 'ACTIVE').get(),
+    const [classes, students] = await Promise.all([
+      prisma.class.findMany({ where: { status: 'ACTIVE' }, select: { id: true, name: true } }),
+      prisma.student.findMany({ where: { status: 'ACTIVE' }, select: { id: true, fullName: true } }),
     ])
-    res.json({
-      classes: classesSnap.docs.map(d => ({ id: d.id, name: d.data().name })),
-      students: studentsSnap.docs.map(d => ({ id: d.id, fullName: d.data().fullName })),
-    })
+    res.json({ classes, students })
   } catch (err) { next(err) }
 })
 
@@ -310,12 +267,11 @@ notificationRouter.get('/', async (req: AuthRequest, res: Response, next: NextFu
     const page  = Math.max(1, parseInt(req.query.page  as string) || 1)
     const limit = Math.min(50, parseInt(req.query.limit as string) || 20)
 
-    const snap = await db.collection(C.NOTIFICATIONS)
-      .orderBy('createdAt', 'desc')
-      .get()
-
-    const all = toDocs<Notification>(snap)
-    res.json(paginate(all, page, limit))
+    const [total, data] = await prisma.$transaction([
+      prisma.notification.count(),
+      prisma.notification.findMany({ orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit }),
+    ])
+    res.json({ data: api(data), total, page, limit, totalPages: Math.ceil(total / limit) })
   } catch (err) {
     next(err)
   }
@@ -324,8 +280,8 @@ notificationRouter.get('/', async (req: AuthRequest, res: Response, next: NextFu
 // POST /api/notifications/:id/send-zalo — Gửi lại qua Zalo cho thông báo đã tạo
 notificationRouter.post('/:id/send-zalo', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const doc = await db.collection(C.NOTIFICATIONS).doc(s(req.params.id)).get()
-    if (!doc.exists) {
+    const notification = await prisma.notification.findUnique({ where: { id: s(req.params.id) } })
+    if (!notification) {
       res.status(404).json({ message: 'Không tìm thấy thông báo' })
       return
     }
@@ -335,7 +291,6 @@ notificationRouter.post('/:id/send-zalo', async (req: AuthRequest, res: Response
       return
     }
 
-    const notification = doc.data() as Notification
     const zaloMessage = `[Math Center]\n${notification.title}\n\n${notification.content}`
     const zaloUserIds = await getZaloRecipients(notification.targetType, notification.targetId)
 
@@ -351,7 +306,7 @@ notificationRouter.post('/:id/send-zalo', async (req: AuthRequest, res: Response
     }
 
     if (sentCount > 0) {
-      await doc.ref.update({ sentAt: now(), zaloQueued: false, zaloSentCount: sentCount })
+      await prisma.notification.update({ where: { id: notification.id }, data: { sentAt: new Date(), zaloQueued: false, zaloSentCount: sentCount } })
       res.json({ message: `Đã gửi ${sentCount}/${zaloUserIds.length} tin nhắn qua Zalo` })
     } else {
       res.status(500).json({ message: 'Gửi Zalo thất bại. Kiểm tra access_token và logs.' })

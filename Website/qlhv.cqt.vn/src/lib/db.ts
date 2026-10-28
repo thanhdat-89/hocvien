@@ -27,6 +27,7 @@ export function newId(): string {
 const DATE_ONLY = new Set([
   'enrollmentDate', 'dropDate', 'dateOfBirth', 'startDate', 'endDate', 'sessionDate', 'effectiveFrom', 'effectiveTo',
   'validFrom', 'validTo', 'appliedFrom', 'appliedTo', 'dueDate', 'paymentDate', 'invoiceDate', 'dates',
+  'date', // holidays: trường tương thích ngược = startDate
 ])
 
 const pad = (n: number) => String(n).padStart(2, '0')

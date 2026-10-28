@@ -6,8 +6,7 @@
 // ================================================================
 
 import crypto from 'crypto'
-import { db, C } from '../lib/firebase'
-import type { Parent, Student } from '../types/models'
+import { prisma } from '../lib/db'
 
 const ZALO_MSG_API  = 'https://openapi.zalo.me/v3.0/oa/message/cs'
 const ZALO_TOKEN_API = 'https://oauth.zaloapp.com/v4/oa/access_token'
@@ -146,25 +145,21 @@ export async function sendTuitionReminder(
   amount: number
 ): Promise<{ success: boolean }> {
   try {
-    const studentDoc = await db.collection(C.STUDENTS).doc(studentId).get()
-    if (!studentDoc.exists) {
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      select: { fullName: true, parents: { where: { isPrimaryContact: true }, take: 1, select: { zalo: true } } },
+    })
+    if (!student) {
       console.warn('[Zalo] Không tìm thấy học viên:', studentId)
       return { success: false }
     }
-    const student = studentDoc.data() as Student
 
-    const parentsSnap = await db.collection(C.STUDENTS).doc(studentId)
-      .collection('parents')
-      .where('isPrimaryContact', '==', true)
-      .limit(1)
-      .get()
-
-    if (parentsSnap.empty) {
+    const parent = student.parents[0]
+    if (!parent) {
       console.warn('[Zalo] Học viên', studentId, 'không có phụ huynh chính')
       return { success: false }
     }
 
-    const parent = parentsSnap.docs[0].data() as Parent
     if (!parent.zalo) {
       console.warn('[Zalo] Phụ huynh của', student.fullName, 'chưa có Zalo user ID')
       return { success: false }

@@ -1,22 +1,20 @@
 import { Router, Response, NextFunction } from 'express'
-import { db, C, s, toDocs, toObj } from '../lib/firebase'
+import { prisma, api, newId, toDay } from '../lib/db'
+import { s } from '../lib/params'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
-import { Holiday } from '../types/models'
 
 const router = Router()
 router.use(authenticate)
-const now = () => new Date().toISOString()
+
+// API cũ có thêm `date` (= ngày bắt đầu) để tương thích ngược.
+const toApi = <T extends { startDate: Date }>(h: T) => api({ ...h, date: h.startDate })
 
 // Lấy danh sách ngày nghỉ lễ
 router.get('/', async (_req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const snap = await db.collection(C.HOLIDAYS)
-      .orderBy('date', 'desc')
-      .get()
-    
-    const holidays = toDocs<Holiday>(snap)
-    res.json(holidays)
+    const holidays = await prisma.holiday.findMany({ orderBy: { startDate: 'desc' } })
+    res.json(holidays.map(toApi))
   } catch (err) {
     next(err)
   }
@@ -26,7 +24,7 @@ router.get('/', async (_req: AuthRequest, res: Response, next: NextFunction) => 
 router.post('/', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { name, date, startDate, endDate, description } = req.body
-    
+
     const start = startDate || date
     const end = endDate || start
 
@@ -41,81 +39,26 @@ router.post('/', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Re
     }
 
     // Tạo danh sách tất cả các ngày trong khoảng [start, end]
-    const dates: string[] = []
-    let curr = new Date(start + 'T00:00:00Z')
-    const endD = new Date(end + 'T00:00:00Z')
-    while (curr <= endD) {
-      dates.push(curr.toISOString().slice(0, 10))
-      curr.setUTCDate(curr.getUTCDate() + 1)
-    }
-
-    // 1. Tạo Holiday record
-    const data: Omit<Holiday, 'id'> = {
-      name,
-      date: start, // YYYY-MM-DD (backward compatibility)
-      startDate: start,
-      endDate: end,
-      dates,
-      description: description || '',
-      createdAt: now(),
-    }
-    const ref = await db.collection(C.HOLIDAYS).add(data)
+    const dates: Date[] = []
+    for (const curr = toDay(start)!; curr <= toDay(end)!; curr.setUTCDate(curr.getUTCDate() + 1)) dates.push(new Date(curr))
 
     const cancelReason = `Nghỉ lễ: ${name}`
+    const range = { sessionDate: { gte: toDay(start)!, lte: toDay(end)! }, status: 'SCHEDULED' as const }
 
-    // 2. Tìm tất cả các sessions trong khoảng [start, end] đang SCHEDULED
-    const sessionsSnap = await db.collection(C.SESSIONS)
-      .where('sessionDate', '>=', start)
-      .where('sessionDate', '<=', end)
-      .get()
+    // Tạo ngày nghỉ và huỷ các buổi SCHEDULED trong khoảng — cùng một transaction.
+    const [holiday, sessions, privates] = await prisma.$transaction([
+      prisma.holiday.create({
+        data: { id: newId(), name, startDate: toDay(start)!, endDate: toDay(end)!, dates, description: description || '' },
+      }),
+      prisma.session.updateMany({ where: range, data: { status: 'CANCELLED', cancelReason } }),
+      prisma.privateSession.updateMany({ where: range, data: { status: 'CANCELLED', cancelReason } }),
+    ])
 
-    // 3. Tìm tất cả privateSchedules trong khoảng [start, end] đang SCHEDULED
-    const privateSchedulesSnap = await db.collection(C.PRIVATE_SCHEDULES)
-      .where('sessionDate', '>=', start)
-      .where('sessionDate', '<=', end)
-      .get()
-
-    // 4. Thực hiện batch update thành CANCELLED (hỗ trợ chia nhỏ batch nếu > 400 docs)
-    const updates: { ref: FirebaseFirestore.DocumentReference; data: any }[] = []
-
-    sessionsSnap.docs.forEach(doc => {
-      if (doc.data().status === 'SCHEDULED') {
-        updates.push({
-          ref: doc.ref,
-          data: {
-            status: 'CANCELLED',
-            cancelReason,
-            updatedAt: now()
-          }
-        })
-      }
-    })
-
-    privateSchedulesSnap.docs.forEach(doc => {
-      if (doc.data().status === 'SCHEDULED') {
-        updates.push({
-          ref: doc.ref,
-          data: {
-            status: 'CANCELLED',
-            cancelReason,
-            updatedAt: now()
-          }
-        })
-      }
-    })
-
-    for (let i = 0; i < updates.length; i += 400) {
-      const chunk = updates.slice(i, i + 400)
-      const batch = db.batch()
-      chunk.forEach(u => batch.update(u.ref, u.data))
-      await batch.commit()
-    }
-
-    const cancelledCount = updates.length
+    const cancelledCount = sessions.count + privates.count
 
     res.status(201).json({
       message: `Đã tạo ngày nghỉ lễ và hủy ${cancelledCount} buổi học.`,
-      holiday: { id: ref.id, ...data },
+      holiday: toApi(holiday),
       cancelledCount
     })
   } catch (err) {
@@ -129,76 +72,34 @@ router.delete('/:id', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, re
     const { restoreSessions } = req.query
     const holidayId = s(req.params.id)
 
-    const doc = await db.collection(C.HOLIDAYS).doc(holidayId).get()
-    if (!doc.exists) {
+    const holiday = await prisma.holiday.findUnique({ where: { id: holidayId } })
+    if (!holiday) {
       res.status(404).json({ message: 'Không tìm thấy ngày nghỉ lễ' })
       return
     }
 
-    const holiday = doc.data() as Holiday
-    const cancelReason = `Nghỉ lễ: ${holiday.name}`
-    const start = holiday.startDate || holiday.date
-    const end = holiday.endDate || holiday.date || start
-
-    await db.collection(C.HOLIDAYS).doc(holidayId).delete()
-
-    let restoredCount = 0
-    if (restoreSessions === 'true') {
-      const updates: { ref: FirebaseFirestore.DocumentReference; data: any }[] = []
-
-      // Khôi phục sessions
-      const sessionsSnap = await db.collection(C.SESSIONS)
-        .where('sessionDate', '>=', start)
-        .where('sessionDate', '<=', end)
-        .get()
-
-      sessionsSnap.docs.forEach(d => {
-        const data = d.data()
-        if (data.status === 'CANCELLED' && data.cancelReason === cancelReason) {
-          updates.push({
-            ref: d.ref,
-            data: {
-              status: 'SCHEDULED',
-              cancelReason: null, // Xóa lý do hủy
-              updatedAt: now()
-            }
-          })
-        }
-      })
-
-      // Khôi phục privateSchedules
-      const privateSnap = await db.collection(C.PRIVATE_SCHEDULES)
-        .where('sessionDate', '>=', start)
-        .where('sessionDate', '<=', end)
-        .get()
-
-      privateSnap.docs.forEach(d => {
-        const data = d.data()
-        if (data.status === 'CANCELLED' && data.cancelReason === cancelReason) {
-          updates.push({
-            ref: d.ref,
-            data: {
-              status: 'SCHEDULED',
-              cancelReason: null,
-              updatedAt: now()
-            }
-          })
-        }
-      })
-
-      for (let i = 0; i < updates.length; i += 400) {
-        const chunk = updates.slice(i, i + 400)
-        const batch = db.batch()
-        chunk.forEach(u => batch.update(u.ref, u.data))
-        await batch.commit()
-      }
-
-      restoredCount = updates.length
+    // Chỉ khôi phục buổi bị huỷ bởi chính ngày nghỉ này.
+    const restoreWhere = {
+      sessionDate: { gte: holiday.startDate, lte: holiday.endDate },
+      status: 'CANCELLED' as const,
+      cancelReason: `Nghỉ lễ: ${holiday.name}`,
     }
+    const restoreData = { status: 'SCHEDULED' as const, cancelReason: null }
 
-    res.json({ 
-      message: restoreSessions === 'true' 
-        ? `Đã xóa ngày nghỉ lễ và khôi phục ${restoredCount} buổi học.` 
+    const [, sessions, privates] = await prisma.$transaction([
+      prisma.holiday.delete({ where: { id: holidayId } }),
+      ...(restoreSessions === 'true'
+        ? [
+            prisma.session.updateMany({ where: restoreWhere, data: restoreData }),
+            prisma.privateSession.updateMany({ where: restoreWhere, data: restoreData }),
+          ]
+        : []),
+    ])
+    const restoredCount = (sessions?.count ?? 0) + (privates?.count ?? 0)
+
+    res.json({
+      message: restoreSessions === 'true'
+        ? `Đã xóa ngày nghỉ lễ và khôi phục ${restoredCount} buổi học.`
         : 'Đã xóa ngày nghỉ lễ.',
       restoredCount
     })
