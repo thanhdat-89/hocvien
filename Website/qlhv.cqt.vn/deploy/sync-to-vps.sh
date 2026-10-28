@@ -16,4 +16,4 @@ rsync -az --delete -e "ssh -i $KEY" \
   ./ "$VPS:/srv/qlhv-api/"
 
 if [ "${1:-}" = "--no-deploy" ]; then echo "Đã đẩy mã nguồn."; exit 0; fi
-ssh -i "$KEY" "$VPS" 'chown -R qlhv:qlhv /srv/qlhv-api && sudo -u qlhv -H bash /srv/qlhv-api/deploy/deploy.sh'
+ssh -i "$KEY" "$VPS" 'chown -R qlhv:qlhv /srv/qlhv-api && cd /srv/qlhv-api && sudo -u qlhv -H bash deploy/deploy.sh'

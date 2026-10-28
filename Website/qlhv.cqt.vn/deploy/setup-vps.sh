@@ -11,6 +11,8 @@ APP=/srv/qlhv-api
 
 # 1. User và thư mục
 id qlhv >/dev/null 2>&1 || useradd -m -s /bin/bash qlhv
+# Lệnh chạy bằng user qlhv không được kế thừa thư mục /root (PM2 sinh tiến trình con sẽ báo EACCES).
+cd $APP
 mkdir -p /var/log/qlhv-api
 chown -R qlhv:qlhv $APP /var/log/qlhv-api
 

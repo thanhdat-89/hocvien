@@ -26,7 +26,7 @@ Vercel + Firestore vẫn phục vụ người dùng. VPS chạy bản PostgreSQL
 ```sh
 # trên Mac, trong thư mục backend của nhánh postgres-migration
 bash deploy/sync-to-vps.sh --no-deploy
-ssh -i ~/.ssh/htt_vps root@14.225.204.223 bash /srv/qlhv-api/deploy/setup-vps.sh
+ssh -i ~/.ssh/htt_vps root@14.225.204.223 'cd /srv/qlhv-api && bash deploy/setup-vps.sh'
 bash deploy/sync-to-vps.sh
 ```
 
@@ -76,7 +76,7 @@ Chọn giờ ít người dùng. Mọi bước đều quay lại được cho t�
 ## Vận hành
 
 ```sh
-sudo -u qlhv -H pm2 status | logs qlhv-api | reload qlhv-api
+cd /srv/qlhv-api && sudo -u qlhv -H pm2 status   # hoặc: logs qlhv-api | reload qlhv-api
 tail -f /var/log/qlhv-api/cron.log
 ls -la /var/backups/qlhv
 ```
