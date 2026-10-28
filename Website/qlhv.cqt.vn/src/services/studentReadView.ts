@@ -1,4 +1,4 @@
-import { db, C } from '../lib/firebase'
+import { prisma } from '../lib/db'
 import { readView } from './readViews'
 
 type StudentIndexEntry = { id: string; fullName: string; status?: string; gradeLevel?: number }
@@ -7,8 +7,8 @@ type Options = { page: number; limit: number; search?: string; status?: string; 
 /** A shared compact index preserves contains-search and numbered page jumps without billed offsets. */
 export function getStudentIndex() {
   return readView('studentsIndex', 'all', async () => {
-    const snap = await db.collection(C.STUDENTS).select('fullName', 'status', 'gradeLevel').get()
-    return snap.docs.map(doc => ({ ...doc.data(), id: doc.id }) as StudentIndexEntry)
+    const students = await prisma.student.findMany({ select: { id: true, fullName: true, status: true, gradeLevel: true } })
+    return students.map(s => ({ ...s, gradeLevel: s.gradeLevel ?? undefined }) as StudentIndexEntry)
       .sort((a, b) => Buffer.compare(Buffer.from(a.fullName || ''), Buffer.from(b.fullName || '')) || a.id.localeCompare(b.id))
   })
 }
@@ -18,8 +18,8 @@ export async function getStudentPage(options: Options) {
   const all = view.data!
   let classIds: Set<string> | undefined
   if (options.classId) {
-    const snap = await db.collection(C.ENROLLMENTS).where('classId', '==', options.classId).where('status', '==', 'ACTIVE').select('studentId').get()
-    classIds = new Set(snap.docs.map(doc => doc.data().studentId))
+    const enrollments = await prisma.classEnrollment.findMany({ where: { classId: options.classId, status: 'ACTIVE' }, select: { studentId: true } })
+    classIds = new Set(enrollments.map(e => e.studentId))
   }
   const search = options.search?.trim().toLowerCase() || ''
   const filters = JSON.stringify([search, options.status || '', options.gradeLevel || '', options.classId || '', options.limit])

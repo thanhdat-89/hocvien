@@ -1,6 +1,21 @@
-import { db, C, toDocs } from './firebase'
+import { prisma, toClassId } from './db'
+import {
+  classDoc, classInclude, enrollmentDoc, enrollmentInclude, privateSessionDoc, privateSessionInclude,
+  sessionDoc, sessionInclude, studentPromotionDoc, studentPromotionInclude,
+} from './docs'
 import type { ClassEnrollment } from '../types/models'
 import { classRateForMonth } from '../services/classChange'
+
+// Đọc dạng tài liệu Firestore cũ (ngày là chuỗi, classId "private") để giữ nguyên phép tính bên dưới.
+const loadEnrollments = (studentId: string) =>
+  prisma.classEnrollment.findMany({ where: { studentId }, include: enrollmentInclude }).then(rows => rows.map(enrollmentDoc))
+const loadClassSessions = (classId: string) =>
+  prisma.session.findMany({ where: { classId }, include: sessionInclude }).then(rows => rows.map(sessionDoc))
+const loadPromotions = (studentId: string, classId?: string) =>
+  prisma.studentPromotion.findMany({
+    where: { studentId, ...(classId === undefined ? {} : { classId: toClassId(classId) }) },
+    include: studentPromotionInclude,
+  }).then(rows => rows.map(studentPromotionDoc))
 
 export interface TuitionSummaryRow {
   monthKey: string
@@ -26,15 +41,12 @@ export interface StudentPromoSummary {
 }
 
 export async function computeTuitionSummary(studentId: string): Promise<TuitionSummaryRow[]> {
-  const enrollSnap = await db.collection(C.ENROLLMENTS)
-    .where('studentId', '==', studentId)
-    .get()
-  const enrollments = toDocs<ClassEnrollment>(enrollSnap)
+  const enrollments: ClassEnrollment[] = await loadEnrollments(studentId)
 
   const classIds = [...new Set(enrollments.map(e => e.classId))]
-  const classDocs = await Promise.all(classIds.map(id => db.collection(C.CLASSES).doc(id).get()))
+  const classes = await prisma.class.findMany({ where: { id: { in: classIds } }, include: classInclude })
   const classMap: Record<string, any> = {}
-  classDocs.forEach(d => { if (d.exists) classMap[d.id] = { id: d.id, ...d.data() } })
+  classes.forEach(c => { classMap[c.id] = classDoc(c) })
 
   const rows: Record<string, {
     monthKey: string; month: number; year: number
@@ -49,21 +61,14 @@ export async function computeTuitionSummary(studentId: string): Promise<TuitionS
       ? (enroll as any).dropDate
       : '9999-12-31'
 
-    const sessSnap = await db.collection(C.SESSIONS)
-      .where('classId', '==', enroll.classId)
-      .get()
-    const sessions = toDocs<any>(sessSnap).filter((s: any) =>
+    const sessions = (await loadClassSessions(enroll.classId)).filter((s: any) =>
       s.sessionDate >= fromDate && s.sessionDate <= toDate && s.status !== 'CANCELLED'
     )
 
     const cls = classMap[enroll.classId] ?? {}
 
     const today = new Date().toISOString().slice(0, 10)
-    const promoSnap = await db.collection(C.STUDENT_PROMOTIONS)
-      .where('studentId', '==', studentId)
-      .where('classId', '==', enroll.classId)
-      .get()
-    const promos = toDocs<any>(promoSnap).filter(p =>
+    const promos = (await loadPromotions(studentId, enroll.classId)).filter((p: any) =>
       (!p.appliedTo || p.appliedTo >= fromDate) && (!p.appliedFrom || p.appliedFrom <= today)
     )
 
@@ -100,16 +105,10 @@ export async function computeTuitionSummary(studentId: string): Promise<TuitionS
   }))
 
   // Học riêng
-  const privateSnap = await db.collection(C.PRIVATE_SCHEDULES)
-    .where('studentId', '==', studentId)
-    .get()
-  const privateSessions = toDocs<any>(privateSnap).filter((s: any) => s.status !== 'CANCELLED')
+  const privateSessions = (await prisma.privateSession.findMany({ where: { studentId }, include: privateSessionInclude }))
+    .map(privateSessionDoc).filter((s: any) => s.status !== 'CANCELLED')
 
-  const privatePromoSnap = await db.collection(C.STUDENT_PROMOTIONS)
-    .where('studentId', '==', studentId)
-    .where('classId', '==', 'private')
-    .get()
-  const privatePromos = toDocs<any>(privatePromoSnap)
+  const privatePromos = await loadPromotions(studentId, 'private')
 
   const privateMonthCounts: Record<string, { count: number; totalAmount: number }> = {}
   for (const ps of privateSessions) {
@@ -159,10 +158,7 @@ export async function computeTuitionSummary(studentId: string): Promise<TuitionS
 }
 
 export async function loadStudentPromotions(studentId: string): Promise<StudentPromoSummary[]> {
-  const snap = await db.collection(C.STUDENT_PROMOTIONS)
-    .where('studentId', '==', studentId)
-    .get()
-  return toDocs<any>(snap).map(p => ({
+  return (await loadPromotions(studentId)).map((p: any) => ({
     id: p.id,
     classId: p.classId,
     className: p.className ?? (p.classId === 'private' ? 'Học riêng' : ''),

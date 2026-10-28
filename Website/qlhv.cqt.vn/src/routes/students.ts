@@ -1,9 +1,14 @@
 import { Router, Response, NextFunction } from 'express'
-import { admin, db, C, s, toObj, toDocs, paginate } from '../lib/firebase'
-import { syncPrimaryParentToStudent } from '../lib/studentSync'
+import type { Prisma } from '@prisma/client'
+import { prisma, api, newId, toDay } from '../lib/db'
+import {
+  classDoc, classInclude, enrollmentDoc, enrollmentInclude, privateSessionDoc, privateSessionInclude,
+  sessionDoc, sessionInclude, studentAttendanceDoc, studentAttendanceInclude, studentPromotionDoc,
+  studentPromotionInclude, tuitionRecordDoc, tuitionRecordInclude,
+} from '../lib/docs'
+import { s } from '../lib/params'
 import { recountClassActiveStudents } from '../lib/classSync'
 import { computeTuitionSummary } from '../lib/tuition'
-import { currentClassNames, displayClassName } from '../lib/classDisplayNames'
 import { classRateForMonth } from '../services/classChange'
 import { requireRole } from '../middleware/auth'
 import { authenticate } from '../middleware/auth'
@@ -11,82 +16,46 @@ import { activityContext } from '../middleware/activityContext'
 import { getMissingPrivateStudents, validPeriod } from '../services/readViews'
 import { getStudentPage } from '../services/studentReadView'
 import { AuthRequest } from '../types'
-import type { Student, ClassEnrollment, StudentAttendance, PrivateSession } from '../types/models'
+import type { ClassEnrollment } from '../types/models'
 
 const router = Router()
 router.use(authenticate)
 router.use(activityContext)
 
-const now = () => new Date().toISOString()
-const IN_QUERY_LIMIT = 30
+const today = () => new Date().toISOString().slice(0, 10)
 
-function chunkIds(ids: string[]): string[][] {
-  const chunks: string[][] = []
-  for (let i = 0; i < ids.length; i += IN_QUERY_LIMIT) chunks.push(ids.slice(i, i + IN_QUERY_LIMIT))
-  return chunks
+/** Ngày từ client hoặc file Excel đã chuẩn hoá; giá trị không đọc được → null (bulk ghi chú lỗi riêng). */
+function dayOrNull(value: unknown): Date | null {
+  try { return toDay(value) } catch { return null }
 }
 
-async function loadStudentsByIds(ids: string[]): Promise<(Student & { id: string })[]> {
-  if (ids.length === 0) return []
-  const snaps = await Promise.all(
-    chunkIds(ids).map(chunk =>
-      db.collection(C.STUDENTS)
-        .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
-        .get()
-    )
-  )
-  return snaps.flatMap(snap => toDocs<Student>(snap))
-}
+// Phụ huynh liên hệ chính: ưu tiên isPrimaryContact, nếu không có lấy phụ huynh đầu tiên (như syncPrimaryParentToStudent cũ).
+const primaryParentInclude = { orderBy: [{ isPrimaryContact: 'desc' }, { createdAt: 'asc' }], take: 1 } satisfies Prisma.Student$parentsArgs
 
-async function enrichStudents(pageStudents: (Student & { id: string })[]) {
-  const studentIds = pageStudents.map(stu => stu.id)
-  const today = new Date().toISOString().slice(0, 10)
-  const chunks = chunkIds(studentIds)
+async function enrichStudents(ids: string[]) {
+  const now = toDay(today())!
+  const students = await prisma.student.findMany({
+    where: { id: { in: ids } },
+    include: {
+      parents: primaryParentInclude,
+      enrollments: { where: { status: 'ACTIVE' }, include: enrollmentInclude },
+      promotions: {
+        where: { AND: [{ OR: [{ appliedFrom: { lte: now } }] }, { OR: [{ appliedTo: null }, { appliedTo: { gte: now } }] }] },
+        include: studentPromotionInclude,
+      },
+    },
+  })
+  const positions = new Map(ids.map((id, index) => [id, index]))
+  students.sort((a, b) => positions.get(a.id)! - positions.get(b.id)!)
 
-  const [enrollSnaps, promoSnaps] = await Promise.all([
-    Promise.all(chunks.map(chunk =>
-      db.collection(C.ENROLLMENTS)
-        .where('studentId', 'in', chunk)
-        .where('status', '==', 'ACTIVE')
-        .get()
-    )),
-    Promise.all(chunks.map(chunk =>
-      db.collection(C.STUDENT_PROMOTIONS)
-        .where('studentId', 'in', chunk)
-        .get()
-    )),
-  ])
-
-  const enrollByStudent = new Map<string, ClassEnrollment[]>()
-  for (const e of enrollSnaps.flatMap(snap => toDocs<ClassEnrollment>(snap))) {
-    const arr = enrollByStudent.get(e.studentId) ?? []
-    arr.push(e)
-    enrollByStudent.set(e.studentId, arr)
-  }
-  const classNames = await currentClassNames([...enrollByStudent.values()].flat().map(e => e.classId))
-
-  const promoByStudent = new Map<string, any[]>()
-  for (const doc of promoSnaps.flatMap(snap => snap.docs)) {
-    const p = doc.data()
-    if (p.appliedFrom && p.appliedFrom > today) continue
-    if (p.appliedTo && p.appliedTo < today) continue
-    const sid = p.studentId as string
-    const arr = promoByStudent.get(sid) ?? []
-    arr.push({ id: doc.id, ...p })
-    promoByStudent.set(sid, arr)
-  }
-
-  return pageStudents.map(stu => {
-    const primaryParent = stu.primaryParentName
-      ? {
-          fullName: stu.primaryParentName,
-          phone: stu.primaryParentPhone ?? null,
-          zalo: stu.primaryParentZalo ?? null,
-        }
-      : null
-    const enrollments = (enrollByStudent.get(stu.id) ?? []).map(e => displayClassName(e, classNames))
-    const promotions = promoByStudent.get(stu.id) ?? []
-    return { ...stu, primaryParent, enrollments, promotions }
+  return students.map(({ parents, enrollments, promotions, ...stu }) => {
+    const p = parents[0]
+    return {
+      ...api(stu),
+      primaryParent: p?.fullName ? { fullName: p.fullName, phone: p.phone ?? null, zalo: p.zalo ?? null } : null,
+      enrollments: enrollments.map(enrollmentDoc),
+      promotions: promotions.map(studentPromotionDoc),
+    }
   })
 }
 
@@ -97,10 +66,7 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
     const pageNum = Math.max(1, Math.floor(Number(page) || 1))
     const limitNum = Math.min(500, Math.max(1, Math.floor(Number(limit) || 20)))
     const { ids, ...pagination } = await getStudentPage({ page: pageNum, limit: limitNum, search, status, classId, gradeLevel, cursor })
-    const loaded = await loadStudentsByIds(ids)
-    const positions = new Map(ids.map((id, index) => [id, index]))
-    loaded.sort((a, b) => positions.get(a.id)! - positions.get(b.id)!)
-    const result = await enrichStudents(loaded)
+    const result = await enrichStudents(ids)
     res.json({ data: result, ...pagination })
   } catch (err) {
     next(err)
@@ -127,19 +93,9 @@ router.post('/bulk', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthR
     }
     if (!students?.length) { res.status(400).json({ message: 'Danh sách rỗng' }); return }
 
-    // Cache class name → classId lookup (tránh truy vấn trùng)
-    const classCache: Record<string, { id: string; name: string } | null> = {}
-    const lookupClass = async (name: string) => {
-      const key = name.trim().toLowerCase()
-      if (key in classCache) return classCache[key]
-      const snap = await db.collection(C.CLASSES).get()
-      for (const doc of snap.docs) {
-        const n = (doc.data().name as string ?? '').trim().toLowerCase()
-        if (n === key) { classCache[key] = { id: doc.id, name: doc.data().name as string }; return classCache[key] }
-      }
-      classCache[key] = null
-      return null
-    }
+    // Tra lớp theo tên (không phân biệt hoa thường), nạp một lần
+    const classes = await prisma.class.findMany({ select: { id: true, name: true } })
+    const classByName = new Map(classes.map(c => [c.name.trim().toLowerCase(), c]))
 
     const created: string[] = []
     const failed: { row: number; name: string; error: string }[] = []
@@ -148,50 +104,44 @@ router.post('/bulk', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthR
       const s = students[i]
       if (!s.fullName?.trim()) { failed.push({ row: i + 1, name: '', error: 'Thiếu họ tên' }); continue }
       try {
-        const studentData = {
-          fullName: s.fullName.trim(),
-          dateOfBirth: s.dateOfBirth || null,
-          gender: s.gender || null,
-          school: s.school || null,
-          gradeLevel: s.gradeLevel ? Number(s.gradeLevel) : null,
-          address: s.address || null,
-          notes: s.notes || null,
-          enrollmentDate: s.enrollmentDate || now().slice(0, 10),
-          status: 'ACTIVE',
-          createdAt: now(), updatedAt: now(),
+        const dateOfBirth = dayOrNull(s.dateOfBirth)
+        if (s.dateOfBirth && !dateOfBirth) {
+          failed.push({ row: i + 1, name: s.fullName, error: `Ngày sinh "${s.dateOfBirth}" không đọc được — học viên vẫn được tạo, chưa có ngày sinh` })
         }
-        const ref = await db.collection(C.STUDENTS).add(studentData)
-        const studentId = ref.id
+        const enrollmentDate = dayOrNull(s.enrollmentDate) ?? toDay(today())!
+        const cls = s.className?.trim() ? classByName.get(s.className.trim().toLowerCase()) : undefined
+        const studentId = newId()
 
-        if (s.parentName?.trim()) {
-          await db.collection(C.STUDENTS).doc(studentId).collection('parents').add({
-            studentId,
-            fullName: s.parentName.trim(),
-            phone: s.parentPhone?.trim() || null,
-            relationship: 'PHỤ HUYNH',
-            isPrimaryContact: true,
-            createdAt: now(),
-          })
-          await syncPrimaryParentToStudent(studentId)
-        }
-
-        if (s.className?.trim()) {
-          const cls = await lookupClass(s.className)
-          if (cls) {
-            await db.collection(C.ENROLLMENTS).add({
-              classId: cls.id,
-              className: cls.name,
-              studentId,
-              studentName: s.fullName.trim(),
-              enrollmentDate: s.enrollmentDate || now().slice(0, 10),
+        // Học viên + phụ huynh + ghi danh của một dòng: cùng một transaction
+        await prisma.$transaction(async tx => {
+          await tx.student.create({
+            data: {
+              id: studentId,
+              fullName: s.fullName.trim(),
+              dateOfBirth,
+              gender: (s.gender as Prisma.StudentCreateInput['gender']) || null,
+              school: s.school || null,
+              gradeLevel: s.gradeLevel ? Number(s.gradeLevel) : null,
+              address: s.address || null,
+              notes: s.notes || null,
+              enrollmentDate,
               status: 'ACTIVE',
-              createdAt: now(),
+            },
+          })
+          if (s.parentName?.trim()) {
+            await tx.parent.create({
+              data: { id: newId(), studentId, fullName: s.parentName.trim(), phone: s.parentPhone?.trim() || null, relationship: 'PHỤ HUYNH', isPrimaryContact: true },
             })
-            await recountClassActiveStudents(cls.id)
-          } else {
-            // Ghi chú lỗi phụ nhưng không fail học viên
-            failed.push({ row: i + 1, name: s.fullName, error: `Không tìm thấy lớp "${s.className}" — học viên đã được tạo nhưng chưa đăng ký lớp` })
           }
+          if (cls) {
+            await tx.classEnrollment.create({ data: { id: newId(), classId: cls.id, studentId, enrollmentDate, status: 'ACTIVE' } })
+            await recountClassActiveStudents(cls.id, tx)
+          }
+        })
+
+        if (s.className?.trim() && !cls) {
+          // Ghi chú lỗi phụ nhưng không fail học viên
+          failed.push({ row: i + 1, name: s.fullName, error: `Không tìm thấy lớp "${s.className}" — học viên đã được tạo nhưng chưa đăng ký lớp` })
         }
 
         created.push(studentId)
@@ -208,11 +158,11 @@ router.post('/bulk', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthR
 router.get('/private-sessions/all', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { fromDate, toDate } = req.query as Record<string, string>
-    let query = db.collection(C.PRIVATE_SCHEDULES) as FirebaseFirestore.Query
-    if (fromDate) query = query.where('sessionDate', '>=', fromDate)
-    if (toDate) query = query.where('sessionDate', '<=', toDate)
-    const snap = await query.get()
-    res.json(toDocs(snap))
+    const sessions = await prisma.privateSession.findMany({
+      where: { sessionDate: { ...(fromDate ? { gte: toDay(fromDate)! } : {}), ...(toDate ? { lte: toDay(toDate)! } : {}) } },
+      include: privateSessionInclude,
+    })
+    res.json(sessions.map(privateSessionDoc))
   } catch (err) { next(err) }
 })
 
@@ -229,41 +179,27 @@ router.get('/private-schedule/missing', async (req: AuthRequest, res: Response, 
 // GET /api/students/:id — Hồ sơ chi tiết
 router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const doc = await db.collection(C.STUDENTS).doc(s(req.params.id)).get()
-    if (!doc.exists) { res.status(404).json({ message: 'Không tìm thấy học viên' }); return }
+    const student = await prisma.student.findUnique({
+      where: { id: s(req.params.id) },
+      include: {
+        parents: true,
+        enrollments: { include: enrollmentInclude },
+        // 6 phiếu học phí gần nhất
+        tuitionRecords: { include: tuitionRecordInclude, orderBy: [{ billingYear: 'desc' }, { billingMonth: 'desc' }], take: 6 },
+        // Khuyến mãi đang hiệu lực (chưa có ngày kết thúc)
+        promotions: { where: { appliedTo: null }, include: studentPromotionInclude },
+      },
+    })
+    if (!student) { res.status(404).json({ message: 'Không tìm thấy học viên' }); return }
 
-    const student = toObj<Student>(doc)
-
-    // Subcollection parents
-    const parentsSnap = await db.collection(C.STUDENTS).doc(student.id).collection('parents').get()
-    const parents = parentsSnap.docs.map(d => ({ id: d.id, ...d.data() }))
-
-    // Enrollments
-    const enrollSnap = await db.collection(C.ENROLLMENTS)
-      .where('studentId', '==', student.id)
-      .get()
-    const storedEnrollments = toDocs<ClassEnrollment>(enrollSnap)
-    const classNames = await currentClassNames(storedEnrollments.map(e => e.classId))
-    const enrollments = storedEnrollments.map(e => displayClassName(e, classNames))
-
-    // Tuition records (6 tháng gần nhất) — sort in memory to avoid composite index requirement
-    const tuitionSnap = await db.collection(C.TUITION_RECORDS)
-      .where('studentId', '==', student.id)
-      .get()
-    const tuitionRecords = toDocs(tuitionSnap)
-      .sort((a: any, b: any) => b.billingYear - a.billingYear || b.billingMonth - a.billingMonth)
-      .slice(0, 6)
-
-    // Promotions đang hiệu lực
-    let promotions: any[] = []
-    try {
-      const promoSnap = await db.collection(C.STUDENT_PROMOTIONS)
-        .where('studentId', '==', student.id)
-        .get()
-      promotions = toDocs(promoSnap).filter((p: any) => p.appliedTo == null)
-    } catch (_) { /* index chưa tạo — bỏ qua */ }
-
-    res.json({ ...student, parents, enrollments, tuitionRecords, promotions })
+    const { parents, enrollments, tuitionRecords, promotions, ...rest } = student
+    res.json({
+      ...api(rest),
+      parents: api(parents),
+      enrollments: enrollments.map(enrollmentDoc),
+      tuitionRecords: tuitionRecords.map(tuitionRecordDoc),
+      promotions: promotions.map(studentPromotionDoc),
+    })
   } catch (err) {
     next(err)
   }
@@ -273,37 +209,32 @@ router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) =
 router.post('/', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { fullName, dateOfBirth, gender, school, gradeLevel, address, notes, parents } = req.body
+    const studentId = newId()
 
-    const studentData: Omit<Student, 'id'> = {
-      fullName,
-      dateOfBirth: dateOfBirth || null,
-      gender: gender || null,
-      school: school || null,
-      gradeLevel: gradeLevel ? Number(gradeLevel) : null,
-      address: address || null,
-      enrollmentDate: now().slice(0, 10),
-      status: 'ACTIVE',
-      notes: notes || null,
-      createdAt: now(),
-      updatedAt: now(),
-    } as Omit<Student, 'id'>
-
-    const ref = await db.collection(C.STUDENTS).add(studentData)
-    const studentId = ref.id
-
-    // Thêm parents vào subcollection
-    if (parents?.length) {
-      const batch = db.batch()
-      for (const p of parents as Record<string, unknown>[]) {
-        const pRef = db.collection(C.STUDENTS).doc(studentId).collection('parents').doc()
-        batch.set(pRef, { ...p, studentId, createdAt: now() })
-      }
-      await batch.commit()
-      await syncPrimaryParentToStudent(studentId)
-    }
-
-    const created = toObj<Student>(await ref.get())
-    res.status(201).json(created)
+    const [student] = await prisma.$transaction([
+      prisma.student.create({
+        data: {
+          id: studentId,
+          fullName,
+          dateOfBirth: toDay(dateOfBirth),
+          gender: gender || null,
+          school: school || null,
+          gradeLevel: gradeLevel ? Number(gradeLevel) : null,
+          address: address || null,
+          enrollmentDate: toDay(today())!,
+          status: 'ACTIVE',
+          notes: notes || null,
+        },
+      }),
+      // Thêm phụ huynh
+      prisma.parent.createMany({
+        data: ((parents ?? []) as Record<string, any>[]).map(p => ({
+          id: newId(), studentId, fullName: p.fullName ?? '', relationship: p.relationship || null,
+          phone: p.phone || null, zalo: p.zalo || null, email: p.email || null, isPrimaryContact: !!p.isPrimaryContact,
+        })),
+      }),
+    ])
+    res.status(201).json(api(student))
   } catch (err) {
     next(err)
   }
@@ -315,40 +246,28 @@ router.put('/:id', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: 
     const { fullName, dateOfBirth, gender, school, gradeLevel, address, status, notes, parentName, phone, parentId } = req.body
     const studentId = s(req.params.id)
 
-    const updates: Record<string, unknown> = { updatedAt: now() }
-    if (fullName !== undefined) updates.fullName = fullName
-    if (dateOfBirth !== undefined) updates.dateOfBirth = dateOfBirth
-    if (gender !== undefined) updates.gender = gender
-    if (school !== undefined) updates.school = school
-    if (gradeLevel !== undefined) updates.gradeLevel = gradeLevel ? Number(gradeLevel) : null
-    if (address !== undefined) updates.address = address
-    if (status !== undefined) updates.status = status
-    if (notes !== undefined) updates.notes = notes
+    const updated = await prisma.$transaction(async tx => {
+      const student = await tx.student.update({
+        where: { id: studentId },
+        data: {
+          fullName, gender, school, address, status, notes,
+          dateOfBirth: dateOfBirth === undefined ? undefined : toDay(dateOfBirth),
+          gradeLevel: gradeLevel === undefined ? undefined : gradeLevel ? Number(gradeLevel) : null,
+        },
+      })
 
-    await db.collection(C.STUDENTS).doc(studentId).update(updates)
-
-    // Cập nhật hoặc tạo mới primary parent
-    if (parentName !== undefined || phone !== undefined) {
-      const parentRef = parentId
-        ? db.collection(C.STUDENTS).doc(studentId).collection('parents').doc(s(parentId))
-        : null
-
-      if (parentRef) {
-        await parentRef.update({ fullName: parentName ?? '', phone: phone ?? '' })
-      } else if (parentName || phone) {
-        await db.collection(C.STUDENTS).doc(studentId).collection('parents').add({
-          fullName: parentName || '',
-          phone: phone || '',
-          isPrimaryContact: true,
-          studentId,
-          createdAt: now(),
-        })
+      // Cập nhật hoặc tạo mới primary parent
+      if (parentName !== undefined || phone !== undefined) {
+        if (parentId) {
+          await tx.parent.update({ where: { id: s(parentId), studentId }, data: { fullName: parentName ?? '', phone: phone ?? '' } })
+        } else if (parentName || phone) {
+          await tx.parent.create({ data: { id: newId(), studentId, fullName: parentName || '', phone: phone || '', isPrimaryContact: true } })
+        }
       }
-      await syncPrimaryParentToStudent(studentId)
-    }
+      return student
+    })
 
-    const updated = toObj<Student>(await db.collection(C.STUDENTS).doc(studentId).get())
-    res.json(updated)
+    res.json(api(updated))
   } catch (err) {
     next(err)
   }
@@ -357,11 +276,12 @@ router.put('/:id', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: 
 // POST /api/students/:id/enroll/:enrollmentId/remove — xoá enrollment
 router.post('/:id/enroll/:enrollmentId/remove', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const enrollRef = db.collection(C.ENROLLMENTS).doc(s(req.params.enrollmentId))
-    const enrollDoc = await enrollRef.get()
-    const classId = enrollDoc.exists ? (enrollDoc.data()!.classId as string) : null
-    await enrollRef.delete()
-    if (classId) await recountClassActiveStudents(classId)
+    await prisma.$transaction(async tx => {
+      const enrollment = await tx.classEnrollment.findUnique({ where: { id: s(req.params.enrollmentId) }, select: { classId: true } })
+      if (!enrollment) return
+      await tx.classEnrollment.delete({ where: { id: s(req.params.enrollmentId) } })
+      await recountClassActiveStudents(enrollment.classId, tx)
+    })
     res.json({ message: 'Đã xoá đăng ký lớp học' })
   } catch (err) {
     next(err)
@@ -371,7 +291,7 @@ router.post('/:id/enroll/:enrollmentId/remove', requireRole('ADMIN', 'STAFF'), a
 // DELETE /api/students/:id — soft delete
 router.delete('/:id', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    await db.collection(C.STUDENTS).doc(s(req.params.id)).update({ status: 'INACTIVE', updatedAt: now() })
+    await prisma.student.update({ where: { id: s(req.params.id) }, data: { status: 'INACTIVE' } })
     res.json({ message: 'Đã chuyển học viên sang trạng thái không hoạt động' })
   } catch (err) {
     next(err)
@@ -382,60 +302,23 @@ router.delete('/:id', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, re
 router.delete('/:id/hard', requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const studentId = s(req.params.id)
-    const studentRef = db.collection(C.STUDENTS).doc(studentId)
 
-    // Lấy danh sách các collection liên quan
-    const [parentsSnap, enrollSnap, privateSnap, attendSnap, tuitionSnap, paymentSnap, promoSnap] = await Promise.all([
-      studentRef.collection('parents').get(),
-      db.collection(C.ENROLLMENTS).where('studentId', '==', studentId).get(),
-      db.collection(C.PRIVATE_SCHEDULES).where('studentId', '==', studentId).get(),
-      db.collection(C.STUDENT_ATTENDANCES).where('studentId', '==', studentId).get(),
-      db.collection(C.TUITION_RECORDS).where('studentId', '==', studentId).get(),
-      db.collection(C.PAYMENTS).where('studentId', '==', studentId).get(),
-      db.collection(C.STUDENT_PROMOTIONS).where('studentId', '==', studentId).get(),
-    ])
-
-    // Lưu lại classIds đang ACTIVE để recount sau khi xoá
-    const affectedClassIds = new Set<string>()
-    for (const doc of enrollSnap.docs) {
-      if (doc.data().status === 'ACTIVE') affectedClassIds.add(doc.data().classId as string)
-    }
-
-    // Xoá song song
-    await Promise.all([
-      ...parentsSnap.docs.map(d => d.ref.delete()),
-      ...enrollSnap.docs.map(d => d.ref.delete()),
-      ...privateSnap.docs.map(d => d.ref.delete()),
-      ...attendSnap.docs.map(d => d.ref.delete()),
-      ...tuitionSnap.docs.map(d => d.ref.delete()),
-      ...paymentSnap.docs.map(d => d.ref.delete()),
-      ...promoSnap.docs.map(d => d.ref.delete()),
-    ])
-
-    // Xoá doc HV
-    await studentRef.delete()
-
-    // Recount activeStudentCount cho các lớp bị ảnh hưởng
-    const { recountClassActiveStudents } = await import('../lib/classSync')
-    await Promise.all(Array.from(affectedClassIds).map(cid => recountClassActiveStudents(cid)))
+    await prisma.$transaction(async tx => {
+      const active = await tx.classEnrollment.findMany({ where: { studentId, status: 'ACTIVE' }, select: { classId: true } })
+      // Học phí và thanh toán được bảo vệ bằng khoá ngoại RESTRICT → xoá trước, có chủ đích.
+      await tx.payment.deleteMany({ where: { studentId } })
+      await tx.tuitionRecord.deleteMany({ where: { studentId } })
+      // Phụ huynh, ghi danh, lịch riêng, điểm danh, khuyến mãi, điểm, nhận xét: xoá theo học viên (ON DELETE CASCADE).
+      await tx.student.delete({ where: { id: studentId } })
+      // Recount activeStudentCount cho các lớp bị ảnh hưởng
+      for (const classId of new Set(active.map(e => e.classId))) await recountClassActiveStudents(classId, tx)
+    })
 
     res.json({ message: 'Đã xoá hoàn toàn dữ liệu học viên' })
   } catch (err) {
     next(err)
   }
 })
-
-// Helper xóa mảng query snapshot theo batch
-async function deleteQueryDocs(querySnap: FirebaseFirestore.QuerySnapshot) {
-  const docs = querySnap.docs
-  const chunkSize = 400
-  for (let i = 0; i < docs.length; i += chunkSize) {
-    const chunk = docs.slice(i, i + chunkSize)
-    const batch = db.batch()
-    chunk.forEach(doc => batch.delete(doc.ref))
-    await batch.commit()
-  }
-}
 
 // POST /api/students/bulk-delete — HARD DELETE xoá vĩnh viễn tất cả học viên (xác nhận MK)
 router.post('/bulk-delete', requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -446,47 +329,22 @@ router.post('/bulk-delete', requireRole('ADMIN'), async (req: AuthRequest, res: 
       return
     }
 
-    const studentsSnap = await db.collection(C.STUDENTS).get()
-    const studentDocs = studentsSnap.docs
-    if (!studentDocs.length) {
+    const count = await prisma.student.count()
+    if (!count) {
       res.json({ message: 'Không có học viên nào trong cơ sở dữ liệu', count: 0 })
       return
     }
 
-    // Lấy tất cả bản ghi liên quan
-    const [enrollSnap, privateSnap, attendSnap, tuitionSnap, paymentSnap, promoSnap] = await Promise.all([
-      db.collection(C.ENROLLMENTS).get(),
-      db.collection(C.PRIVATE_SCHEDULES).get(),
-      db.collection(C.STUDENT_ATTENDANCES).get(),
-      db.collection(C.TUITION_RECORDS).get(),
-      db.collection(C.PAYMENTS).get(),
-      db.collection(C.STUDENT_PROMOTIONS).get(),
+    await prisma.$transaction([
+      prisma.payment.deleteMany(),
+      prisma.tuitionRecord.deleteMany(),
+      // Mọi dữ liệu gắn với học viên xoá theo (ON DELETE CASCADE)
+      prisma.student.deleteMany(),
+      // Đặt số học viên của tất cả các lớp về 0
+      prisma.class.updateMany({ data: { activeStudentCount: 0 } }),
     ])
 
-    // Xóa subcollection parents của từng học viên
-    for (const studentDoc of studentDocs) {
-      const parentsSnap = await studentDoc.ref.collection('parents').get()
-      await deleteQueryDocs(parentsSnap)
-    }
-
-    // Xóa các bản ghi liên quan và tài liệu học viên
-    await Promise.all([
-      deleteQueryDocs(enrollSnap),
-      deleteQueryDocs(privateSnap),
-      deleteQueryDocs(attendSnap),
-      deleteQueryDocs(tuitionSnap),
-      deleteQueryDocs(paymentSnap),
-      deleteQueryDocs(promoSnap),
-      deleteQueryDocs(studentsSnap),
-    ])
-
-    // Đặt số học viên của tất cả các lớp về 0
-    const classesSnap = await db.collection(C.CLASSES).get()
-    for (const classDoc of classesSnap.docs) {
-      await classDoc.ref.update({ activeStudentCount: 0 })
-    }
-
-    res.json({ message: `Đã xóa vĩnh viễn toàn bộ ${studentDocs.length} học viên cùng tất cả dữ liệu liên quan`, count: studentDocs.length })
+    res.json({ message: `Đã xóa vĩnh viễn toàn bộ ${count} học viên cùng tất cả dữ liệu liên quan`, count })
   } catch (err) {
     next(err)
   }
@@ -498,31 +356,30 @@ router.post('/:id/enroll', requireRole('ADMIN', 'STAFF'), async (req: AuthReques
     const studentId = s(req.params.id)
     const { classId, enrollmentDate, customTuitionRate, notes } = req.body as { classId: string; enrollmentDate?: string; customTuitionRate?: number; notes?: string }
 
-    // Lấy thông tin student và class để denormalize
-    const [studentDoc, classDoc] = await Promise.all([
-      db.collection(C.STUDENTS).doc(studentId).get(),
-      db.collection(C.CLASSES).doc(classId).get(),
+    const [student, cls] = await Promise.all([
+      prisma.student.findUnique({ where: { id: studentId }, select: { id: true } }),
+      prisma.class.findUnique({ where: { id: classId }, select: { id: true } }),
     ])
 
-    if (!studentDoc.exists || !classDoc.exists) {
+    if (!student || !cls) {
       res.status(404).json({ message: 'Không tìm thấy học viên hoặc lớp học' }); return
     }
 
-    const enrollment: Record<string, unknown> = {
-      classId,
-      className: classDoc.data()!.name as string,
-      studentId,
-      studentName: studentDoc.data()!.fullName as string,
-      enrollmentDate: enrollmentDate || now().slice(0, 10),
-      status: 'ACTIVE',
-      createdAt: now(),
-    }
-    if (customTuitionRate) enrollment.customTuitionRate = Number(customTuitionRate)
-    if (notes) enrollment.notes = notes
-
-    const ref = await db.collection(C.ENROLLMENTS).add(enrollment)
-    await recountClassActiveStudents(classId)
-    res.status(201).json({ id: ref.id, ...enrollment })
+    const enrollment = await prisma.$transaction(async tx => {
+      const created = await tx.classEnrollment.create({
+        data: {
+          id: newId(), classId, studentId,
+          enrollmentDate: toDay(enrollmentDate || today())!,
+          status: 'ACTIVE',
+          customTuitionRate: customTuitionRate ? Number(customTuitionRate) : null,
+          notes: notes || null,
+        },
+        include: enrollmentInclude,
+      })
+      await recountClassActiveStudents(classId, tx)
+      return created
+    })
+    res.status(201).json(enrollmentDoc(enrollment))
   } catch (err) {
     next(err)
   }
@@ -532,14 +389,13 @@ router.post('/:id/enroll', requireRole('ADMIN', 'STAFF'), async (req: AuthReques
 router.put('/:id/enroll/:enrollmentId/drop', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { dropDate } = req.body
-    const enrollRef = db.collection(C.ENROLLMENTS).doc(s(req.params.enrollmentId))
-    const enrollDoc = await enrollRef.get()
-    const classId = enrollDoc.exists ? (enrollDoc.data()!.classId as string) : null
-    await enrollRef.update({
-      status: 'DROPPED',
-      dropDate: dropDate || now().slice(0, 10),
+    await prisma.$transaction(async tx => {
+      const enrollment = await tx.classEnrollment.update({
+        where: { id: s(req.params.enrollmentId) },
+        data: { status: 'DROPPED', dropDate: toDay(dropDate || today())! },
+      })
+      await recountClassActiveStudents(enrollment.classId, tx)
     })
-    if (classId) await recountClassActiveStudents(classId)
     res.json({ message: 'Đã nghỉ lớp' })
   } catch (err) {
     next(err)
@@ -550,26 +406,16 @@ router.put('/:id/enroll/:enrollmentId/drop', requireRole('ADMIN', 'STAFF'), asyn
 router.get('/:id/attendance', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { month, year, classId } = req.query as Record<string, string>
-    const studentId = req.params.id
+    const studentId = s(req.params.id)
 
-    // Không dùng orderBy kèm where để tránh yêu cầu composite index
-    let query = db.collection(C.STUDENT_ATTENDANCES).where('studentId', '==', studentId)
-    if (classId) query = query.where('classId', '==', classId)
-
-    const snap = await query.get()
-    let attendances = toDocs<StudentAttendance>(snap)
-      .sort((a, b) => (b.sessionDate > a.sessionDate ? 1 : -1))
-
-    // Filter by month/year in memory
+    const where: Prisma.StudentAttendanceWhereInput = { studentId, ...(classId ? { classId } : {}) }
     if (month && year) {
-      const m = month.padStart(2, '0')
-      attendances = attendances.filter(a => {
-        const d = a.sessionDate.slice(0, 7) // "YYYY-MM"
-        return d === `${year}-${m}`
-      })
+      where.session = { sessionDate: { gte: new Date(Date.UTC(Number(year), Number(month) - 1, 1)), lte: new Date(Date.UTC(Number(year), Number(month), 0)) } }
     }
-
-    res.json(attendances)
+    const attendances = await prisma.studentAttendance.findMany({
+      where, include: studentAttendanceInclude, orderBy: { session: { sessionDate: 'desc' } },
+    })
+    res.json(attendances.map(studentAttendanceDoc))
   } catch (err) {
     next(err)
   }
@@ -579,66 +425,49 @@ router.get('/:id/attendance', async (req: AuthRequest, res: Response, next: Next
 // Trả về lịch học cá nhân của học viên trong tháng: sessions của tất cả lớp đang học
 router.get('/:id/schedule', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const studentId = req.params.id
+    const studentId = s(req.params.id)
     const now = new Date()
     const month = Number((req.query.month as string) || now.getMonth() + 1)
     const year  = Number((req.query.year  as string) || now.getFullYear())
 
     // 1. Lấy tất cả enrollments của học viên (kể cả dropped để xem lịch cũ)
-    const enrollSnap = await db.collection(C.ENROLLMENTS)
-      .where('studentId', '==', studentId)
-      .get()
-    const enrollments = toDocs<ClassEnrollment>(enrollSnap)
+    const enrollments: ClassEnrollment[] = (await prisma.classEnrollment.findMany({ where: { studentId }, include: enrollmentInclude })).map(enrollmentDoc)
 
-    // 2. Với mỗi lớp, lấy sessions của tháng đó (filter in memory tránh index)
-    const monthStr = `${year}-${String(month).padStart(2, '0')}`
-
-    // Lấy thông tin lớp (tuitionRate, teacher) từ collection classes
+    // Lấy thông tin lớp (tuitionRate, teacher) và các buổi trong tháng của các lớp đó
     const classIds = [...new Set(enrollments.map(e => e.classId))]
-    const classDocs = await Promise.all(
-      classIds.map(cid => db.collection(C.CLASSES).doc(cid).get())
-    )
+    const [classes, monthSessions] = await Promise.all([
+      prisma.class.findMany({ where: { id: { in: classIds } }, include: classInclude }),
+      prisma.session.findMany({
+        where: { classId: { in: classIds }, sessionDate: { gte: new Date(Date.UTC(year, month - 1, 1)), lte: new Date(Date.UTC(year, month, 0)) } },
+        include: sessionInclude,
+      }),
+    ])
     const classMap: Record<string, Record<string, unknown>> = {}
-    classDocs.forEach(d => { if (d.exists) classMap[d.id] = { id: d.id, ...d.data() } })
+    classes.forEach(c => { classMap[c.id] = classDoc(c) })
 
-    // Lấy sessions của từng lớp
-    const sessionsByClass = await Promise.all(
-      classIds.map(cid =>
-        db.collection(C.SESSIONS).where('classId', '==', cid).get()
-          .then(snap => toDocs(snap))
-      )
-    )
-
-    // Gộp và filter theo tháng
     const allSessions: Record<string, unknown>[] = []
-    sessionsByClass.forEach((sessions, idx) => {
-      const cid = classIds[idx]
-      const cls = classMap[cid] || {}
+    for (const s of monthSessions.map(sessionDoc) as any[]) {
+      const cls = classMap[s.classId] || {}
       // A student can leave and rejoin the same class. Match each session to
       // an enrollment covering its date, rather than the first stored record.
-      const classEnrollments = enrollments.filter(e => e.classId === cid)
+      const classEnrollments = enrollments.filter(e => e.classId === s.classId)
         .sort((a, b) => Number(b.status === 'ACTIVE') - Number(a.status === 'ACTIVE')
           || (b.enrollmentDate || '').localeCompare(a.enrollmentDate || '')
           || a.id.localeCompare(b.id))
-
-      sessions
-        .forEach((s: any) => {
-          if (!s.sessionDate || !s.sessionDate.startsWith(monthStr)) return
-          const enroll = classEnrollments.find(e =>
-            (!e.enrollmentDate || s.sessionDate >= e.enrollmentDate)
-            && (e.status !== 'DROPPED' || !e.dropDate || s.sessionDate <= e.dropDate)
-          )
-          if (!enroll) return
-          // Học phí buổi: ưu tiên customTuitionRate của enrollment, fallback về class tuitionRate
-          const rate = (enroll?.customTuitionRate as number) || classRateForMonth(cls, month, year)
-          allSessions.push({
-            ...s,
-            className: (cls.name as string) || s.className,
-            teacherName: (cls.teacherName as string) || s.teacherName,
-            ratePerSession: rate,
-          })
-        })
-    })
+      const enroll = classEnrollments.find(e =>
+        (!e.enrollmentDate || s.sessionDate >= e.enrollmentDate)
+        && (e.status !== 'DROPPED' || !e.dropDate || s.sessionDate <= e.dropDate)
+      )
+      if (!enroll) continue
+      // Học phí buổi: ưu tiên customTuitionRate của enrollment, fallback về class tuitionRate
+      const rate = (enroll?.customTuitionRate as number) || classRateForMonth(cls, month, year)
+      allSessions.push({
+        ...s,
+        className: (cls.name as string) || s.className,
+        teacherName: (cls.teacherName as string) || s.teacherName,
+        ratePerSession: rate,
+      })
+    }
 
     // Sắp xếp theo ngày rồi giờ
     allSessions.sort((a: any, b: any) => {
@@ -657,42 +486,27 @@ router.get('/:id/schedule', async (req: AuthRequest, res: Response, next: NextFu
 router.get('/:id/tuition-summary', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const studentId = s(req.params.id)
-    const summary = await computeTuitionSummary(studentId)
-
-    const recordsSnap = await db.collection(C.TUITION_RECORDS)
-      .where('studentId', '==', studentId)
-      .get()
+    const [summary, records, paid] = await Promise.all([
+      computeTuitionSummary(studentId),
+      prisma.tuitionRecord.findMany({ where: { studentId }, include: tuitionRecordInclude }).then(rows => rows.map(tuitionRecordDoc)),
+      prisma.payment.groupBy({ by: ['tuitionRecordId'], where: { studentId }, _sum: { amount: true } }),
+    ])
     const recordsByKey = new Map<string, any>()
-    recordsSnap.forEach(doc => {
-      const d = { id: doc.id, ...(doc.data() as any) }
-      recordsByKey.set(`${d.billingYear}-${d.billingMonth}-${d.classId}`, d)
-    })
-
-    const recordIds = Array.from(recordsByKey.values()).map((r: any) => r.id as string)
-    const paidByRecord = new Map<string, number>()
-    for (let i = 0; i < recordIds.length; i += 10) {
-      const chunk = recordIds.slice(i, i + 10)
-      if (chunk.length === 0) continue
-      const paySnap = await db.collection(C.PAYMENTS)
-        .where('tuitionRecordId', 'in', chunk).get()
-      paySnap.forEach(p => {
-        const data = p.data() as any
-        paidByRecord.set(data.tuitionRecordId, (paidByRecord.get(data.tuitionRecordId) || 0) + (data.amount || 0))
-      })
-    }
+    records.forEach((d: any) => recordsByKey.set(`${d.billingYear}-${d.billingMonth}-${d.classId}`, d))
+    const paidByRecord = new Map(paid.map(p => [p.tuitionRecordId, p._sum.amount ?? 0]))
 
     const enriched = summary.map((row: any) => {
       const rec = recordsByKey.get(`${row.year}-${row.month}-${row.classId}`)
       if (!rec) return { ...row, tuitionRecord: null }
-      const paid = paidByRecord.get(rec.id) || 0
+      const paidAmount = paidByRecord.get(rec.id) || 0
       return {
         ...row,
         tuitionRecord: {
           id: rec.id,
           finalAmount: rec.finalAmount,
           status: rec.status,
-          paidAmount: paid,
-          remainingAmount: Math.max(0, rec.finalAmount - paid),
+          paidAmount,
+          remainingAmount: Math.max(0, rec.finalAmount - paidAmount),
         },
       }
     })
@@ -711,18 +525,13 @@ router.get('/:id/private-schedule', async (req: AuthRequest, res: Response, next
     const studentId = s(req.params.id)
     const { month, year } = req.query as Record<string, string>
 
-    const snap = await db.collection(C.PRIVATE_SCHEDULES)
-      .where('studentId', '==', studentId)
-      .get()
-
-    let sessions = toDocs<PrivateSession>(snap)
-
+    const where: Prisma.PrivateSessionWhereInput = { studentId }
     if (month && year) {
-      const monthStr = `${year}-${String(Number(month)).padStart(2, '0')}`
-      sessions = sessions.filter(s => s.sessionDate.startsWith(monthStr))
+      where.sessionDate = { gte: new Date(Date.UTC(Number(year), Number(month) - 1, 1)), lte: new Date(Date.UTC(Number(year), Number(month), 0)) }
     }
 
-    sessions.sort((a, b) =>
+    const sessions = (await prisma.privateSession.findMany({ where, include: privateSessionInclude })).map(privateSessionDoc)
+    sessions.sort((a: any, b: any) =>
       a.sessionDate !== b.sessionDate
         ? b.sessionDate.localeCompare(a.sessionDate)
         : (b.startTime ?? '').localeCompare(a.startTime ?? '')
@@ -742,25 +551,23 @@ router.post('/:id/private-schedule', requireRole('ADMIN', 'STAFF', 'TEACHER'), a
 
     if (!sessions?.length) { res.status(400).json({ message: 'Cần ít nhất 1 buổi học' }); return }
 
-    const studentDoc = await db.collection(C.STUDENTS).doc(studentId).get()
-    if (!studentDoc.exists) { res.status(404).json({ message: 'Không tìm thấy học viên' }); return }
-    const studentName = studentDoc.data()!.fullName as string
+    const student = await prisma.student.findUnique({ where: { id: studentId }, select: { id: true } })
+    if (!student) { res.status(404).json({ message: 'Không tìm thấy học viên' }); return }
 
-    const created = await Promise.all(sessions.map(sess => {
-      const data: Omit<PrivateSession, 'id'> = {
-        studentId, studentName,
-        sessionDate: sess.sessionDate,
-        startTime: sess.startTime,
-        endTime: sess.endTime,
+    const created = await prisma.$transaction(sessions.map(sess => prisma.privateSession.create({
+      data: {
+        id: newId(), studentId,
+        sessionDate: toDay(sess.sessionDate)!,
+        startTime: sess.startTime || null,
+        endTime: sess.endTime || null,
         ratePerSession: Number(sess.ratePerSession) || 0,
         status: 'SCHEDULED',
         notes: sess.notes,
-        createdAt: now(), updatedAt: now(),
-      }
-      return db.collection(C.PRIVATE_SCHEDULES).add(data).then(ref => ({ id: ref.id, ...data }))
-    }))
+      },
+      include: privateSessionInclude,
+    })))
 
-    res.status(201).json({ message: `Đã tạo ${created.length} buổi học riêng`, sessions: created })
+    res.status(201).json({ message: `Đã tạo ${created.length} buổi học riêng`, sessions: created.map(privateSessionDoc) })
   } catch (err) { next(err) }
 })
 
@@ -768,11 +575,14 @@ router.post('/:id/private-schedule', requireRole('ADMIN', 'STAFF', 'TEACHER'), a
 router.put('/:id/private-schedule/:sessionId', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { startTime, endTime, teacherName } = req.body
-    const updates: Record<string, unknown> = { updatedAt: now() }
-    if (startTime !== undefined) updates.startTime = startTime || null
-    if (endTime !== undefined) updates.endTime = endTime || null
-    if (teacherName !== undefined) updates.teacherName = teacherName || null
-    await db.collection(C.PRIVATE_SCHEDULES).doc(s(req.params.sessionId)).update(updates)
+    await prisma.privateSession.update({
+      where: { id: s(req.params.sessionId) },
+      data: {
+        startTime: startTime === undefined ? undefined : startTime || null,
+        endTime: endTime === undefined ? undefined : endTime || null,
+        teacherName: teacherName === undefined ? undefined : teacherName || null,
+      },
+    })
     res.json({ message: 'Đã cập nhật buổi học' })
   } catch (err) { next(err) }
 })
@@ -780,7 +590,7 @@ router.put('/:id/private-schedule/:sessionId', requireRole('ADMIN', 'STAFF', 'TE
 // DELETE /api/students/:id/private-schedule/:sessionId
 router.delete('/:id/private-schedule/:sessionId', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    await db.collection(C.PRIVATE_SCHEDULES).doc(s(req.params.sessionId)).delete()
+    await prisma.privateSession.delete({ where: { id: s(req.params.sessionId) } })
     res.json({ message: 'Đã xoá buổi học' })
   } catch (err) { next(err) }
 })

@@ -1,5 +1,4 @@
 import { Request, Response, NextFunction } from 'express'
-import { waitUntil } from '@vercel/functions'
 import { invalidateReadView, ViewKind } from '../services/readViews'
 
 /** Deliver mutation responses after the shared view revision has changed. */
@@ -21,9 +20,9 @@ export function readViewInvalidation(req: Request, res: Response, next: NextFunc
     }
     const kinds: ViewKind[] = studentOrClass
       ? ['privateMissing', 'studentsIndex', 'tuition', 'dashboard'] : ['tuition', 'dashboard']
-    const delivery = Promise.all(kinds.map(invalidateReadView)).then(() => { originalJson.call(res, payload) })
-    waitUntil(delivery)
-    return res
+    // Revision nằm trong bộ nhớ tiến trình nên đổi ngay, trước khi trả kết quả.
+    kinds.forEach(kind => void invalidateReadView(kind))
+    return originalJson.call(res, payload)
   }
   next()
 }

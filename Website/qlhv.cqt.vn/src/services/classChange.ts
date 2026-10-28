@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { db, C } from '../lib/firebase'
+import { prisma, newId, toDay } from '../lib/db'
+import { classDoc, classInclude, scheduleDoc, scheduleInclude, sessionDoc, sessionInclude } from '../lib/docs'
 
 type Day = 'SUNDAY' | 'MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY' | 'FRIDAY' | 'SATURDAY'
 type Slot = { dayOfWeek: Day; startTime: string; endTime: string }
@@ -40,10 +41,9 @@ export function classRateForMonth(cls: any, month: number, year: number): number
 export async function renameClass(classId: string, value: unknown) {
   const name = String(value ?? '').trim()
   if (!name || name.length > 120) fail('Tên lớp phải có từ 1 đến 120 ký tự')
-  const ref = db.collection(C.CLASSES).doc(classId)
-  const current = await ref.get()
-  if (!current.exists) fail('Không tìm thấy lớp học', 404)
-  if (current.data()?.name !== name) await ref.update({ name })
+  const current = await prisma.class.findUnique({ where: { id: classId }, select: { name: true } })
+  if (!current) fail('Không tìm thấy lớp học', 404)
+  if (current!.name !== name) await prisma.class.update({ where: { id: classId }, data: { name } })
   return { id: classId, name }
 }
 
@@ -77,30 +77,23 @@ export async function prepareClassChange(classId: string, input: ClassChangeInpu
     seen.add(slot.dayOfWeek)
   }
 
-  const classRef = db.collection(C.CLASSES).doc(classId)
-  const [classDoc, schedulesSnap, sessionsSnap, recordsSnap] = await Promise.all([
-    classRef.get(),
-    db.collection(C.SCHEDULES).where('classId', '==', classId).get(),
-    db.collection(C.SESSIONS).where('classId', '==', classId).get(),
-    db.collection(C.TUITION_RECORDS).where('classId', '==', classId).get(),
+  // Đọc dạng tài liệu (ngày là chuỗi) để giữ nguyên logic so sánh bên dưới; sắp theo id để fingerprint ổn định.
+  const [classRow, schedules, sessions, records] = await Promise.all([
+    prisma.class.findUnique({ where: { id: classId }, include: classInclude }),
+    prisma.schedule.findMany({ where: { classId }, include: scheduleInclude, orderBy: { id: 'asc' } }).then(rows => rows.map(scheduleDoc)),
+    prisma.session.findMany({ where: { classId }, include: sessionInclude, orderBy: { id: 'asc' } }).then(rows => rows.map(sessionDoc)),
+    prisma.tuitionRecord.findMany({ where: { classId }, select: { id: true, status: true, billingYear: true, billingMonth: true }, orderBy: { id: 'asc' } }),
   ])
-  if (!classDoc.exists) fail('Không tìm thấy lớp học', 404)
-  const cls = classDoc.data()!
+  if (!classRow) fail('Không tìm thấy lớp học', 404)
+  const cls = classDoc(classRow!)
   if (cls.status !== 'ACTIVE') fail('Chỉ có thể sửa lớp đang hoạt động', 409)
   const effectiveDate = input.scope === 'schedule' ? input.effectiveDate! : vietnamDate()
-  const currentSchedules = schedulesSnap.docs.filter(doc => {
-    const s = doc.data()
+  const currentSchedules = schedules.filter(s => {
     const today = vietnamDate()
     return s.effectiveFrom <= today && (!s.effectiveTo || s.effectiveTo >= today)
   })
-  const oldSchedules = schedulesSnap.docs.filter(doc => {
-    const s = doc.data()
-    return s.effectiveFrom <= effectiveDate && (!s.effectiveTo || s.effectiveTo >= effectiveDate)
-  })
-  const oldDays = currentSchedules.map(doc => {
-    const s = doc.data()
-    return `${s.dayOfWeek}:${s.startTime}-${s.endTime}`
-  }).sort()
+  const oldSchedules = schedules.filter(s => s.effectiveFrom <= effectiveDate && (!s.effectiveTo || s.effectiveTo >= effectiveDate))
+  const oldDays = currentSchedules.map(s => `${s.dayOfWeek}:${s.startTime}-${s.endTime}`).sort()
   const newDays = requestedDays.map(slot => `${slot.dayOfWeek}:${slot.startTime}-${slot.endTime}`).sort()
   const scheduleChanged = input.scope === 'schedule' && JSON.stringify(oldDays) !== JSON.stringify(newDays)
   if (scheduleChanged && requestedDays.length === 0) fail('Lớp đang hoạt động cần ít nhất một ngày học; hãy kết thúc lớp nếu ngừng dạy', 409)
@@ -118,19 +111,17 @@ export async function prepareClassChange(classId: string, input: ClassChangeInpu
   if (rateChanged && existingHistory.some(item => item.effectiveMonth >= rateEffectiveMonth)) {
     fail('Đã có thay đổi đơn giá ở tháng này hoặc tháng sau; vui lòng đối chiếu trước', 409)
   }
-  const protectedRecords = recordsSnap.docs.filter(doc => {
-    const record = doc.data()
+  const protectedRecords = records.filter(record => {
     const period = `${record.billingYear}-${String(record.billingMonth).padStart(2, '0')}`
     return (scheduleChanged && period >= effectiveDate.slice(0, 7)) || (rateChanged && period >= rateEffectiveMonth)
   })
   if (protectedRecords.length) fail(`Đã có ${protectedRecords.length} phiếu học phí ở kỳ bị ảnh hưởng. Không thể tự sửa lịch hoặc đơn giá; cần đối chiếu phiếu trước.`, 409)
 
-  const oldScheduleIds = new Set(oldSchedules.map(doc => doc.id))
-  const toRemove = scheduleChanged ? sessionsSnap.docs.filter(doc => {
-    const s = doc.data()
-    return oldScheduleIds.has(s.scheduleId) && s.status === 'SCHEDULED' && s.sessionDate >= effectiveDate
-  }) : []
-  const existingDates = toRemove.map(doc => doc.data().sessionDate as string).sort()
+  const oldScheduleIds = new Set(oldSchedules.map(s => s.id))
+  const toRemove = scheduleChanged ? sessions.filter(s =>
+    oldScheduleIds.has(s.scheduleId) && s.status === 'SCHEDULED' && s.sessionDate >= effectiveDate
+  ) : []
+  const existingDates = toRemove.map(s => s.sessionDate as string).sort()
   const lastExisting = existingDates[existingDates.length - 1]
   const [year, month] = effectiveDate.slice(0, 7).split('-').map(Number)
   const horizon = new Date(Date.UTC(year, month + 1, 0)).toISOString().slice(0, 10)
@@ -143,18 +134,14 @@ export async function prepareClassChange(classId: string, input: ClassChangeInpu
 
   const holidays = new Set<string>()
   if (scheduleChanged) {
-    const holidaySnap = await db.collection(C.HOLIDAYS).get()
-    for (const doc of holidaySnap.docs) {
-      const h = doc.data()
-      if (Array.isArray(h.dates)) h.dates.forEach((date: string) => holidays.add(date))
-      else if (h.startDate && h.endDate) {
-        for (let date = h.startDate; date <= h.endDate; date = new Date(Date.parse(`${date}T00:00:00Z`) + 86400000).toISOString().slice(0, 10)) holidays.add(date)
-      } else if (h.date) holidays.add(h.date)
+    for (const h of await prisma.holiday.findMany()) {
+      if (h.dates.length) h.dates.forEach(date => holidays.add(date.toISOString().slice(0, 10)))
+      else for (let date = new Date(h.startDate); date <= h.endDate; date.setUTCDate(date.getUTCDate() + 1)) holidays.add(date.toISOString().slice(0, 10))
     }
   }
-  const removedIds = new Set(toRemove.map(doc => doc.id))
-  const remaining = new Set(sessionsSnap.docs.filter(doc => !removedIds.has(doc.id))
-    .map(doc => `${doc.data().sessionDate}:${doc.data().startTime}`))
+  const removedIds = new Set(toRemove.map(s => s.id))
+  const remaining = new Set(sessions.filter(s => !removedIds.has(s.id))
+    .map(s => `${s.sessionDate}:${s.startTime}`))
   const toCreate = scheduleChanged ? scheduleDates(requestedDays, effectiveDate, toDate, holidays)
     .filter(item => !remaining.has(`${item.date}:${item.slot.startTime}`)) : []
   if (scheduleChanged && toCreate.length === 0) {
@@ -162,15 +149,15 @@ export async function prepareClassChange(classId: string, input: ClassChangeInpu
   }
 
   const fingerprint = createHash('sha256').update(JSON.stringify({
-    classUpdatedAt: cls.updatedAt, schedules: schedulesSnap.docs.map(doc => [doc.id, doc.data().effectiveFrom, doc.data().effectiveTo]),
-    sessions: sessionsSnap.docs.map(doc => [doc.id, doc.data().status, doc.data().sessionDate]),
-    records: recordsSnap.docs.map(doc => [doc.id, doc.data().status]),
+    classUpdatedAt: cls.updatedAt, schedules: schedules.map(s => [s.id, s.effectiveFrom, s.effectiveTo]),
+    sessions: sessions.map(s => [s.id, s.status, s.sessionDate]),
+    records: records.map(r => [r.id, r.status]),
     input: { ...input, previewToken: undefined },
   })).digest('hex')
-  return { classRef, cls, oldSchedules, toRemove, toCreate, scheduleChanged, rateChanged, requestedDays,
+  return { classId, cls, oldSchedules, toRemove, toCreate, scheduleChanged, rateChanged, requestedDays,
     rate, rateEffectiveMonth, token: fingerprint,
     summary: { scheduleChanged, rateChanged, removeSessions: toRemove.length, createSessions: toCreate.length,
-      protectedSessions: sessionsSnap.docs.filter(doc => doc.data().status === 'COMPLETED').length,
+      protectedSessions: sessions.filter(s => s.status === 'COMPLETED').length,
       effectiveDate, rateEffectiveMonth } }
 }
 
@@ -179,37 +166,36 @@ export async function applyClassChange(classId: string, input: ClassChangeInput)
   if (!input.previewToken || input.previewToken !== plan.token) fail('Dữ liệu lớp đã thay đổi; vui lòng xem lại tác động trước khi lưu', 409)
   const writes = 1 + (plan.scheduleChanged ? plan.oldSchedules.length + plan.toRemove.length + plan.requestedDays.length + plan.toCreate.length : 0)
   if (writes > 450) fail('Số buổi cần đổi quá lớn; vui lòng liên hệ quản trị để xử lý riêng', 409)
-  const now = new Date().toISOString()
-  const updates: Record<string, unknown> = { updatedAt: now }
-  if (plan.rateChanged) {
-    const history = Array.isArray(plan.cls.tuitionRateHistory) ? plan.cls.tuitionRateHistory : [
-      { effectiveMonth: '2000-01', rate: Number(plan.cls.tuitionRate ?? 0) },
-    ]
-    updates.tuitionRate = plan.rate
-    updates.tuitionRateHistory = [...history, { effectiveMonth: plan.rateEffectiveMonth, rate: plan.rate }]
-    updates.tuitionRateEffectiveMonth = plan.rateEffectiveMonth
-  }
-  const newScheduleRefs = plan.requestedDays.map(() => db.collection(C.SCHEDULES).doc())
-  const scheduleRefByDay = new Map(plan.requestedDays.map((day, index) => [day.dayOfWeek, newScheduleRefs[index]]))
-  await db.runTransaction(async transaction => {
-    const fresh = await transaction.get(plan.classRef)
-    if (fresh.data()?.updatedAt !== plan.cls.updatedAt) fail('Lớp vừa được thay đổi; vui lòng tải lại', 409)
-    transaction.update(plan.classRef, updates)
+  const newScheduleIds = plan.requestedDays.map(() => newId())
+  const scheduleIdByDay = new Map(plan.requestedDays.map((day, index) => [day.dayOfWeek, newScheduleIds[index]]))
+  await prisma.$transaction(async tx => {
+    // Khoá dòng lớp: hai lần lưu đồng thời không thể cùng vượt qua kiểm tra updatedAt.
+    const [fresh] = await tx.$queryRaw<{ updatedAt: Date }[]>`SELECT "updatedAt" FROM classes WHERE id = ${classId} FOR UPDATE`
+    if (fresh?.updatedAt.toISOString() !== plan.cls.updatedAt) fail('Lớp vừa được thay đổi; vui lòng tải lại', 409)
+    await tx.class.update({
+      where: { id: classId },
+      data: { updatedAt: new Date(), ...(plan.rateChanged ? { tuitionRate: plan.rate } : {}) },
+    })
+    if (plan.rateChanged) {
+      // Lần đổi giá đầu tiên ghi thêm mốc 2000-01 = giá cũ, như tuitionRateHistory trên Firestore.
+      const history = Array.isArray(plan.cls.tuitionRateHistory) ? [] : [
+        { classId, effectiveMonth: '2000-01', rate: Number(plan.cls.tuitionRate ?? 0) },
+      ]
+      await tx.classTuitionRate.createMany({ data: [...history, { classId, effectiveMonth: plan.rateEffectiveMonth, rate: plan.rate }] })
+    }
     if (plan.scheduleChanged) {
-      for (const old of plan.oldSchedules) transaction.update(old.ref, { effectiveTo: dayBefore(input.effectiveDate!) })
-      for (const old of plan.toRemove) transaction.delete(old.ref)
-      for (let i = 0; i < plan.requestedDays.length; i++) {
-        const day = plan.requestedDays[i]
-        transaction.set(newScheduleRefs[i], { classId, className: plan.cls.name, ...day,
-          effectiveFrom: input.effectiveDate, createdAt: now })
-      }
-      for (const item of plan.toCreate) {
-        const ref = db.collection(C.SESSIONS).doc()
-        transaction.set(ref, { classId, className: plan.cls.name, scheduleId: scheduleRefByDay.get(item.slot.dayOfWeek)!.id,
-          sessionDate: item.date, startTime: item.slot.startTime, endTime: item.slot.endTime,
-          teacherId: plan.cls.teacherId || null, teacherName: plan.cls.teacherName || null,
-          status: 'SCHEDULED', createdAt: now, updatedAt: now })
-      }
+      await tx.schedule.updateMany({ where: { id: { in: plan.oldSchedules.map(s => s.id) } }, data: { effectiveTo: toDay(dayBefore(input.effectiveDate!)) } })
+      await tx.session.deleteMany({ where: { id: { in: plan.toRemove.map(s => s.id) } } })
+      await tx.schedule.createMany({
+        data: plan.requestedDays.map((day, i) => ({ id: newScheduleIds[i], classId, ...day, effectiveFrom: toDay(input.effectiveDate)! })),
+      })
+      await tx.session.createMany({
+        data: plan.toCreate.map(item => ({
+          id: newId(), classId, scheduleId: scheduleIdByDay.get(item.slot.dayOfWeek)!,
+          sessionDate: toDay(item.date)!, startTime: item.slot.startTime, endTime: item.slot.endTime,
+          teacherId: plan.cls.teacherId || null, status: 'SCHEDULED' as const,
+        })),
+      })
     }
   })
   return plan.summary

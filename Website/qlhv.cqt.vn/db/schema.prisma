@@ -36,12 +36,6 @@ enum Gender {
   OTHER
 }
 
-enum Relationship {
-  FATHER
-  MOTHER
-  GUARDIAN
-}
-
 enum StudentStatus {
   ACTIVE
   INACTIVE
@@ -199,7 +193,8 @@ model Parent {
   id               String        @id
   studentId        String
   fullName         String
-  relationship     Relationship?
+  /// Chữ tự do do người dùng chọn/nhập ("Bố", "Mẹ", "Ông/Bà", "PHỤ HUYNH"...), hiển thị nguyên văn.
+  relationship     String?
   phone            String?
   zalo             String?
   email            String?
@@ -458,6 +453,8 @@ model StudentPromotion {
   studentId    String
   /// NULL = áp cho học riêng (Firestore classId "private").
   classId      String?
+  /// Tên lớp lúc áp khuyến mãi (ảnh chụp); NULL → dùng tên lớp hiện tại.
+  className    String?
   promotionId  String
   /// Ảnh chụp khuyến mãi lúc áp — giữ nguyên dù khuyến mãi gốc bị sửa.
   promotionName  String
@@ -483,6 +480,8 @@ model TuitionRecord {
   studentId       String
   /// NULL = phiếu học riêng (Firestore classId "private").
   classId         String?
+  /// Tên lớp lúc lập phiếu (ảnh chụp, đi vào hoá đơn) — đổi tên lớp không làm đổi phiếu cũ. NULL → tên hiện tại.
+  className       String?
   billingMonth    Int
   billingYear     Int
   totalSessions   Int

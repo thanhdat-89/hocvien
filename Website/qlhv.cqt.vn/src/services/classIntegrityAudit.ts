@@ -1,4 +1,5 @@
-import { db, C, toDocs } from '../lib/firebase'
+import { prisma, toDay } from '../lib/db'
+import { classDoc, classInclude, enrollmentDoc, enrollmentInclude, scheduleDoc, scheduleInclude, sessionDoc, sessionInclude } from '../lib/docs'
 import { getTuitionScheduleSummary } from './tuitionScheduleSummary'
 
 /** Read-only checks for missing or misplaced class sessions and already-issued fee differences. */
@@ -6,17 +7,13 @@ export async function auditClassTuition(month: number, year: number) {
   const period = `${year}-${String(month).padStart(2, '0')}`
   const from = `${period}-01`
   const to = `${period}-${new Date(year, month, 0).getDate()}`
-  const [classes, enrollments, schedules, sessions, rows] = await Promise.all([
-    db.collection(C.CLASSES).where('status', '==', 'ACTIVE').get(),
-    db.collection(C.ENROLLMENTS).where('status', '==', 'ACTIVE').get(),
-    db.collection(C.SCHEDULES).get(),
-    db.collection(C.SESSIONS).where('sessionDate', '>=', from).where('sessionDate', '<=', to).get(),
+  const [classDocs, enrollmentDocs, scheduleDocs, sessionDocs, rows] = await Promise.all([
+    prisma.class.findMany({ where: { status: 'ACTIVE' }, include: classInclude }).then(r => r.map(classDoc)),
+    prisma.classEnrollment.findMany({ where: { status: 'ACTIVE' }, include: enrollmentInclude }).then(r => r.map(enrollmentDoc)),
+    prisma.schedule.findMany({ include: scheduleInclude }).then(r => r.map(scheduleDoc)),
+    prisma.session.findMany({ where: { sessionDate: { gte: toDay(from)!, lte: toDay(to)! } }, include: sessionInclude }).then(r => r.map(sessionDoc)),
     getTuitionScheduleSummary(month, year),
-  ])
-  const classDocs = toDocs<any>(classes)
-  const enrollmentDocs = toDocs<any>(enrollments)
-  const scheduleDocs = toDocs<any>(schedules)
-  const sessionDocs = toDocs<any>(sessions)
+  ]) as [any[], any[], any[], any[], Awaited<ReturnType<typeof getTuitionScheduleSummary>>]
   const bySchedule = new Map(scheduleDocs.map(schedule => [schedule.id, schedule]))
   const anomalies: { type: string; classId: string; studentId?: string; count?: number; calculatedAmount?: number; recordedAmount?: number }[] = []
   for (const cls of classDocs) {

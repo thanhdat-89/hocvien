@@ -83,7 +83,8 @@ function dob(v: any, id: string): Date | undefined {
   return d
 }
 
-const str = (v: any) => (v == null || v === '' ? undefined : String(v))
+// Giữ nguyên chuỗi rỗng như Firestore (API cũ trả ""); ID rỗng được optFk/classRef xử lý riêng.
+const str = (v: any) => (v == null ? undefined : String(v))
 const int = (v: any, fallback = 0) => (Number.isFinite(Number(v)) && v !== null && v !== '' ? Math.round(Number(v)) : fallback)
 const classRef = (v: any) => (v == null || v === '' || v === 'private' ? null : String(v))
 const json = (v: any) => (v === undefined ? Prisma.JsonNull : (v as Prisma.InputJsonValue))
@@ -103,7 +104,7 @@ async function main() {
 
   /** FK tuỳ chọn trỏ tới bản ghi đã xoá → NULL (có báo cáo). */
   const optFk = (set: Set<string>, v: any, kind: string, id: string) => {
-    const ref = str(v)
+    const ref = str(v) || undefined
     if (ref && !set.has(ref)) { issue(kind + ' trỏ tới bản ghi đã xoá → NULL', id); return null }
     return ref ?? null
   }
@@ -251,7 +252,7 @@ async function main() {
     await insert('student_promotions', coll('studentPromotions').map(d => {
       const x = pick('studentPromotions', d, ['studentId', 'studentName', 'classId', 'className', 'promotionId', 'promotionName', 'promotionType',
         'promotionValue', 'appliedFrom', 'appliedTo', 'approvedById', 'notes', 'createdAt'])
-      return { id: d.document_id, studentId: x.studentId, classId: classRef(x.classId), promotionId: x.promotionId, promotionName: x.promotionName,
+      return { id: d.document_id, studentId: x.studentId, classId: classRef(x.classId), className: str(x.className) ?? null, promotionId: x.promotionId, promotionName: x.promotionName,
         promotionType: x.promotionType, promotionValue: int(x.promotionValue), appliedFrom: day(x.appliedFrom), appliedTo: day(x.appliedTo),
         approvedById: optFk(users, x.approvedById, 'studentPromotions.approvedById', d.document_id), notes: str(x.notes), createdAt: ts(x.createdAt) }
     }), rows => tx.studentPromotion.createMany({ data: rows }))
@@ -260,7 +261,7 @@ async function main() {
       const x = pick('tuitionRecords', d, ['studentId', 'studentName', 'classId', 'className', 'billingMonth', 'billingYear', 'totalSessions',
         'chargedSessions', 'baseAmount', 'discountAmount', 'finalAmount', 'paidAmount', 'remainingAmount', 'status', 'dueDate', 'notes', 'createdAt', 'updatedAt'])
       const final = int(x.finalAmount), paid = int(x.paidAmount)
-      return { id: d.document_id, studentId: x.studentId, classId: classRef(x.classId), billingMonth: int(x.billingMonth), billingYear: int(x.billingYear),
+      return { id: d.document_id, studentId: x.studentId, classId: classRef(x.classId), className: str(x.className) ?? null, billingMonth: int(x.billingMonth), billingYear: int(x.billingYear),
         totalSessions: int(x.totalSessions), chargedSessions: int(x.chargedSessions), baseAmount: int(x.baseAmount), discountAmount: int(x.discountAmount),
         finalAmount: final, paidAmount: paid, remainingAmount: x.remainingAmount == null ? final - paid : int(x.remainingAmount),
         status: x.status ?? 'PENDING', dueDate: day(x.dueDate), notes: str(x.notes), createdAt: ts(x.createdAt), updatedAt: ts(x.updatedAt) ?? ts(x.createdAt) }
@@ -389,7 +390,7 @@ async function main() {
         'updatedAt', 'collaborator_id', 'parent_name', 'parent_phone', 'student_name', 'created_at', 'updated_at'])
       const ctv = 'collaborator_id' in x || 'parent_name' in x
       const created = ts(x.createdAt) ?? ts(x.created_at)
-      return { id: d.document_id, source: str(x.source) ?? (ctv ? 'ctv' : 'zalo'), zaloUserId: str(x.zaloUserId), collaboratorId: str(x.collaborator_id),
+      return { id: d.document_id, source: str(x.source) ?? (ctv ? 'ctv' : 'zalo'), zaloUserId: str(x.zaloUserId) || null, collaboratorId: str(x.collaborator_id),
         parentName: str(x.parentName) ?? str(x.parent_name), phone: str(x.phone) ?? str(x.parent_phone),
         studentName: str(x.studentName) ?? str(x.student_name), gradeLevel: str(x.gradeLevel), status: x.status ?? 'NEW', chatStep: int(x.chatStep),
         note: str(x.note), createdAt: created, updatedAt: ts(x.updatedAt) ?? ts(x.updated_at) ?? created }

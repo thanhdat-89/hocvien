@@ -1,34 +1,35 @@
 import { randomUUID } from 'node:crypto'
-import { db, C } from '../lib/firebase'
+import { prisma } from '../lib/db'
 
 export type ViewKind = 'privateMissing' | 'invoices' | 'tuition' | 'studentsIndex' | 'dashboard'
 const MAX_AGE_MS = 15 * 60 * 1000
 
+// Bộ nhớ của tiến trình (backend chạy một tiến trình PM2 trên VPS). Firestore trước đây giữ cache để tiết kiệm
+// lượt đọc; với PostgreSQL cache chỉ còn để giữ hợp đồng `version`/`unchanged` và con trỏ phân trang của frontend.
+const revisions = new Map<ViewKind, string>()
+const cache = new Map<string, { revision: string; generatedAt: number; data: unknown }>()
+const revisionOf = (kind: ViewKind) => revisions.get(kind) ?? 'initial'
+
 export async function invalidateReadView(kind: ViewKind) {
-  try { await db.collection('readViewRevisions').doc(kind).set({ revision: randomUUID() }) }
-  catch { console.warn('[Read views] invalidation failed', kind) }
+  revisions.set(kind, randomUUID())
+  for (const key of cache.keys()) if (key.startsWith(`${kind}-`)) cache.delete(key)
 }
 
 export async function readView<T>(kind: ViewKind, key: string, build: () => Promise<T>, clientVersion?: string, force = false, maxAge = MAX_AGE_MS): Promise<{ data?: T; version: string; unchanged?: boolean }> {
-  const revisionRef = db.collection('readViewRevisions').doc(kind)
-  const revision = (await revisionRef.get()).data()?.revision || 'initial'
+  const revision = revisionOf(kind)
   const [clientRevision, clientTime] = (clientVersion || '').split(':')
   if (!force && clientRevision === revision && Date.now() - Number(clientTime) < maxAge && Number(clientTime) <= Date.now()) {
     return { unchanged: true, version: clientVersion! }
   }
-  const cacheRef = db.collection('readViews').doc(`${kind}-${key}`)
-  const cached = (await cacheRef.get()).data()
+  const cacheKey = `${kind}-${key}`
+  const cached = cache.get(cacheKey)
   if (!force && cached && cached.revision === revision && Date.now() - cached.generatedAt < maxAge) {
     return { data: cached.data as T, version: `${revision}:${cached.generatedAt}` }
   }
   const data = await build()
   const generatedAt = Date.now()
-  const currentRevision = (await revisionRef.get()).data()?.revision || 'initial'
   // A concurrent mutation must prevent this snapshot from being reused.
-  if (currentRevision === revision) {
-    try { await cacheRef.set({ revision, generatedAt, data }) }
-    catch { console.warn('[Read views] cache write failed', kind) }
-  }
+  if (revisionOf(kind) === revision) cache.set(cacheKey, { revision, generatedAt, data })
   return { data, version: `${revision}:${generatedAt}` }
 }
 
@@ -45,16 +46,15 @@ export function invoiceBillingPeriods(invoice: any): string[] {
 export async function getMissingPrivateStudents(month: number, year: number, version?: string, force = false) {
   const period = `${year}-${String(month).padStart(2, '0')}`
   return readView('privateMissing', period, async () => {
-    const [students, enrollments, sessions] = await Promise.all([
-      db.collection(C.STUDENTS).select('fullName', 'gradeLevel').get(),
-      db.collection(C.ENROLLMENTS).where('status', '==', 'ACTIVE').select('studentId').get(),
-      db.collection(C.PRIVATE_SCHEDULES).where('sessionDate', '>=', `${period}-01`)
-        .where('sessionDate', '<=', `${period}-${new Date(year, month, 0).getDate()}`).select('studentId').get(),
-    ])
-    const enrolled = new Set(enrollments.docs.map(doc => doc.data().studentId))
-    const scheduled = new Set(sessions.docs.map(doc => doc.data().studentId))
-    return students.docs.filter(doc => !enrolled.has(doc.id) && !scheduled.has(doc.id))
-      .map(doc => ({ id: doc.id, fullName: String(doc.data().fullName || ''), gradeLevel: doc.data().gradeLevel ?? null }))
+    // Học viên không có ghi danh ACTIVE nào và chưa có buổi học riêng trong tháng.
+    const students = await prisma.student.findMany({
+      where: {
+        enrollments: { none: { status: 'ACTIVE' } },
+        privateSessions: { none: { sessionDate: { gte: new Date(Date.UTC(year, month - 1, 1)), lte: new Date(Date.UTC(year, month, 0)) } } },
+      },
+      select: { id: true, fullName: true, gradeLevel: true },
+    })
+    return students.map(s => ({ id: s.id, fullName: s.fullName || '', gradeLevel: s.gradeLevel ?? null }))
       .sort((a, b) => a.fullName.localeCompare(b.fullName, 'vi'))
   }, version, force)
 }
@@ -64,10 +64,11 @@ const statuses = new Set(['CREATING', 'OUTCOME_UNKNOWN', 'FAILED', 'DRAFT_CREATE
 export async function getInvoiceList(month: number, year: number, limit: number, cursor?: string, force = false) {
   const period = `${year}-${String(month).padStart(2, '0')}`
   const view = await readView('invoices', period, async () => {
-    const snapshot = await db.collection('misaInvoices').where('billingPeriods', 'array-contains', period).get()
+    const invoices = await prisma.misaInvoice.findMany({ where: { billingPeriods: { has: period } } })
     const byRecordId = new Map<string, any>()
     // Prefer the newest copy when a grouped invoice has several linked documents.
-    const documents = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any))
+    const documents = invoices.map(invoice => ({ ...invoice, invoiceDate: invoice.invoiceDate.toISOString().slice(0, 10),
+      createdAt: invoice.createdAt.toISOString(), updatedAt: invoice.updatedAt.toISOString() } as any))
       .sort((a, b) => String(a.updatedAt || '').localeCompare(String(b.updatedAt || '')))
     for (const invoice of documents) {
       if (!statuses.has(invoice.status)) continue
