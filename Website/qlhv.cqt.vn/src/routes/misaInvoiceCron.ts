@@ -11,7 +11,9 @@ import { monthlyInvoiceSchedule } from '../services/monthlyInvoiceReconciliation
 export async function dispatchMonthlyInvoiceWorker(request: typeof fetch = fetch) {
   const secret = process.env.CRON_SECRET
   if (!secret) throw new Error('Thiếu CRON_SECRET cho worker đối chiếu hóa đơn.')
-  const response = await request('https://api.qlhv.cqt.vn/api/tuition/cron/monthly-invoice-worker', {
+  // Trên VPS gọi thẳng tiến trình cục bộ (không phụ thuộc DNS/HTTPS, kể cả lúc đang chuyển DNS); Vercel đi qua tên miền.
+  const base = process.env.VERCEL ? 'https://api.qlhv.cqt.vn' : `http://127.0.0.1:${process.env.PORT || 3000}`
+  const response = await request(`${base}/api/tuition/cron/monthly-invoice-worker`, {
     method: 'GET', headers: { Authorization: `Bearer ${secret}` }, redirect: 'error', signal: AbortSignal.timeout(5000),
   })
   if (response.status !== 202) throw new Error(`Worker đối chiếu chưa nhận việc (HTTP ${response.status}).`)

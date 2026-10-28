@@ -47,7 +47,7 @@ test('worker dispatcher authenticates only to the fixed backend and requires imm
   process.env.CRON_SECRET = 'fixture-secret'
   try {
     await dispatchMonthlyInvoiceWorker(async (url, init) => {
-      assert.equal(url, 'https://api.qlhv.cqt.vn/api/tuition/cron/monthly-invoice-worker')
+      assert.equal(url, `http://127.0.0.1:${process.env.PORT || 3000}/api/tuition/cron/monthly-invoice-worker`)
       assert.equal(init.headers.Authorization, 'Bearer fixture-secret')
       assert.equal(init.redirect, 'error')
       return { status: 202 }
