@@ -29,22 +29,33 @@ import reportRoutes from './routes/reports'
 import telegramRoutes from './routes/telegram'
 
 import { errorHandler, notFound } from './middleware/errorHandler'
+import { prisma } from './lib/db'
 import { activityLogMiddleware } from './middleware/activityLog'
 import { readViewInvalidation } from './middleware/readViewInvalidation'
 
 const app = express()
 const PORT = process.env.PORT || 3000
 
+// Chạy sau nginx trên cùng máy: tin X-Forwarded-For do nginx (loopback) thêm vào → req.ip là IP thật của client.
+app.set('trust proxy', 'loopback')
+
 // ─── Middleware ────────────────────────────────────────────────
 app.use(helmet())
 app.use(cors())
-app.use(morgan('dev'))
+app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'))
 app.use(express.json())
 app.use(activityLogMiddleware)
 app.use(readViewInvalidation)
 
 // ─── Health check ─────────────────────────────────────────────
-app.get('/health', (_req, res) => res.json({ status: 'ok' }))
+app.get('/health', async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`
+    res.json({ status: 'ok', db: 'ok' })
+  } catch {
+    res.status(503).json({ status: 'error', db: 'unreachable' })
+  }
+})
 
 // ─── Zalo domain verification ────────────────────────────────
 app.get('/zalo_verifierMeNX2R-7MmvqfE0Z_fTD87ZfzWAKdoDSDpCn.html', (_req, res) => {
@@ -89,11 +100,19 @@ app.use('/api/telegram',       telegramRoutes)
 app.use(notFound)
 app.use(errorHandler)
 
-// Chỉ listen khi chạy local (không phải Vercel serverless)
+// Chỉ listen khi chạy như tiến trình (VPS/PM2 hoặc local), không phải Vercel serverless
 if (!process.env.VERCEL) {
-  app.listen(PORT, () => {
-    console.log(`🚀 Server chạy tại http://localhost:${PORT}`)
+  const server = app.listen(Number(PORT), process.env.HOST || '127.0.0.1', () => {
+    console.log(`🚀 Server chạy tại http://${process.env.HOST || '127.0.0.1'}:${PORT}`)
   })
+  // PM2 reload/stop: ngừng nhận request mới, chờ request đang chạy xong rồi đóng kết nối database.
+  const shutdown = (signal: string) => {
+    console.log(`[shutdown] ${signal}`)
+    server.close(() => { void prisma.$disconnect().finally(() => process.exit(0)) })
+    setTimeout(() => process.exit(1), 10_000).unref()
+  }
+  process.on('SIGTERM', () => shutdown('SIGTERM'))
+  process.on('SIGINT', () => shutdown('SIGINT'))
 }
 
 export default app

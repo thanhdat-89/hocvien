@@ -1,0 +1,19 @@
+# /etc/cron.d/qlhv-api — thay cho "crons" trong vercel.json.
+# CHỈ BẬT KHI CHUYỂN CHÍNH THỨC (xem deploy/README.md, bước 4): trước đó các dòng dưới để comment
+# để server thử nghiệm không tự tạo hoá đơn MISA hay gửi tin nhắn.
+# Giờ máy chủ là Asia/Ho_Chi_Minh (UTC+7); giờ trong vercel.json là UTC, đã quy đổi bên dưới.
+SHELL=/bin/bash
+QLHV=/srv/qlhv-api/deploy/run-cron.sh
+
+# vercel: 0 0 * * *   → 07:00  đối soát hoá đơn cuối tháng (chỉ chạy thật vào ngày cuối tháng)
+#0 7 * * *   qlhv $QLHV /api/tuition/cron/reconcile-monthly-invoices
+# vercel: 0 23 * * *  → 06:00  kiểm tra lớp/học phí
+#0 6 * * *   qlhv $QLHV /api/classes/cron/audit
+# vercel: 0 3 * * 0   → 10:00 Chủ nhật  dọn nhật ký hoạt động > 12 tháng
+#0 10 * * 0  qlhv $QLHV /api/activity/cleanup
+# vercel: 0 1 1 * *   → 08:00 ngày 1  sinh buổi học tháng này + tháng sau
+#0 8 1 * *   qlhv $QLHV /api/schedules/cron/generate-monthly
+# vercel: 0 1 * * *   → 08:00  nhắc học phí quá hạn qua ZNS
+#0 8 * * *   qlhv $QLHV /api/zns/cron/remind-overdue
+# vercel: 0 2 * * *   → 09:00  hàng đợi hoá đơn cũ (đã ngừng, luôn trả enabled:false)
+#0 9 * * *   qlhv $QLHV /api/tuition/cron/process-invoices

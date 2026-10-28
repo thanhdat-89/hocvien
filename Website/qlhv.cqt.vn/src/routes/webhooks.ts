@@ -57,7 +57,9 @@ function isAuthorized(req: Request): boolean {
 
 function passesIpCheck(req: Request): boolean {
   if (process.env.SEPAY_SKIP_IP_CHECK === 'true') return true
-  const ip = (req.header('x-forwarded-for') || req.ip || '').split(',')[0].trim()
+  // req.ip (với `trust proxy` = loopback) là IP thật nginx thấy. Không đọc thẳng phần đầu X-Forwarded-For:
+  // client tự điền được phần đó, nginx chỉ nối thêm IP thật vào cuối.
+  const ip = (req.ip || '').replace(/^::ffff:/, '')
   return SEPAY_IPS.has(ip)
 }
 
