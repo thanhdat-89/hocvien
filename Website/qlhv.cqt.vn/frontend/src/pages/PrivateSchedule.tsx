@@ -345,6 +345,66 @@ export default function PrivateSchedule() {
           </div>
         </div>
 
+        {/* Học viên chưa có lịch học riêng trong tháng */}
+        <section className="bg-surface-container-lowest rounded-3xl overflow-hidden shadow-sm border border-outline-variant/10">
+          <div className="p-6 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-headline font-bold text-on-surface">Học viên chưa có lịch học riêng — tháng {monthNumber}/{monthYear}</h3>
+              <p className="text-sm text-outline mt-1">Học viên có lớp “Học riêng” và chưa có buổi nào trong toàn bộ tháng hiện tại.</p>
+            </div>
+            {!missingLoading && !missingError && <span className="text-sm font-semibold text-primary">{filteredMissingStudents.length} học viên</span>}
+          </div>
+          <div className="px-6 pb-5">
+            <p id="missing-grade-label" className="text-[10px] font-bold text-outline uppercase mb-2">Khối lớp</p>
+            <div role="group" aria-labelledby="missing-grade-label" className="flex flex-wrap gap-2">
+              {[null, 6, 7, 8, 9, 10, 11, 12].map(grade => (
+                <button
+                  key={grade ?? 'all'}
+                  type="button"
+                  aria-pressed={missingGrade === grade}
+                  onClick={() => setMissingGrade(grade)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                    missingGrade === grade
+                      ? 'bg-primary text-on-primary border-primary shadow-sm'
+                      : 'bg-surface text-on-surface-variant border-outline-variant/30 hover:border-primary/40 hover:text-primary'
+                  }`}
+                >
+                  {grade === null ? 'Tất cả' : `Lớp ${grade}`}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse min-w-[650px]">
+              <thead><tr className="bg-surface-container-low/50">
+                <th className="table-header w-12 text-center">STT</th>
+                <th className="table-header">Học viên</th>
+                <th className="table-header">Khối lớp</th>
+                <th className="table-header">Lớp học</th>
+                <th className="table-header text-right">Thao tác</th>
+              </tr></thead>
+              <tbody className="divide-y divide-outline-variant/10">
+                {missingLoading ? <tr><td colSpan={5} className="table-cell text-center text-outline" role="status">Đang tải danh sách...</td></tr>
+                  : missingError ? <tr><td colSpan={5} className="table-cell text-center text-error" role="alert">{missingError} <button className="text-primary underline ml-2" onClick={() => void loadMissingStudents()}>Thử lại</button></td></tr>
+                  : filteredMissingStudents.length === 0 ? <tr><td colSpan={5} className="table-cell text-center text-outline">Không có học viên học riêng nào chưa được xếp lịch trong tháng này{missingGrade === null ? '.' : ` thuộc Lớp ${missingGrade}.`}</td></tr>
+                  : filteredMissingStudents.map((student, index) => <tr key={student.id} className="hover:bg-surface-container-low/30 transition-colors group">
+                    <td className="table-cell text-center text-sm text-outline font-medium">{index + 1}</td>
+                    <td className="table-cell"><div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-tertiary/10 text-tertiary flex items-center justify-center text-sm font-bold shrink-0">{student.fullName.trim().split(/\s+/).slice(-2).map(word => word[0]).join('')}</div>
+                      <Link to={`/students/${student.id}`} className="font-semibold text-on-surface hover:text-primary">{student.fullName}</Link>
+                    </div></td>
+                    <td className="table-cell"><span className="inline-flex items-center px-2.5 py-1 rounded-md bg-surface-container-high text-xs font-bold text-primary">{student.gradeLevel ? `Lớp ${student.gradeLevel}` : '—'}</span></td>
+                    <td className="table-cell"><span className="inline-flex items-center px-2 py-0.5 rounded-md bg-tertiary/10 text-tertiary text-xs font-medium">Học riêng</span></td>
+                    <td className="table-cell"><div className="flex justify-end gap-1">
+                      <Link to={`/students/${student.id}`} title="Xem hồ sơ" aria-label={`Xem hồ sơ ${student.fullName}`} className="p-2 text-outline hover:text-primary hover:bg-primary/10 rounded-lg"><span className="material-symbols-outlined text-[20px]">visibility</span></Link>
+                      {canManageStudents && <button onClick={() => setPrivateStudent(student)} title="Thêm lịch học riêng" aria-label={`Thêm lịch học riêng cho ${student.fullName}`} className="p-2 text-outline hover:text-tertiary hover:bg-tertiary-container/10 rounded-lg"><span className="material-symbols-outlined text-[20px]">calendar_month</span></button>}
+                    </div></td>
+                  </tr>)}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
         {/* Calendar controls */}
         <div className="calendar-controls bg-surface-container-lowest p-4 rounded-2xl shadow-sm flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -462,66 +522,6 @@ export default function PrivateSchedule() {
             </tbody>
           </table>
         </div>
-
-
-        <section className="bg-surface-container-lowest rounded-3xl overflow-hidden shadow-sm border border-outline-variant/10">
-          <div className="p-6 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h3 className="text-lg font-headline font-bold text-on-surface">Học viên chưa có lịch học riêng — tháng {monthNumber}/{monthYear}</h3>
-              <p className="text-sm text-outline mt-1">Học viên có lớp “Học riêng” và chưa có buổi nào trong toàn bộ tháng hiện tại.</p>
-            </div>
-            {!missingLoading && !missingError && <span className="text-sm font-semibold text-primary">{filteredMissingStudents.length} học viên</span>}
-          </div>
-          <div className="px-6 pb-5">
-            <p id="missing-grade-label" className="text-[10px] font-bold text-outline uppercase mb-2">Khối lớp</p>
-            <div role="group" aria-labelledby="missing-grade-label" className="flex flex-wrap gap-2">
-              {[null, 6, 7, 8, 9, 10, 11, 12].map(grade => (
-                <button
-                  key={grade ?? 'all'}
-                  type="button"
-                  aria-pressed={missingGrade === grade}
-                  onClick={() => setMissingGrade(grade)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
-                    missingGrade === grade
-                      ? 'bg-primary text-on-primary border-primary shadow-sm'
-                      : 'bg-surface text-on-surface-variant border-outline-variant/30 hover:border-primary/40 hover:text-primary'
-                  }`}
-                >
-                  {grade === null ? 'Tất cả' : `Lớp ${grade}`}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse min-w-[650px]">
-              <thead><tr className="bg-surface-container-low/50">
-                <th className="table-header w-12 text-center">STT</th>
-                <th className="table-header">Học viên</th>
-                <th className="table-header">Khối lớp</th>
-                <th className="table-header">Lớp học</th>
-                <th className="table-header text-right">Thao tác</th>
-              </tr></thead>
-              <tbody className="divide-y divide-outline-variant/10">
-                {missingLoading ? <tr><td colSpan={5} className="table-cell text-center text-outline" role="status">Đang tải danh sách...</td></tr>
-                  : missingError ? <tr><td colSpan={5} className="table-cell text-center text-error" role="alert">{missingError} <button className="text-primary underline ml-2" onClick={() => void loadMissingStudents()}>Thử lại</button></td></tr>
-                  : filteredMissingStudents.length === 0 ? <tr><td colSpan={5} className="table-cell text-center text-outline">Không có học viên học riêng nào chưa được xếp lịch trong tháng này{missingGrade === null ? '.' : ` thuộc Lớp ${missingGrade}.`}</td></tr>
-                  : filteredMissingStudents.map((student, index) => <tr key={student.id} className="hover:bg-surface-container-low/30 transition-colors group">
-                    <td className="table-cell text-center text-sm text-outline font-medium">{index + 1}</td>
-                    <td className="table-cell"><div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-tertiary/10 text-tertiary flex items-center justify-center text-sm font-bold shrink-0">{student.fullName.trim().split(/\s+/).slice(-2).map(word => word[0]).join('')}</div>
-                      <Link to={`/students/${student.id}`} className="font-semibold text-on-surface hover:text-primary">{student.fullName}</Link>
-                    </div></td>
-                    <td className="table-cell"><span className="inline-flex items-center px-2.5 py-1 rounded-md bg-surface-container-high text-xs font-bold text-primary">{student.gradeLevel ? `Lớp ${student.gradeLevel}` : '—'}</span></td>
-                    <td className="table-cell"><span className="inline-flex items-center px-2 py-0.5 rounded-md bg-tertiary/10 text-tertiary text-xs font-medium">Học riêng</span></td>
-                    <td className="table-cell"><div className="flex justify-end gap-1">
-                      <Link to={`/students/${student.id}`} title="Xem hồ sơ" aria-label={`Xem hồ sơ ${student.fullName}`} className="p-2 text-outline hover:text-primary hover:bg-primary/10 rounded-lg"><span className="material-symbols-outlined text-[20px]">visibility</span></Link>
-                      {canManageStudents && <button onClick={() => setPrivateStudent(student)} title="Thêm lịch học riêng" aria-label={`Thêm lịch học riêng cho ${student.fullName}`} className="p-2 text-outline hover:text-tertiary hover:bg-tertiary-container/10 rounded-lg"><span className="material-symbols-outlined text-[20px]">calendar_month</span></button>}
-                    </div></td>
-                  </tr>)}
-              </tbody>
-            </table>
-          </div>
-        </section>
 
       </div>
 
