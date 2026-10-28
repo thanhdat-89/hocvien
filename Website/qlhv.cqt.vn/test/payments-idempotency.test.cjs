@@ -35,8 +35,8 @@ test('SePay webhook delivered twice concurrently records one payment and one ban
   const handler = routeHandler(router, '/sepay', 'post')
   const { student, fee } = await feeFor(9) // T9/2026: trước mốc lập hoá đơn MISA → không gọi MISA
   const body = { id: 987654, gateway: 'VPBank', transactionDate: '2026-09-15 10:20:30', accountNumber: '123', code: null,
-    // Tên không có từ 5–6 chữ cái: parseTransferNote hiện lấy từ 5–6 ký tự ĐẦU TIÊN làm mã học viên (lỗi có sẵn, xem báo cáo).
-    content: `HP AN BINH T9 ${studentShortId(student.id)}`, transferType: 'in', transferAmount: 1200000, accumulated: 5000000,
+    // Tên có từ 5–6 chữ cái (NGUYEN) không được đọc nhầm thành mã học viên.
+    content: `HP NGUYEN VAN A T9 ${studentShortId(student.id)}`, transferType: 'in', transferAmount: 1200000, accumulated: 5000000,
     subAccount: null, referenceCode: 'FT123', description: '' }
   const req = () => ({ body, header: name => ({ authorization: 'Apikey test-key' })[name.toLowerCase()], ip: '127.0.0.1' })
 

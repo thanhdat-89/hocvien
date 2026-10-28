@@ -10,7 +10,7 @@ import { sendMessage as sendZaloMessage } from '../services/zaloService'
 import { sendZnsAndLog, findActiveTemplate, resolveRecipient } from './zns'
 import {
   parseTransferNote,
-  findStudentsByShortId,
+  findStudentByCandidates,
   findTuitionRecords,
 } from '../services/sepayMatcher'
 import type { BankTransaction } from '../types/models'
@@ -152,11 +152,11 @@ router.post('/sepay', async (req: Request, res: Response, next: NextFunction) =>
       return
     }
 
-    const students = await findStudentsByShortId(parsed.shortId)
+    const { shortId, students } = await findStudentByCandidates(parsed.candidates)
     if (students.length === 0) {
       const record: BankTransaction = {
         id: docId, ...baseRecord, status: 'unmatched',
-        matchReason: `Không tìm thấy HV với shortId=${parsed.shortId}`,
+        matchReason: `Không tìm thấy HV với shortId=${parsed.candidates.join('/')}`,
       }
       if ((await saveTx(record)).duplicate) { res.json({ success: true, idempotent: true }); return }
       res.json({ success: true, status: 'unmatched' })
@@ -165,7 +165,7 @@ router.post('/sepay', async (req: Request, res: Response, next: NextFunction) =>
     if (students.length > 1) {
       const record: BankTransaction = {
         id: docId, ...baseRecord, status: 'unmatched',
-        matchReason: `Trùng shortId (${students.length} HV) — admin cần xác nhận thủ công`,
+        matchReason: `Trùng shortId ${shortId} (${students.length} HV) — admin cần xác nhận thủ công`,
       }
       if ((await saveTx(record)).duplicate) { res.json({ success: true, idempotent: true }); return }
       res.json({ success: true, status: 'unmatched' })
