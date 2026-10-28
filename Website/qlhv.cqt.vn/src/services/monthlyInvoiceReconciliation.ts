@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { db as productionDb, C } from '../lib/firebase'
+import { Prisma } from '@prisma/client'
+import { prisma, type Tx } from '../lib/db'
+import { tuitionRecordDoc, tuitionRecordInclude } from '../lib/docs'
+import { listInvoiceEntries, mergeInvoiceFields, readInvoice } from './misaInvoiceStore'
 import { createTuitionMisaInvoice } from './misaAutoDraft'
 import { readMisaInvoiceStatus } from './misaInvoicePreview'
 import { assertInvoicePeriod } from './invoiceEligibility'
@@ -7,7 +10,6 @@ import { sendTelegramMessage } from './telegramService'
 import { invalidateReadView } from './readViews'
 import { withMisaDeadline } from './misaRequestDeadline'
 
-const RUNS = 'monthlyInvoiceRuns'
 const LEASE_MS = 120_000
 const confirmed = new Set(['DRAFT_CREATED', 'ISSUED', 'SENT_TO_TAX'])
 type Entry = { id: string; studentName: string; className: string; amount: number; status: string; reason: string; linkedInvoiceId: string }
@@ -74,11 +76,33 @@ export function monthlyInvoiceReport(run: any, entries: any[]) {
   return { counts, totalAmount, messages }
 }
 
+// ─── Lưu trữ lượt chạy ────────────────────────────────────────
+// Một lượt = tài liệu { ...data, status, leaseToken, leaseUntil } như trên Firestore; cột riêng chỉ cho trạng thái/lease.
+type RunDoc = Record<string, any>
+const ACTIVE = ['INITIALIZING', 'RUNNING', 'REPORT_PENDING']
+
+function runFromRow(row: { status: string; leaseToken: string; leaseUntil: bigint; data: Prisma.JsonValue }): RunDoc {
+  return { ...(row.data as object), status: row.status, leaseToken: row.leaseToken, leaseUntil: Number(row.leaseUntil) }
+}
+
+/** Khoá và đọc lượt chạy trong transaction (undefined nếu chưa có). */
+async function lockRun(tx: Tx, id: string): Promise<RunDoc | undefined> {
+  const [row] = await tx.$queryRaw<{ status: string; leaseToken: string; leaseUntil: bigint; data: Prisma.JsonValue }[]>`
+    SELECT status, "leaseToken", "leaseUntil", data FROM monthly_invoice_runs WHERE id = ${id} FOR UPDATE`
+  return row ? runFromRow(row) : undefined
+}
+
+async function writeRun(tx: Tx, id: string, doc: RunDoc) {
+  const { status, leaseToken, leaseUntil, ...data } = doc
+  const fields = { status: String(status ?? ''), leaseToken: String(leaseToken ?? ''), leaseUntil: BigInt(Math.trunc(Number(leaseUntil) || 0)),
+    data: data as Prisma.InputJsonValue }
+  await tx.monthlyInvoiceRun.upsert({ where: { id }, create: { id, ...fields }, update: fields })
+}
+
 export function createMonthlyInvoiceReconciler(dependencies: {
-  db?: FirebaseFirestore.Firestore; createInvoice?: typeof createTuitionMisaInvoice; readStatus?: typeof readMisaInvoiceStatus
+  createInvoice?: typeof createTuitionMisaInvoice; readStatus?: typeof readMisaInvoiceStatus
   sendTelegram?: typeof sendTelegramMessage; invalidate?: typeof invalidateReadView; clock?: () => number
 } = {}) {
-  const db = dependencies.db || productionDb
   const createInvoice = dependencies.createInvoice || createTuitionMisaInvoice
   const readStatus = dependencies.readStatus || readMisaInvoiceStatus
   const sendTelegram = dependencies.sendTelegram || sendTelegramMessage
@@ -90,57 +114,64 @@ export function createMonthlyInvoiceReconciler(dependencies: {
     assertInvoicePeriod(month, year)
     const cutoff = new Date(Date.UTC(year, month, 0)).toISOString()
     const [fees, invoices] = await Promise.all([
-      db.collection(C.TUITION_RECORDS).where('billingMonth', '==', month).where('billingYear', '==', year).get(),
+      prisma.tuitionRecord.findMany({ where: { billingMonth: month, billingYear: year }, include: tuitionRecordInclude }),
       // Include grouped and older invoice documents without billingPeriods metadata.
-      db.collection('misaInvoices').get(),
+      listInvoiceEntries(),
     ])
-    return { month, year, cutoff, ...buildMonthlyInvoiceEntries(fees.docs.map(doc => ({ id: doc.id, data: doc.data() })),
-      invoices.docs.map(doc => ({ id: doc.id, data: doc.data() })), cutoff) }
+    return { month, year, cutoff, ...buildMonthlyInvoiceEntries(fees.map(fee => ({ id: fee.id, data: tuitionRecordDoc(fee) })), invoices, cutoff) }
   }
 
   async function start(now = new Date(clock())) {
     const schedule = monthlyInvoiceSchedule(now)
     if (!schedule.due) return { started: false, reason: 'NOT_DUE' }
-    const ref = db.collection(RUNS).doc(schedule.period)
+    const id = schedule.period
     const token = randomUUID()
-    const claimed = await db.runTransaction(async tx => {
-      const current = (await tx.get(ref)).data()
-      if (current && (current.status !== 'INITIALIZING' || current.leaseUntil > clock())) return false
-      tx.set(ref, { ...current, month: schedule.month, year: schedule.year, cutoff: schedule.cutoff,
-        startedAt: current?.startedAt || iso(), status: 'INITIALIZING', leaseToken: token, leaseUntil: clock() + LEASE_MS })
-      return true
-    })
+    let claimed: boolean
+    try {
+      claimed = await prisma.$transaction(async tx => {
+        const current = await lockRun(tx, id)
+        if (current && (current.status !== 'INITIALIZING' || current.leaseUntil > clock())) return false
+        await writeRun(tx, id, { ...current, month: schedule.month, year: schedule.year, cutoff: schedule.cutoff,
+          startedAt: current?.startedAt || iso(), status: 'INITIALIZING', leaseToken: token, leaseUntil: clock() + LEASE_MS })
+        return true
+      })
+    } catch (error: any) {
+      // Hai tiến trình cùng tạo lượt mới: dòng thứ hai vi phạm khoá chính.
+      if (error?.code === 'P2002') return { started: false, reason: 'ALREADY_STARTED' }
+      throw error
+    }
     if (!claimed) return { started: false, reason: 'ALREADY_STARTED' }
-    await initialize(ref, token)
+    await initialize(id, token)
     return { started: true, period: schedule.period }
   }
 
-  async function initialize(ref: FirebaseFirestore.DocumentReference, token: string) {
-    const run = (await ref.get()).data()!
+  async function initialize(id: string, token: string) {
+    const run = runFromRow(await prisma.monthlyInvoiceRun.findUniqueOrThrow({ where: { id } }))
     const snapshot = await preview(run.month, run.year)
     // Deterministic item IDs allow initialization to resume after an interrupted batch.
-    for (let index = 0; index < snapshot.entries.length; index += 400) {
-      const batch = db.batch()
-      for (const entry of snapshot.entries.slice(index, index + 400)) batch.set(ref.collection('items').doc(entry.id), entry)
-      await batch.commit()
-    }
-    await db.runTransaction(async tx => {
-      const current = (await tx.get(ref)).data()!
-      if (current.leaseToken !== token) return
-      tx.update(ref, { status: 'RUNNING', total: snapshot.entries.length, excludedAfterCutoff: snapshot.excludedAfterCutoff,
+    await prisma.$transaction(async tx => {
+      for (const entry of snapshot.entries) {
+        const fields = { status: entry.status, data: entry as unknown as Prisma.InputJsonValue }
+        await tx.monthlyInvoiceRunItem.upsert({ where: { runId_id: { runId: id, id: entry.id } }, create: { runId: id, id: entry.id, ...fields }, update: fields })
+      }
+    }, { timeout: 60_000 })
+    await prisma.$transaction(async tx => {
+      const current = await lockRun(tx, id)
+      if (current?.leaseToken !== token) return
+      await writeRun(tx, id, { ...current, status: 'RUNNING', total: snapshot.entries.length, excludedAfterCutoff: snapshot.excludedAfterCutoff,
         leaseToken: '', leaseUntil: 0, updatedAt: iso() })
     })
   }
 
   async function reconcile(entry: Entry, run: any, period: string, recovering: boolean) {
-    const feeDoc = await db.collection(C.TUITION_RECORDS).doc(entry.id).get()
-    const fee = feeDoc.data()
+    const feeRow = await prisma.tuitionRecord.findUnique({ where: { id: entry.id }, include: tuitionRecordInclude })
+    const fee = feeRow ? tuitionRecordDoc(feeRow) : undefined
     if (!fee || fee.billingMonth !== run.month || fee.billingYear !== run.year) return { status: 'SKIPPED_CHANGED', reason: 'Phiếu đã xóa hoặc thay đổi kỳ học phí.' }
     if (fee.finalAmount === 0) return { status: 'SKIPPED_ZERO', reason: 'Phiếu 0 đồng / miễn toàn bộ học phí.' }
     if (!Number.isSafeInteger(fee.finalAmount) || fee.finalAmount < 0) return { status: 'REVIEW', reason: 'Số tiền không hợp lệ.' }
-    const doc = await db.collection('misaInvoices').doc(entry.id).get()
-    const linked = !doc.exists && entry.linkedInvoiceId ? await db.collection('misaInvoices').doc(entry.linkedInvoiceId).get() : doc
-    let invoice = linked.data()
+    const direct = await readInvoice(entry.id)
+    const linkedId = !direct && entry.linkedInvoiceId ? entry.linkedInvoiceId : entry.id
+    let invoice = direct ?? (entry.linkedInvoiceId ? await readInvoice(entry.linkedInvoiceId) : null) ?? undefined
     const actor = `monthly-invoices:${period}`
     const resultForConfirmed = () => ({ status: invoice!.createdBy === actor ? 'CREATED' : 'EXISTING',
       amount: invoice!.source?.finalAmount ?? fee.finalAmount, refId: invoice!.refId || '', reason: '' })
@@ -153,11 +184,12 @@ export function createMonthlyInvoiceReconciler(dependencies: {
         const status = await readStatus(invoice.refId, withMisaDeadline(fetch, clock() + 12000))
         if (!confirmed.has(status.status)) return { status: 'REVIEW', reason: 'MISA chưa xác nhận hóa đơn hiện hữu; không tạo lại.' }
         const fields = Object.fromEntries(Object.entries(status).filter(([, value]) => value !== undefined))
-        const ids = Array.from(new Set([linked.id, entry.id, ...(invoice.recordIds || [])])) as string[]
-        await db.runTransaction(async tx => {
-          const refs = ids.map(id => db.collection('misaInvoices').doc(id))
-          const docs = await Promise.all(refs.map(ref => tx.get(ref)))
-          docs.forEach((doc, index) => { if (doc.data()?.refId === invoice!.refId) tx.set(refs[index], { ...fields, updatedAt: iso() }, { merge: true }) })
+        const ids = Array.from(new Set([linkedId, entry.id, ...(invoice.recordIds || [])])) as string[]
+        await prisma.$transaction(async tx => {
+          for (const id of ids) {
+            const copy = await tx.misaInvoice.findUnique({ where: { id }, select: { refId: true } })
+            if (copy?.refId === invoice!.refId) await mergeInvoiceFields(id, { ...fields, updatedAt: iso() }, tx)
+          }
         })
         invoice = { ...invoice, ...fields }
         await invalidate('invoices')
@@ -173,9 +205,9 @@ export function createMonthlyInvoiceReconciler(dependencies: {
       const result = await createInvoice([entry.id], actor, undefined, withMisaDeadline(fetch, clock() + 40000),
         { notifications: false, positiveAmountOnly: true })
       invoice = result.invoice
-      if (confirmed.has(invoice.status)) return resultForConfirmed()
-      return { status: invoice.status === 'FAILED' ? 'FAILED' : 'REVIEW', refId: invoice.refId || '',
-        reason: invoice.lastErrorMessage || 'MISA chưa xác nhận kết quả; không tự động tạo lại.' }
+      if (confirmed.has(invoice!.status)) return resultForConfirmed()
+      return { status: invoice!.status === 'FAILED' ? 'FAILED' : 'REVIEW', refId: invoice!.refId || '',
+        reason: invoice!.lastErrorMessage || 'MISA chưa xác nhận kết quả; không tự động tạo lại.' }
     } catch (error) {
       return { status: 'FAILED', reason: error instanceof Error ? error.message.slice(0, 300) : 'Chưa tạo được hóa đơn.' }
     }
@@ -184,22 +216,29 @@ export function createMonthlyInvoiceReconciler(dependencies: {
   async function tick() {
     // Catch up if the 07:00 trigger was missed. Never start a new run on another date.
     await start()
-    const active = await db.collection(RUNS).where('status', 'in', ['INITIALIZING', 'RUNNING', 'REPORT_PENDING']).limit(1).get()
-    if (active.empty) return { processed: 0, state: 'IDLE' }
-    const ref = active.docs[0].ref
+    const active = await prisma.monthlyInvoiceRun.findFirst({ where: { status: { in: ACTIVE } }, select: { id: true } })
+    if (!active) return { processed: 0, state: 'IDLE' }
+    const id = active.id
     const token = randomUUID()
-    const run = await db.runTransaction(async tx => {
-      const data = (await tx.get(ref)).data()!
-      if (data.leaseUntil > clock() || !['INITIALIZING', 'RUNNING', 'REPORT_PENDING'].includes(data.status)) return null
-      tx.update(ref, { leaseToken: token, leaseUntil: clock() + LEASE_MS })
+    const run = await prisma.$transaction(async tx => {
+      const data = (await lockRun(tx, id))!
+      if (data.leaseUntil > clock() || !ACTIVE.includes(data.status)) return null
+      await writeRun(tx, id, { ...data, leaseToken: token, leaseUntil: clock() + LEASE_MS })
       return data
     })
     if (!run) return { processed: 0, state: 'BUSY' }
-    const save = async (patch: Record<string, unknown>) => db.runTransaction(async tx => {
-      if ((await tx.get(ref)).data()?.leaseToken === token) tx.update(ref, { ...patch, updatedAt: iso() })
+    const save = async (patch: Record<string, unknown>) => prisma.$transaction(async tx => {
+      const current = await lockRun(tx, id)
+      if (current?.leaseToken === token) await writeRun(tx, id, { ...current, ...patch, updatedAt: iso() })
     })
+    const updateItem = async (itemId: string, patch: Record<string, unknown>) => {
+      const item = await prisma.monthlyInvoiceRunItem.findUniqueOrThrow({ where: { runId_id: { runId: id, id: itemId } } })
+      const data = { ...(item.data as object), ...patch } as Record<string, unknown>
+      await prisma.monthlyInvoiceRunItem.update({ where: { runId_id: { runId: id, id: itemId } },
+        data: { status: String(data.status ?? item.status), data: data as Prisma.InputJsonValue } })
+    }
     try {
-      if (run.status === 'INITIALIZING') { await initialize(ref, token); return { processed: 0, state: 'INITIALIZED' } }
+      if (run.status === 'INITIALIZING') { await initialize(id, token); return { processed: 0, state: 'INITIALIZED' } }
       if (run.status === 'REPORT_PENDING') {
         const index = run.reportIndex || 0
         const sent = await sendTelegram(run.reportMessages[index])
@@ -211,19 +250,18 @@ export function createMonthlyInvoiceReconciler(dependencies: {
           ...(index + 1 === run.reportMessages.length ? { status: 'COMPLETE', completedAt: iso() } : {}) })
         return { processed: 0, state: index + 1 === run.reportMessages.length ? 'COMPLETE' : 'REPORT_PENDING' }
       }
-      // One provider operation per invocation stays inside the 60-second serverless budget.
-      const pending = await ref.collection('items').where('status', 'in', ['PENDING', 'PROCESSING']).limit(1).get()
-      if (!pending.empty) {
-        const item = pending.docs[0]
-        const entry = item.data() as Entry
-        await item.ref.update({ status: 'PROCESSING', processingAt: iso() })
-        const outcome = await reconcile(entry, run, ref.id, entry.status === 'PROCESSING')
-        await item.ref.update({ ...outcome, finishedAt: iso() })
+      // One provider operation per invocation keeps each worker call short.
+      const pending = await prisma.monthlyInvoiceRunItem.findFirst({ where: { runId: id, status: { in: ['PENDING', 'PROCESSING'] } } })
+      if (pending) {
+        const entry = { ...(pending.data as object), status: pending.status } as Entry
+        await updateItem(pending.id, { status: 'PROCESSING', processingAt: iso() })
+        const outcome = await reconcile(entry, run, id, entry.status === 'PROCESSING')
+        await updateItem(pending.id, { ...outcome, finishedAt: iso() })
         return { processed: 1, state: 'RUNNING' }
       }
-      const all = await ref.collection('items').get()
+      const all = await prisma.monthlyInvoiceRunItem.findMany({ where: { runId: id } })
       const reconciledAt = iso()
-      const report = monthlyInvoiceReport({ ...run, reconciledAt }, all.docs.map(doc => doc.data()))
+      const report = monthlyInvoiceReport({ ...run, reconciledAt }, all.map(item => ({ ...(item.data as object), status: item.status })))
       await save({ status: 'REPORT_PENDING', reconciledAt, counts: report.counts, totalAmount: report.totalAmount,
         reportMessages: report.messages, reportIndex: 0 })
       return { processed: 0, state: 'REPORT_PENDING' }
@@ -235,8 +273,7 @@ export function createMonthlyInvoiceReconciler(dependencies: {
     }
   }
   async function hasWork() {
-    const active = await db.collection(RUNS).where('status', 'in', ['INITIALIZING', 'RUNNING', 'REPORT_PENDING']).limit(1).get()
-    return !active.empty
+    return !!(await prisma.monthlyInvoiceRun.findFirst({ where: { status: { in: ACTIVE } }, select: { id: true } }))
   }
   return { start, tick, preview, hasWork }
 }

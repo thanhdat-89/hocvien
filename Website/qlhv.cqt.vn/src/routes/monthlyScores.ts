@@ -1,5 +1,7 @@
 import { Router, Response, NextFunction } from 'express'
-import { db, C, s, toObj } from '../lib/firebase'
+import { prisma, toClassId } from '../lib/db'
+import { enrollmentDoc, enrollmentInclude, monthlyScoreDoc, monthlyScoreInclude, privateSessionDoc, privateSessionInclude, sessionDoc, sessionInclude } from '../lib/docs'
+import { s } from '../lib/params'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
 import type { MonthlyScores, Session, PrivateSession, ClassEnrollment, Class } from '../types/models'
@@ -42,24 +44,18 @@ interface RowOut {
  * No documents are created here — first PUT will create the doc.
  */
 async function buildRows(year: number, month: number, classFilter?: string): Promise<RowOut[]> {
-  const monthPrefix = `${year}-${String(month).padStart(2, '0')}`
-  const monthStart = `${monthPrefix}-01`
-  const monthEnd = `${monthPrefix}-31`
+  const inMonthRange = { gte: new Date(Date.UTC(year, month - 1, 1)), lte: new Date(Date.UTC(year, month, 0)) }
 
   const rows: RowOut[] = []
   const usedIds = new Set<string>()
 
   // ─── Class rows ────────────────────────────────────────────
   if (classFilter !== PRIVATE_CLASS_ID) {
-    const sessionsSnap = await db.collection(C.SESSIONS)
-      .where('sessionDate', '>=', monthStart)
-      .where('sessionDate', '<=', monthEnd)
-      .get()
+    const sessions: Session[] = (await prisma.session.findMany({ where: { sessionDate: inMonthRange }, include: sessionInclude })).map(sessionDoc)
 
     // Group sessions by class, count non-cancelled
     const sessionCountByClass = new Map<string, { count: number; className: string }>()
-    sessionsSnap.docs.forEach(d => {
-      const sess = d.data() as Session
+    sessions.forEach(sess => {
       if (sess.status === 'CANCELLED') return
       if (classFilter && sess.classId !== classFilter) return
       const ent = sessionCountByClass.get(sess.classId)
@@ -69,12 +65,10 @@ async function buildRows(year: number, month: number, classFilter?: string): Pro
 
     // For each class, list active enrollments
     for (const [classId, { count: expectedCount, className }] of sessionCountByClass) {
-      const enrollSnap = await db.collection(C.ENROLLMENTS)
-        .where('classId', '==', classId)
-        .where('status', '==', 'ACTIVE')
-        .get()
-      enrollSnap.docs.forEach(e => {
-        const en = e.data() as ClassEnrollment
+      const enrollments: ClassEnrollment[] = (await prisma.classEnrollment.findMany({
+        where: { classId, status: 'ACTIVE' }, include: enrollmentInclude,
+      })).map(enrollmentDoc)
+      enrollments.forEach(en => {
         rows.push({
           id: rowId(en.studentId, classId, year, month),
           studentId: en.studentId,
@@ -91,13 +85,9 @@ async function buildRows(year: number, month: number, classFilter?: string): Pro
 
   // ─── Private rows ──────────────────────────────────────────
   if (!classFilter || classFilter === PRIVATE_CLASS_ID) {
-    const psSnap = await db.collection(C.PRIVATE_SCHEDULES)
-      .where('sessionDate', '>=', monthStart)
-      .where('sessionDate', '<=', monthEnd)
-      .get()
+    const privates: PrivateSession[] = (await prisma.privateSession.findMany({ where: { sessionDate: inMonthRange }, include: privateSessionInclude })).map(privateSessionDoc)
     const countByStudent = new Map<string, { count: number; name: string }>()
-    psSnap.docs.forEach(d => {
-      const ps = d.data() as PrivateSession
+    privates.forEach(ps => {
       if (ps.status === 'CANCELLED') return
       const ent = countByStudent.get(ps.studentId)
       if (ent) ent.count += 1
@@ -121,14 +111,8 @@ async function buildRows(year: number, month: number, classFilter?: string): Pro
 
   // ─── Hydrate from existing docs ────────────────────────────
   if (rows.length === 0) return rows
-  const ids = [...usedIds]
-  const chunks: string[][] = []
-  for (let i = 0; i < ids.length; i += 30) chunks.push(ids.slice(i, i + 30))
-  const docs = await Promise.all(chunks.map(chunk =>
-    db.collection(C.MONTHLY_SCORES).where('__name__', 'in', chunk).get()
-  ))
-  const docMap = new Map<string, MonthlyScores>()
-  docs.forEach(snap => snap.docs.forEach(d => docMap.set(d.id, toObj<MonthlyScores>(d))))
+  const stored = (await prisma.monthlyScore.findMany({ where: { id: { in: [...usedIds] } }, include: monthlyScoreInclude })).map(monthlyScoreDoc) as MonthlyScores[]
+  const docMap = new Map<string, MonthlyScores>(stored.map(d => [d.id, d]))
   rows.forEach(r => {
     const doc = docMap.get(r.id)
     if (!doc) return
@@ -171,8 +155,7 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
 router.get('/student/:studentId', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const studentId = s(req.params.studentId)
-    const snap = await db.collection(C.MONTHLY_SCORES).where('studentId', '==', studentId).get()
-    const stored = snap.docs.map(d => toObj<MonthlyScores>(d))
+    const stored = (await prisma.monthlyScore.findMany({ where: { studentId }, include: monthlyScoreInclude })).map(monthlyScoreDoc) as MonthlyScores[]
     const classNames = await currentClassNames(stored.map(row => row.classId))
     const docs = stored.map(row => displayClassName(row, classNames))
       .sort((a, b) => (b.year - a.year) || (b.month - a.month) || a.className.localeCompare(b.className, 'vi'))
@@ -195,54 +178,41 @@ router.put('/:rowId', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: Auth
     const studentId = parts.slice(0, -2).join('_')
 
     const body = req.body as { index?: number; score?: number | null; notes?: string }
-    const ref = db.collection(C.MONTHLY_SCORES).doc(id)
 
     // Recompute expectedCount on every PUT (in case sessions changed)
-    const monthPrefix = `${year}-${String(month).padStart(2, '0')}`
-    const monthStart = `${monthPrefix}-01`
-    const monthEnd = `${monthPrefix}-31`
+    const inMonthRange = { gte: new Date(Date.UTC(year, month - 1, 1)), lte: new Date(Date.UTC(year, month, 0)) }
 
     let expectedCount = 0
     let className = ''
     let studentName = ''
 
     if (classId === PRIVATE_CLASS_ID) {
-      const psSnap = await db.collection(C.PRIVATE_SCHEDULES)
-        .where('studentId', '==', studentId)
-        .where('sessionDate', '>=', monthStart)
-        .where('sessionDate', '<=', monthEnd)
-        .get()
-      psSnap.docs.forEach(d => {
-        const ps = d.data() as PrivateSession
+      const privates: PrivateSession[] = (await prisma.privateSession.findMany({
+        where: { studentId, sessionDate: inMonthRange }, include: privateSessionInclude,
+      })).map(privateSessionDoc)
+      privates.forEach(ps => {
         if (ps.status === 'CANCELLED') return
         expectedCount += 1
         if (ps.studentName) studentName = ps.studentName
       })
       className = PRIVATE_CLASS_NAME
     } else {
-      const [sessionsSnap, classDoc, studentDoc] = await Promise.all([
-        db.collection(C.SESSIONS)
-          .where('classId', '==', classId)
-          .where('sessionDate', '>=', monthStart)
-          .where('sessionDate', '<=', monthEnd)
-          .get(),
-        db.collection(C.CLASSES).doc(classId).get(),
-        db.collection(C.STUDENTS).doc(studentId).get(),
+      const [sessionCount, cls, student] = await Promise.all([
+        prisma.session.count({ where: { classId, sessionDate: inMonthRange, status: { not: 'CANCELLED' } } }),
+        prisma.class.findUnique({ where: { id: classId }, select: { name: true } }),
+        prisma.student.findUnique({ where: { id: studentId }, select: { fullName: true } }),
       ])
-      sessionsSnap.docs.forEach(d => {
-        const sess = d.data() as Session
-        if (sess.status !== 'CANCELLED') expectedCount += 1
-      })
-      className = (classDoc.exists ? (classDoc.data() as Class).name : '') || ''
-      studentName = studentDoc.exists ? ((studentDoc.data() as { fullName?: string }).fullName ?? '') : ''
+      expectedCount = sessionCount
+      className = cls?.name || ''
+      studentName = student?.fullName ?? ''
     }
 
     // RBAC: TEACHER chỉ chấm lớp họ phụ trách
     if (req.user?.role === 'TEACHER' && classId !== PRIVATE_CLASS_ID) {
-      const teacherSnap = await db.collection(C.TEACHERS).where('userId', '==', req.user.userId).limit(1).get()
-      const teacherDocId = teacherSnap.empty ? null : teacherSnap.docs[0].id
-      const cls = await db.collection(C.CLASSES).doc(classId).get()
-      const classTeacherId = cls.exists ? (cls.data() as Class).teacherId : null
+      const teacher = await prisma.teacher.findUnique({ where: { userId: req.user.userId }, select: { id: true } })
+      const teacherDocId = teacher?.id ?? null
+      const cls = await prisma.class.findUnique({ where: { id: classId }, select: { teacherId: true } })
+      const classTeacherId = cls?.teacherId ?? null
       if (!teacherDocId || classTeacherId !== teacherDocId) {
         res.status(403).json({ message: 'Không có quyền chấm lớp này' }); return
       }
@@ -251,8 +221,8 @@ router.put('/:rowId', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: Auth
     if (expectedCount === 0) { res.status(400).json({ message: 'Tháng này chưa có buổi học' }); return }
 
     // Load existing or seed
-    const existingSnap = await ref.get()
-    const existing = existingSnap.exists ? toObj<MonthlyScores>(existingSnap) : null
+    const existingRow = await prisma.monthlyScore.findUnique({ where: { id }, include: monthlyScoreInclude })
+    const existing = existingRow ? monthlyScoreDoc(existingRow) as MonthlyScores : null
     const scores: (number | null)[] = Array.from({ length: expectedCount }, (_, i) =>
       typeof existing?.scores?.[i] === 'number' ? existing.scores[i] : null
     )
@@ -288,7 +258,12 @@ router.put('/:rowId', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: Auth
       updatedAt: now(),
       updatedBy: req.user!.userId,
     }
-    await ref.set(data, { merge: false })
+    // Ghi đè toàn bộ dòng như set({ merge: false }); classId "private" → NULL.
+    const fields = {
+      studentId, classId: toClassId(classId), className: data.className, year, month, expectedCount, scores,
+      maxScore: MAX_SCORE, notes: notes ?? null, updatedAt: new Date(), updatedBy: data.updatedBy,
+    }
+    await prisma.monthlyScore.upsert({ where: { id }, create: { id, ...fields }, update: fields })
 
     req.activity = {
       description: `Chấm điểm ${data.className} — ${data.studentName} tháng ${month}/${year}`,

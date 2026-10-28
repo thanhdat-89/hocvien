@@ -1,11 +1,18 @@
 import { Router, Response, NextFunction } from 'express'
-import { db, C, toDocs } from '../lib/firebase'
+import { prisma, toDay } from '../lib/db'
+import { paymentDoc, paymentInclude, sessionDoc, sessionInclude } from '../lib/docs'
 import { getCachedTuitionSummary } from '../services/tuitionReadView'
 import { getMissingPrivateStudents, readView } from '../services/readViews'
 import { getStudentIndex } from '../services/studentReadView'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
-import type { Session, TuitionRecord, Payment, ClassEnrollment } from '../types/models'
+import type { Session } from '../types/models'
+
+/** Ngày đầu và cuối tháng "YYYY-MM" cho cột @db.Date. */
+function monthRange(monthKey: string) {
+  const [year, month] = monthKey.split('-').map(Number)
+  return { gte: new Date(Date.UTC(year, month - 1, 1)), lte: new Date(Date.UTC(year, month, 0)) }
+}
 
 const router = Router()
 router.use(authenticate)
@@ -40,57 +47,50 @@ async function computeDashboard(force = false) {
   const today = dateInVietnam()
   const thisMonth = today.slice(0, 7)
 
+  const todayDate = toDay(today)!
   const [
     studentsIndex,
-    activeClassesSnap,
-    sessionsTodaySnap,
-    privateSessionsTodaySnap,
-    newStudentsSnap,
-    revenueSnap,
-    overdueSnap,
-    recentPaymentsSnap,
+    activeClassCount,
+    sessionsTodayRows,
+    privateSessionsTodayCount,
+    newStudentsCount,
+    revenue,
+    overdueCount,
+    recentPaymentRows,
   ] = await Promise.all([
     getStudentIndex(),
-    db.collection(C.CLASSES).where('status', '==', 'ACTIVE').get(),
-    db.collection(C.SESSIONS).where('sessionDate', '==', today).get(),
-    db.collection(C.PRIVATE_SCHEDULES).where('sessionDate', '==', today).get(),
-    db.collection(C.STUDENTS)
-      .where('enrollmentDate', '>=', `${thisMonth}-01`)
-      .where('enrollmentDate', '<=', `${thisMonth}-31`)
-      .get(),
-    db.collection(C.PAYMENTS)
-      .where('paymentDate', '>=', `${thisMonth}-01`)
-      .where('paymentDate', '<=', `${thisMonth}-31`)
-      .get(),
-    db.collection(C.TUITION_RECORDS).where('dueDate', '<', today).get(),
-    db.collection(C.PAYMENTS).orderBy('createdAt', 'desc').limit(10).get(),
+    prisma.class.count({ where: { status: 'ACTIVE' } }),
+    prisma.session.findMany({ where: { sessionDate: todayDate }, include: sessionInclude }),
+    prisma.privateSession.count({ where: { sessionDate: todayDate } }),
+    prisma.student.count({ where: { enrollmentDate: monthRange(thisMonth) } }),
+    prisma.payment.aggregate({ where: { paymentDate: monthRange(thisMonth) }, _sum: { amount: true } }),
+    prisma.tuitionRecord.count({ where: { dueDate: { lt: todayDate }, status: { in: ['PENDING', 'PARTIAL'] } } }),
+    prisma.payment.findMany({ orderBy: { createdAt: 'desc' }, take: 10, include: paymentInclude }),
   ])
   const activeStudents = studentsIndex.data!.filter(student => student.status === 'ACTIVE')
 
-  const revenueThisMonth = toDocs<Payment>(revenueSnap).reduce((sum, p) => sum + p.amount, 0)
-  const overdueCount = toDocs<TuitionRecord>(overdueSnap)
-    .filter(r => r.status === 'PENDING' || r.status === 'PARTIAL').length
-  const sessionsToday = toDocs<Session>(sessionsTodaySnap)
-    .sort((a, b) => a.startTime.localeCompare(b.startTime))
-  const recentPayments = toDocs<Payment>(recentPaymentsSnap)
+  const revenueThisMonth = revenue._sum.amount ?? 0
+  const sessionsToday: Session[] = sessionsTodayRows.map(sessionDoc)
+    .sort((a: Session, b: Session) => a.startTime.localeCompare(b.startTime))
+  const recentPayments = recentPaymentRows.map(paymentDoc)
 
   let unscheduledPrivateStudentsThisMonth: number | null = null
   let totalPrivateStudents: number | null = null
   let unpaidStudentsThisMonth: number | null = null
   let unpaidStudentsByMonth: Array<{ year: number; month: number; count: number }> = []
   try {
-    const [enrollmentsSnap, missingPrivateStudents] = await Promise.all([
-      db.collection(C.ENROLLMENTS).where('status', '==', 'ACTIVE').get(),
+    const [enrollments, missingPrivateStudents] = await Promise.all([
+      prisma.classEnrollment.findMany({ where: { status: 'ACTIVE' }, select: { studentId: true } }),
       getMissingPrivateStudents(Number(thisMonth.slice(5)), Number(thisMonth.slice(0, 4)), undefined, force),
     ])
-    const enrolledStudents = new Set(toDocs<ClassEnrollment>(enrollmentsSnap).map(e => e.studentId))
+    const enrolledStudents = new Set(enrollments.map(e => e.studentId))
     const privateStudents = activeStudents.filter(s => !enrolledStudents.has(s.id))
     totalPrivateStudents = privateStudents.length
     // Count the exact list shown by /students/private-schedule/missing, including its eligibility rules.
     unscheduledPrivateStudentsThisMonth = missingPrivateStudents.data!.length
 
   } catch (error: any) {
-    console.warn('[Dashboard] Firebase monthly metrics unavailable', error?.code ?? error?.name ?? 'unknown')
+    console.warn('[Dashboard] monthly metrics unavailable', error?.code ?? error?.name ?? 'unknown')
   }
 
   // Use the same schedule rows and outstanding amounts as the tuition page.
@@ -110,11 +110,11 @@ async function computeDashboard(force = false) {
   return {
     stats: {
       totalActiveStudents: activeStudents.length,
-      totalActiveClasses: activeClassesSnap.size,
-      newStudentsThisMonth: newStudentsSnap.size,
+      totalActiveClasses: activeClassCount,
+      newStudentsThisMonth: newStudentsCount,
       revenueThisMonth,
       overdueCount,
-      sessionsTodayCount: sessionsToday.length + privateSessionsTodaySnap.size,
+      sessionsTodayCount: sessionsToday.length + privateSessionsTodayCount,
       unscheduledPrivateStudentsThisMonth,
       totalPrivateStudents,
       unpaidStudentsThisMonth,
@@ -157,20 +157,18 @@ router.get('/revenue', requireRole('ADMIN', 'STAFF'), async (_req: AuthRequest, 
         return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1 }
       })
 
-      // Query song song thay vì tuần tự
-      const snaps = await Promise.all(
-        monthRanges.map(({ year, month }) => {
-          const monthStr = `${year}-${String(month).padStart(2, '0')}`
-          return db.collection(C.PAYMENTS)
-            .where('paymentDate', '>=', `${monthStr}-01`)
-            .where('paymentDate', '<=', `${monthStr}-31`)
-            .get()
-        })
-      )
+      // Một truy vấn gộp theo tháng cho cả 12 tháng (tham số là chuỗi ngày → không phụ thuộc múi giờ phiên)
+      const first = monthRanges[0], last = monthRanges[monthRanges.length - 1]
+      const rows = await prisma.$queryRaw<{ ym: string; revenue: bigint }[]>`
+        SELECT to_char("paymentDate", 'YYYY-MM') AS ym, SUM(amount)::bigint AS revenue FROM payments
+        WHERE "paymentDate" BETWEEN ${new Date(Date.UTC(first.year, first.month - 1, 1)).toISOString().slice(0, 10)}::date
+          AND ${new Date(Date.UTC(last.year, last.month, 0)).toISOString().slice(0, 10)}::date
+        GROUP BY 1`
+      const byMonth = new Map(rows.map(r => [r.ym, Number(r.revenue)]))
 
-      const months = monthRanges.map((r, i) => ({
+      const months = monthRanges.map(r => ({
         ...r,
-        revenue: toDocs<Payment>(snaps[i]).reduce((sum, p) => sum + p.amount, 0),
+        revenue: byMonth.get(`${r.year}-${String(r.month).padStart(2, '0')}`) ?? 0,
       }))
 
       return months

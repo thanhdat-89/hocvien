@@ -1,4 +1,4 @@
-/** Leave room for Firestore persistence and response delivery within Vercel's 60s limit. */
+/** Leave room for database writes and response delivery within the request time budget. */
 export function withMisaDeadline(request: typeof fetch, deadline = Date.now() + 35_000): typeof fetch {
   return async (input, init) => {
     const remaining = deadline - Date.now()

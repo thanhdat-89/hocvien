@@ -1,9 +1,53 @@
-import { db, C, toDocs } from '../lib/firebase'
-import type { TuitionRecord, Payment } from '../types/models'
+import { prisma } from '../lib/db'
+import {
+  classDoc, classInclude, enrollmentDoc, enrollmentInclude, privateSessionDoc, privateSessionInclude,
+  sessionDoc, sessionInclude, studentPromotionDoc, studentPromotionInclude, tuitionRecordDoc, tuitionRecordInclude,
+} from '../lib/docs'
+import type { TuitionRecord } from '../types/models'
 import { classRateForMonth } from './classChange'
 
+/** Dữ liệu đầu vào dạng tài liệu Firestore cũ — tách khỏi phép tính để test truyền thẳng mảng. */
+export interface TuitionScheduleData {
+  enrollments: any[]
+  classes: any[]
+  /** { id, fullName, gradeLevel, primaryParentName, primaryParentPhone, primaryParentZalo } */
+  students: any[]
+  sessions: any[]
+  promotions: any[]
+  privateSessions: any[]
+  records: (TuitionRecord & { id: string })[]
+  paidByRecord: Map<string, number>
+}
+
+/** Đọc PostgreSQL cho một tháng, trả đúng hình dạng mà phép tính bên dưới mong đợi. */
+export async function loadTuitionScheduleData(month: number, year: number): Promise<TuitionScheduleData> {
+  const from = new Date(Date.UTC(year, month - 1, 1)), to = new Date(Date.UTC(year, month, 0))
+  const enrollments = (await prisma.classEnrollment.findMany({ include: enrollmentInclude })).map(enrollmentDoc)
+  const classIds = [...new Set(enrollments.map((e: any) => e.classId as string))]
+  const [classes, students, sessions, promotions, privateSessions, records, paid] = await Promise.all([
+    prisma.class.findMany({ where: { id: { in: classIds } }, include: classInclude }).then(rows => rows.map(classDoc)),
+    // Phụ huynh liên hệ chính (ưu tiên isPrimaryContact, nếu không có lấy người đầu tiên) — thay cho primaryParent* denorm cũ.
+    prisma.student.findMany({
+      select: { id: true, fullName: true, gradeLevel: true, parents: { orderBy: [{ isPrimaryContact: 'desc' }, { createdAt: 'asc' }], take: 1 } },
+    }).then(rows => rows.map(({ parents, ...s }) => ({
+      ...s, primaryParentName: parents[0]?.fullName || null, primaryParentPhone: parents[0]?.phone ?? null, primaryParentZalo: parents[0]?.zalo ?? null,
+    }))),
+    prisma.session.findMany({ where: { classId: { in: classIds }, sessionDate: { gte: from, lte: to } }, include: sessionInclude }).then(rows => rows.map(sessionDoc)),
+    prisma.studentPromotion.findMany({ include: studentPromotionInclude }).then(rows => rows.map(studentPromotionDoc)),
+    prisma.privateSession.findMany({ where: { sessionDate: { gte: from, lte: to } }, include: privateSessionInclude }).then(rows => rows.map(privateSessionDoc)),
+    prisma.tuitionRecord.findMany({ where: { billingMonth: month, billingYear: year }, include: tuitionRecordInclude }).then(rows => rows.map(tuitionRecordDoc)),
+    prisma.payment.groupBy({ by: ['tuitionRecordId'], where: { tuitionRecord: { billingMonth: month, billingYear: year } }, _sum: { amount: true } }),
+  ])
+  return { enrollments, classes, students, sessions, promotions, privateSessions, records,
+    paidByRecord: new Map(paid.map(p => [p.tuitionRecordId, p._sum.amount ?? 0])) }
+}
+
 /** Shared calculation for the tuition page and automated exports. */
-export async function getTuitionScheduleSummary(month: number, year: number, sourceDb: Pick<FirebaseFirestore.Firestore, 'collection'> = db) {
+export async function getTuitionScheduleSummary(month: number, year: number) {
+  return buildTuitionScheduleSummary(await loadTuitionScheduleData(month, year), month, year)
+}
+
+export function buildTuitionScheduleSummary(data: TuitionScheduleData, month: number, year: number) {
   const m = month
   const y = year
   const monthStr = `${y}-${String(m).padStart(2, '0')}`
@@ -11,59 +55,24 @@ export async function getTuitionScheduleSummary(month: number, year: number, sou
   const toDate = `${y}-${String(m).padStart(2, '0')}-${new Date(y, m, 0).getDate()}`
 
   // 1. Lấy tất cả enrollments: ACTIVE hoặc DROPPED nhưng dropDate >= fromDate
-  const enrollmentsSnap = await sourceDb.collection(C.ENROLLMENTS).get()
-  const allEnrollments = toDocs<any>(enrollmentsSnap)
-  const relevantEnrollments = allEnrollments.filter(e => {
+  const relevantEnrollments = data.enrollments.filter(e => {
     if (e.status === 'ACTIVE') return true
     if (e.status === 'DROPPED' && e.dropDate && e.dropDate >= fromDate) return true
     return false
   })
 
-
-  // 2. Unique classIds, studentIds
-  const classIds = [...new Set(relevantEnrollments.map((e: any) => e.classId as string))]
-  const studentIds = [...new Set(relevantEnrollments.map((e: any) => e.studentId as string))]
-
-  // BatchGet keeps the number of document reads while avoiding one RPC per class/student.
-  const getDocuments = async (collection: string, ids: string[]) => {
-    const refs = ids.map(id => sourceDb.collection(collection).doc(id))
-    if (refs.length === 0) return []
-    const firestore = sourceDb as FirebaseFirestore.Firestore
-    return typeof firestore.getAll === 'function'
-      ? firestore.getAll(...refs)
-      : Promise.all(refs.map(ref => ref.get()))
-  }
-
-  // 3. Fetch classes
-  const classDocs = await getDocuments(C.CLASSES, classIds)
+  // 3. Classes / 4. Students
   const classMap: Record<string, any> = {}
-  for (const doc of classDocs) {
-    if (doc.exists) classMap[doc.id] = { id: doc.id, ...doc.data() }
-  }
-
-  // 4. Fetch students
-  const studentDocs = await getDocuments(C.STUDENTS, studentIds)
+  for (const cls of data.classes) classMap[cls.id] = cls
   const studentMap: Record<string, any> = {}
-  for (const doc of studentDocs) {
-    if (doc.exists) studentMap[doc.id] = { id: doc.id, ...doc.data() }
-  }
+  for (const stu of data.students) studentMap[stu.id] = stu
 
-  // 5. Fetch sessions per class — dùng composite index (classId, sessionDate)
-  //    để chỉ lấy sessions trong tháng, không cần filter in-memory
+  // 5. Sessions trong tháng theo lớp
   const sessionsByClass: Record<string, any[]> = {}
-  await Promise.all(classIds.map(async (classId) => {
-    const snap = await sourceDb.collection(C.SESSIONS)
-      .where('classId', '==', classId)
-      .where('sessionDate', '>=', fromDate)
-      .where('sessionDate', '<=', toDate)
-      .get()
-    sessionsByClass[classId] = toDocs<any>(snap)
-  }))
+  for (const sess of data.sessions) (sessionsByClass[sess.classId] ??= []).push(sess)
 
-  // Promotions are a small collection; one query is much faster than one query per enrollment.
   const promotionMap: Record<string, any[]> = {}
-  const promotionSnap = await sourceDb.collection(C.STUDENT_PROMOTIONS).get()
-  for (const p of toDocs<any>(promotionSnap)) {
+  for (const p of data.promotions) {
     if ((p.appliedFrom && p.appliedFrom > toDate) || (p.appliedTo && p.appliedTo < fromDate)) continue
     const key = `${p.studentId}-${p.classId}`
     if (!promotionMap[key]) promotionMap[key] = []
@@ -137,27 +146,14 @@ export async function getTuitionScheduleSummary(month: number, year: number, sou
     })
   }
 
-  // Học riêng — dùng range query thay vì fetch all rồi filter
-  const privateSnap = await sourceDb.collection(C.PRIVATE_SCHEDULES)
-    .where('sessionDate', '>=', fromDate)
-    .where('sessionDate', '<=', toDate)
-    .get()
-  const allPrivate = toDocs<any>(privateSnap).filter((ps: any) => ps.status !== 'CANCELLED')
+  // Học riêng trong tháng
+  const allPrivate = data.privateSessions.filter((ps: any) => ps.status !== 'CANCELLED')
 
   // Group by studentId
   const privateByStudent: Record<string, any[]> = {}
   for (const ps of allPrivate) {
     if (!privateByStudent[ps.studentId]) privateByStudent[ps.studentId] = []
     privateByStudent[ps.studentId].push(ps)
-  }
-
-  // Thêm rows học riêng — cần studentName
-  const privateStudentIds = Object.keys(privateByStudent).filter(sid => !studentMap[sid])
-  if (privateStudentIds.length > 0) {
-    const extraDocs = await getDocuments(C.STUDENTS, privateStudentIds)
-    for (const doc of extraDocs) {
-      if (doc.exists) studentMap[doc.id] = { id: doc.id, ...doc.data() }
-    }
   }
 
   for (const [sid, sessions] of Object.entries(privateByStudent)) {
@@ -190,32 +186,13 @@ export async function getTuitionScheduleSummary(month: number, year: number, sou
   }
 
   // ─── Enrich rows với tuitionRecord + payment status ───────
-  const recordsSnap = await sourceDb.collection(C.TUITION_RECORDS)
-    .where('billingMonth', '==', m)
-    .where('billingYear', '==', y)
-    .get()
   const recordsByKey = new Map<string, TuitionRecord>()
-  recordsSnap.forEach(doc => {
-    const d = { id: doc.id, ...(doc.data() as any) } as TuitionRecord
-    recordsByKey.set(`${d.studentId}-${d.classId}`, d)
-  })
-
-  const recordIds = Array.from(recordsByKey.values()).map(r => r.id)
-  const paidByRecord = new Map<string, number>()
-  const paymentChunks: string[][] = []
-  for (let i = 0; i < recordIds.length; i += 10) paymentChunks.push(recordIds.slice(i, i + 10))
-  await Promise.all(paymentChunks.map(async chunk => {
-    const paySnap = await sourceDb.collection(C.PAYMENTS).where('tuitionRecordId', 'in', chunk).get()
-    paySnap.forEach(p => {
-      const data = p.data() as Payment
-      paidByRecord.set(data.tuitionRecordId, (paidByRecord.get(data.tuitionRecordId) || 0) + (data.amount || 0))
-    })
-  }))
+  for (const d of data.records) recordsByKey.set(`${d.studentId}-${d.classId}`, d)
 
   rows.forEach(row => {
     const rec = recordsByKey.get(`${row.studentId}-${row.classId}`)
     if (rec) {
-      const paid = paidByRecord.get(rec.id) || 0
+      const paid = data.paidByRecord.get(rec.id) || 0
       row.tuitionRecord = {
         id: rec.id,
         finalAmount: rec.finalAmount,

@@ -1,8 +1,63 @@
-import { db, C, toDocs } from '../lib/firebase'
-import type { ClassEnrollment, StudentPromotion, TuitionRecord, Payment } from '../types/models'
+import { prisma, newId, toDay, toClassId, type Tx } from '../lib/db'
+import {
+  classDoc, classInclude, enrollmentDoc, enrollmentInclude, privateSessionDoc, privateSessionInclude,
+  sessionDoc, sessionInclude, studentPromotionDoc, studentPromotionInclude, tuitionRecordDoc, tuitionRecordInclude,
+} from '../lib/docs'
+import type { ClassEnrollment, StudentPromotion, TuitionRecord } from '../types/models'
 import { classRateForMonth } from './classChange'
 
-const now = () => new Date().toISOString()
+type TuitionRecordDoc = TuitionRecord & { id: string; paidAmount?: number; remainingAmount?: number }
+
+const loadRecord = (id: string): Promise<TuitionRecordDoc> =>
+  prisma.tuitionRecord.findUniqueOrThrow({ where: { id }, include: tuitionRecordInclude }).then(tuitionRecordDoc)
+
+/** Phiếu của học viên × lớp (hoặc học riêng) × tháng — duy nhất nhờ unique index. */
+const findRecord = (studentId: string, classId: string, month: number, year: number) =>
+  prisma.tuitionRecord.findFirst({ where: { studentId, classId: toClassId(classId), billingMonth: month, billingYear: year } })
+
+/** Khuyến mãi của học viên cho lớp (hoặc học riêng) có hiệu lực trong khoảng [fromDate, toDate]. */
+async function activePromotions(studentId: string, classId: string, fromDate: string, toDate: string): Promise<StudentPromotion[]> {
+  const rows = await prisma.studentPromotion.findMany({
+    where: { studentId, classId: toClassId(classId), appliedFrom: { lte: toDay(toDate)! } },
+    include: studentPromotionInclude,
+  })
+  return rows.map(studentPromotionDoc).filter((p: StudentPromotion) => !p.appliedTo || p.appliedTo >= fromDate)
+}
+
+/**
+ * Ghi phiếu (tạo mới hoặc cập nhật) rồi tính lại trạng thái từ thanh toán thực tế.
+ * Giảm giá theo % làm tròn đến đồng — cột tiền là số nguyên VND.
+ */
+async function saveRecord(existingId: string | null, data: {
+  studentId: string; classId: string; className: string; month: number; year: number
+  totalSessions: number; chargedSessions: number; baseAmount: number; discountAmount: number
+}) {
+  const discountAmount = Math.round(data.discountAmount)
+  const fields = {
+    className: data.className,
+    totalSessions: data.totalSessions, chargedSessions: data.chargedSessions,
+    baseAmount: Math.round(data.baseAmount), discountAmount, finalAmount: Math.round(data.baseAmount) - discountAmount,
+    status: 'PENDING' as const,
+    dueDate: toDay(`${data.year}-${String(data.month).padStart(2, '0')}-25`),
+  }
+  let recordId: string
+  if (existingId) {
+    recordId = existingId
+    await prisma.tuitionRecord.update({ where: { id: recordId }, data: fields })
+  } else {
+    recordId = newId()
+    await prisma.tuitionRecord.create({
+      data: {
+        id: recordId, studentId: data.studentId, classId: toClassId(data.classId),
+        billingMonth: data.month, billingYear: data.year, remainingAmount: fields.finalAmount, ...fields,
+      },
+    })
+  }
+
+  // Recompute status từ payments thực tế (PENDING/PARTIAL/PAID)
+  await refreshTuitionStatus(recordId)
+  return { tuitionRecord: await loadRecord(recordId), isNew: !existingId }
+}
 
 /**
  * Tính học phí cho 1 học viên / 1 lớp / 1 tháng
@@ -12,7 +67,7 @@ export async function calculateTuitionForStudent(
   classId: string,
   month: number,
   year: number
-): Promise<{ tuitionRecord: TuitionRecord & { id: string }; isNew: boolean }> {
+): Promise<{ tuitionRecord: TuitionRecordDoc; isNew: boolean }> {
   const monthStr = `${year}-${String(month).padStart(2, '0')}`
   const fromDate = `${monthStr}-01`
   const toDate = `${year}-${String(month).padStart(2, '0')}-${new Date(year, month, 0).getDate()}`
@@ -22,41 +77,32 @@ export async function calculateTuitionForStudent(
   }
 
   // Enrollment để lấy customTuitionRate
-  const enrollSnap = await db.collection(C.ENROLLMENTS)
-    .where('classId', '==', classId)
-    .where('studentId', '==', studentId)
-    .limit(1)
-    .get()
-
-  if (enrollSnap.empty) throw new Error(`Học viên ${studentId} không đăng ký lớp ${classId}`)
-
-  const enrollment = { id: enrollSnap.docs[0].id, ...enrollSnap.docs[0].data() } as ClassEnrollment
+  // Firestore .limit(1) trả tài liệu đầu tiên theo ID — giữ cùng lựa chọn khi học viên nghỉ rồi ghi danh lại.
+  const enrollmentRow = await prisma.classEnrollment.findFirst({ where: { classId, studentId }, include: enrollmentInclude, orderBy: { id: 'asc' } })
+  if (!enrollmentRow) throw new Error(`Học viên ${studentId} không đăng ký lớp ${classId}`)
+  const enrollment: ClassEnrollment = enrollmentDoc(enrollmentRow)
 
   // Đơn giá: ưu tiên customTuitionRate → class.tuitionRate → subject.tuitionRatePerSession
+  const classRow = await prisma.class.findUnique({ where: { id: classId }, include: { ...classInclude, subject: true } })
+  const classData = classRow ? classDoc(classRow) : {}
   let ratePerSession = enrollment.customTuitionRate ?? 0
   if (!ratePerSession) {
-    const classDoc = await db.collection(C.CLASSES).doc(classId).get()
-    const classData = classDoc.data() || {}
     if (classRateForMonth(classData, month, year)) {
       ratePerSession = classRateForMonth(classData, month, year)
-    } else if (classData.subjectId) {
-      const subjectDoc = await db.collection(C.SUBJECTS).doc(classData.subjectId as string).get()
-      ratePerSession = Number(subjectDoc.data()?.tuitionRatePerSession || 0)
+    } else if (classRow?.subject) {
+      ratePerSession = Number(classRow.subject.tuitionRatePerSession || 0)
     }
   }
 
   // Sessions không CANCELLED trong tháng (theo lịch dự kiến)
-  const sessionsSnap = await db.collection(C.SESSIONS)
-    .where('classId', '==', classId)
-    .where('sessionDate', '>=', fromDate)
-    .where('sessionDate', '<=', toDate)
-    .get()
-  const validSessions = sessionsSnap.docs.filter(d => {
-    const data = d.data()
+  const sessions = (await prisma.session.findMany({
+    where: { classId, sessionDate: { gte: toDay(fromDate)!, lte: toDay(toDate)! } },
+    include: sessionInclude,
+  })).map(sessionDoc)
+  const validSessions = sessions.filter((data: any) => {
     if (data.status === 'CANCELLED') return false
     if (enrollment.enrollmentDate && data.sessionDate < enrollment.enrollmentDate) return false
-    if (enrollment.status === 'DROPPED' && (enrollment as any).dropDate
-        && data.sessionDate > (enrollment as any).dropDate) return false
+    if (enrollment.status === 'DROPPED' && enrollment.dropDate && data.sessionDate > enrollment.dropDate) return false
     return true
   })
   const totalSessions = validSessions.length
@@ -65,15 +111,7 @@ export async function calculateTuitionForStudent(
   const baseAmount = chargedSessions * ratePerSession
 
   // Khuyến mãi đang hiệu lực
-  const promoSnap = await db.collection(C.STUDENT_PROMOTIONS)
-    .where('studentId', '==', studentId)
-    .where('classId', '==', classId)
-    .where('appliedFrom', '<=', toDate)
-    .get()
-
-  const activePromos = toDocs<StudentPromotion>(promoSnap).filter(p =>
-    !p.appliedTo || p.appliedTo >= fromDate
-  )
+  const activePromos = await activePromotions(studentId, classId, fromDate, toDate)
 
   let discountAmount = 0
   for (const sp of activePromos) {
@@ -86,68 +124,24 @@ export async function calculateTuitionForStudent(
     }
   }
   discountAmount = Math.min(discountAmount, baseAmount)
-  const finalAmount = baseAmount - discountAmount
-
-  // Lấy tên học viên và lớp
-  const [studentDoc, classDoc] = await Promise.all([
-    db.collection(C.STUDENTS).doc(studentId).get(),
-    db.collection(C.CLASSES).doc(classId).get(),
-  ])
 
   // Kiểm tra đã có phiếu chưa
-  const existingSnap = await db.collection(C.TUITION_RECORDS)
-    .where('studentId', '==', studentId)
-    .where('classId', '==', classId)
-    .where('billingMonth', '==', month)
-    .where('billingYear', '==', year)
-    .limit(1)
-    .get()
-
-  const isNew = existingSnap.empty
-  if (!isNew) {
-    const existing = existingSnap.docs[0]
-    const previous = existing.data() as TuitionRecord
-    if (previous.status === 'PAID' || previous.status === 'PARTIAL' || Number((previous as any).paidAmount || 0) > 0) {
-      return { tuitionRecord: { ...previous, id: existing.id }, isNew: false }
+  const existing = await findRecord(studentId, classId, month, year)
+  if (existing) {
+    // Phiếu đã thu tiền hoặc đã có hoá đơn MISA: giữ nguyên, không tính lại.
+    if (existing.status === 'PAID' || existing.status === 'PARTIAL' || existing.paidAmount > 0) {
+      return { tuitionRecord: await loadRecord(existing.id), isNew: false }
     }
-    const [directInvoice, groupedInvoice] = await Promise.all([
-      db.collection('misaInvoices').doc(existing.id).get(),
-      db.collection('misaInvoices').where('recordIds', 'array-contains', existing.id).limit(1).get(),
-    ])
-    if (directInvoice.exists || !groupedInvoice.empty) {
-      return { tuitionRecord: { ...previous, id: existing.id }, isNew: false }
-    }
+    const invoice = await prisma.misaInvoice.findFirst({
+      where: { OR: [{ id: existing.id }, { recordIds: { has: existing.id } }] }, select: { id: true },
+    })
+    if (invoice) return { tuitionRecord: await loadRecord(existing.id), isNew: false }
   }
 
-  const recordData = {
-    studentId, studentName: studentDoc.data()!.fullName as string,
-    classId, className: classDoc.data()!.name as string,
-    billingMonth: month, billingYear: year,
-    totalSessions, chargedSessions,
-    baseAmount, discountAmount, finalAmount,
-    status: 'PENDING' as const,
-    dueDate: `${year}-${String(month).padStart(2, '0')}-25`,
-    updatedAt: now(),
-  }
-
-  let recordId: string
-  if (isNew) {
-    const ref = db.collection(C.TUITION_RECORDS).doc()
-    await ref.set({ ...recordData, createdAt: now() })
-    recordId = ref.id
-  } else {
-    recordId = existingSnap.docs[0].id
-    await db.collection(C.TUITION_RECORDS).doc(recordId).update(recordData)
-  }
-
-  // Recompute status từ payments thực tế (PENDING/PARTIAL/PAID)
-  await refreshTuitionStatus(recordId)
-
-  const doc = await db.collection(C.TUITION_RECORDS).doc(recordId).get()
-  return {
-    tuitionRecord: { id: doc.id, ...doc.data() } as TuitionRecord & { id: string },
-    isNew,
-  }
+  return saveRecord(existing?.id ?? null, {
+    studentId, classId, className: classRow?.name ?? '', month, year,
+    totalSessions, chargedSessions, baseAmount, discountAmount,
+  })
 }
 
 /**
@@ -160,33 +154,22 @@ async function calculatePrivateTuition(
   year: number,
   fromDate: string,
   toDate: string,
-): Promise<{ tuitionRecord: TuitionRecord & { id: string }; isNew: boolean }> {
-  const sessionsSnap = await db.collection(C.PRIVATE_SCHEDULES)
-    .where('studentId', '==', studentId)
-    .where('sessionDate', '>=', fromDate)
-    .where('sessionDate', '<=', toDate)
-    .get()
-  const validSessions = sessionsSnap.docs
-    .map(d => ({ id: d.id, ...(d.data() as any) }))
-    .filter(s => s.status !== 'CANCELLED')
+): Promise<{ tuitionRecord: TuitionRecordDoc; isNew: boolean }> {
+  const validSessions = (await prisma.privateSession.findMany({
+    where: { studentId, sessionDate: { gte: toDay(fromDate)!, lte: toDay(toDate)! } },
+    include: privateSessionInclude,
+  })).map(privateSessionDoc).filter((s: any) => s.status !== 'CANCELLED')
 
   if (validSessions.length === 0) {
     throw new Error(`Học viên ${studentId} không có buổi học riêng nào trong T${month}/${year}`)
   }
 
   const totalSessions = validSessions.length
-  const baseAmount = validSessions.reduce((sum, s) => sum + (Number(s.ratePerSession) || 0), 0)
+  const baseAmount = validSessions.reduce((sum: number, s: any) => sum + (Number(s.ratePerSession) || 0), 0)
   const avgRate = totalSessions > 0 ? Math.round(baseAmount / totalSessions) : 0
 
   // Khuyến mãi cho học riêng (classId='private')
-  const promoSnap = await db.collection(C.STUDENT_PROMOTIONS)
-    .where('studentId', '==', studentId)
-    .where('classId', '==', 'private')
-    .where('appliedFrom', '<=', toDate)
-    .get()
-  const activePromos = toDocs<StudentPromotion>(promoSnap).filter(p =>
-    !p.appliedTo || p.appliedTo >= fromDate
-  )
+  const activePromos = await activePromotions(studentId, 'private', fromDate, toDate)
 
   let discountAmount = 0
   for (const sp of activePromos) {
@@ -199,45 +182,12 @@ async function calculatePrivateTuition(
     }
   }
   discountAmount = Math.min(discountAmount, baseAmount)
-  const finalAmount = baseAmount - discountAmount
 
-  const studentDoc = await db.collection(C.STUDENTS).doc(studentId).get()
-
-  const existingSnap = await db.collection(C.TUITION_RECORDS)
-    .where('studentId', '==', studentId)
-    .where('classId', '==', 'private')
-    .where('billingMonth', '==', month)
-    .where('billingYear', '==', year)
-    .limit(1).get()
-  const isNew = existingSnap.empty
-
-  const recordData = {
-    studentId, studentName: studentDoc.data()!.fullName as string,
-    classId: 'private', className: 'Học riêng',
-    billingMonth: month, billingYear: year,
-    totalSessions, chargedSessions: totalSessions,
-    baseAmount, discountAmount, finalAmount,
-    status: 'PENDING' as const,
-    dueDate: `${year}-${String(month).padStart(2, '0')}-25`,
-    updatedAt: now(),
-  }
-
-  let recordId: string
-  if (isNew) {
-    const ref = db.collection(C.TUITION_RECORDS).doc()
-    await ref.set({ ...recordData, createdAt: now() })
-    recordId = ref.id
-  } else {
-    recordId = existingSnap.docs[0].id
-    await db.collection(C.TUITION_RECORDS).doc(recordId).update(recordData)
-  }
-  await refreshTuitionStatus(recordId)
-
-  const doc = await db.collection(C.TUITION_RECORDS).doc(recordId).get()
-  return {
-    tuitionRecord: { id: doc.id, ...doc.data() } as TuitionRecord & { id: string },
-    isNew,
-  }
+  const existing = await findRecord(studentId, 'private', month, year)
+  return saveRecord(existing?.id ?? null, {
+    studentId, classId: 'private', className: 'Học riêng', month, year,
+    totalSessions, chargedSessions: totalSessions, baseAmount, discountAmount,
+  })
 }
 
 /**
@@ -249,25 +199,17 @@ export async function calculateTuitionForClass(
   let studentIds: string[]
 
   if (classId === 'private') {
-    const monthStr = `${year}-${String(month).padStart(2, '0')}`
-    const fromDate = `${monthStr}-01`
-    const toDate = `${year}-${String(month).padStart(2, '0')}-${new Date(year, month, 0).getDate()}`
-    const sessionsSnap = await db.collection(C.PRIVATE_SCHEDULES)
-      .where('sessionDate', '>=', fromDate)
-      .where('sessionDate', '<=', toDate)
-      .get()
-    const ids = new Set<string>()
-    sessionsSnap.docs.forEach(d => {
-      const data = d.data() as any
-      if (data.status !== 'CANCELLED' && data.studentId) ids.add(data.studentId as string)
+    const sessions = await prisma.privateSession.findMany({
+      where: {
+        status: { not: 'CANCELLED' },
+        sessionDate: { gte: new Date(Date.UTC(year, month - 1, 1)), lte: new Date(Date.UTC(year, month, 0)) },
+      },
+      select: { studentId: true }, distinct: ['studentId'],
     })
-    studentIds = Array.from(ids)
+    studentIds = sessions.map(s => s.studentId)
   } else {
-    const enrollSnap = await db.collection(C.ENROLLMENTS)
-      .where('classId', '==', classId)
-      .where('status', '==', 'ACTIVE')
-      .get()
-    studentIds = enrollSnap.docs.map(d => d.data().studentId as string)
+    const enrollments = await prisma.classEnrollment.findMany({ where: { classId, status: 'ACTIVE' }, select: { studentId: true } })
+    studentIds = enrollments.map(e => e.studentId)
   }
 
   let created = 0, updated = 0
@@ -275,13 +217,9 @@ export async function calculateTuitionForClass(
   const newRecordIds: string[] = []
   for (const sid of studentIds) {
     try {
-      const { isNew } = await calculateTuitionForStudent(sid, classId, month, year)
-      if (isNew) { created++; newRecordIds.push((await db.collection(C.TUITION_RECORDS)
-        .where('studentId', '==', sid).where('classId', '==', classId)
-        .where('billingMonth', '==', month).where('billingYear', '==', year).limit(1).get()).docs[0]?.id) } else updated++
-      recordIds.push((await db.collection(C.TUITION_RECORDS)
-        .where('studentId', '==', sid).where('classId', '==', classId)
-        .where('billingMonth', '==', month).where('billingYear', '==', year).limit(1).get()).docs[0]?.id || '')
+      const { isNew, tuitionRecord } = await calculateTuitionForStudent(sid, classId, month, year)
+      if (isNew) { created++; newRecordIds.push(tuitionRecord.id) } else updated++
+      recordIds.push(tuitionRecord.id)
     } catch (e) {
       console.error('[calculateTuitionForClass] failed for student', sid, classId, e)
     }
@@ -292,36 +230,68 @@ export async function calculateTuitionForClass(
 /**
  * Tính tổng tiền đã thanh toán và còn nợ cho 1 phiếu học phí
  */
-export async function getPaymentStatus(tuitionRecordId: string) {
-  const [recordDoc, paymentsSnap] = await Promise.all([
-    db.collection(C.TUITION_RECORDS).doc(tuitionRecordId).get(),
-    db.collection(C.PAYMENTS).where('tuitionRecordId', '==', tuitionRecordId).get(),
+export async function getPaymentStatus(tuitionRecordId: string, tx: Tx = prisma) {
+  const [record, paid] = await Promise.all([
+    tx.tuitionRecord.findUnique({ where: { id: tuitionRecordId }, select: { finalAmount: true, status: true } }),
+    tx.payment.aggregate({ where: { tuitionRecordId }, _sum: { amount: true } }),
   ])
 
-  if (!recordDoc.exists) throw new Error('Không tìm thấy phiếu học phí')
+  if (!record) throw new Error('Không tìm thấy phiếu học phí')
 
-  const record = recordDoc.data() as TuitionRecord
-  const payments = toDocs<Payment>(paymentsSnap)
-  const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0)
+  const totalPaid = paid._sum.amount ?? 0
   const remaining = record.finalAmount - totalPaid
 
   return { finalAmount: record.finalAmount, totalPaid, remaining, status: record.status }
 }
 
 /**
+ * Ghi một khoản thu và tính lại trạng thái phiếu trong cùng transaction, sau khi khoá dòng phiếu.
+ * `amount = 'remaining'`: thu đủ phần còn nợ — bấm "đã đóng" hai lần liền không tạo hai khoản thu.
+ * Trả về khoản thu đã tạo, hoặc null khi phiếu đã đủ tiền.
+ */
+export async function recordPayment(tuitionRecordId: string, input: {
+  amount: number | 'remaining'; paymentDate?: string; method?: string; notes?: string; receivedById?: string; receivedByName: string
+}) {
+  return prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM tuition_records WHERE id = ${tuitionRecordId} FOR UPDATE`
+    const record = await tx.tuitionRecord.findUniqueOrThrow({ where: { id: tuitionRecordId }, select: { studentId: true } })
+    const amount = input.amount === 'remaining' ? (await getPaymentStatus(tuitionRecordId, tx)).remaining : input.amount
+    if (amount <= 0) { await refreshTuitionStatus(tuitionRecordId, tx); return null }
+    const receivedBy = input.receivedById
+      ? await tx.user.findUnique({ where: { id: input.receivedById }, select: { id: true } }) : null
+    const payment = await tx.payment.create({
+      data: {
+        id: newId(), tuitionRecordId, studentId: record.studentId, amount,
+        paymentDate: toDay(input.paymentDate || new Date().toISOString().slice(0, 10))!,
+        method: (input.method || 'CASH') as 'CASH',
+        receivedById: receivedBy?.id ?? null, receivedByName: input.receivedByName, notes: input.notes,
+      },
+    })
+    await refreshTuitionStatus(tuitionRecordId, tx)
+    return payment
+  })
+}
+
+/** Xoá mọi khoản thu của phiếu (bỏ xác nhận đã đóng) và tính lại trạng thái — một transaction. */
+export async function clearPayments(tuitionRecordId: string) {
+  await prisma.$transaction(async tx => {
+    await tx.payment.deleteMany({ where: { tuitionRecordId } })
+    await refreshTuitionStatus(tuitionRecordId, tx)
+  })
+}
+
+/**
  * Cập nhật trạng thái phiếu dựa trên tổng tiền đã trả
  */
-export async function refreshTuitionStatus(tuitionRecordId: string): Promise<void> {
-  const { finalAmount, totalPaid } = await getPaymentStatus(tuitionRecordId)
+export async function refreshTuitionStatus(tuitionRecordId: string, tx: Tx = prisma): Promise<void> {
+  const { finalAmount, totalPaid } = await getPaymentStatus(tuitionRecordId, tx)
 
   let status: TuitionRecord['status'] = 'PENDING'
   if (totalPaid >= finalAmount) status = 'PAID'
   else if (totalPaid > 0) status = 'PARTIAL'
 
-  await db.collection(C.TUITION_RECORDS).doc(tuitionRecordId).update({
-    status,
-    paidAmount: totalPaid,
-    remainingAmount: Math.max(0, finalAmount - totalPaid),
-    updatedAt: new Date().toISOString(),
+  await tx.tuitionRecord.update({
+    where: { id: tuitionRecordId },
+    data: { status, paidAmount: totalPaid, remainingAmount: Math.max(0, finalAmount - totalPaid) },
   })
 }

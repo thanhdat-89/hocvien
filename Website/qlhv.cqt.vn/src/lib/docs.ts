@@ -87,3 +87,11 @@ export const paymentInclude = {
 export function paymentDoc({ student, tuitionRecord, ...p }: Prisma.PaymentGetPayload<{ include: typeof paymentInclude }>) {
   return api({ ...p, studentName: student.fullName, classId: fromClassId(tuitionRecord.classId) })
 }
+
+// ─── Điểm tháng ──────────────────────────────────────────────
+
+export const monthlyScoreInclude = { student: fullName } satisfies Prisma.MonthlyScoreInclude
+
+export function monthlyScoreDoc({ student, ...row }: Prisma.MonthlyScoreGetPayload<{ include: typeof monthlyScoreInclude }>) {
+  return api({ ...row, classId: fromClassId(row.classId), studentName: student.fullName })
+}

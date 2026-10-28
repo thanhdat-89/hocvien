@@ -312,9 +312,10 @@ async function main() {
 
     await insert('misa_invoices', coll('misaInvoices').map(d => {
       const x = pick('misaInvoices', d, ['id', 'refId', 'status', 'revision', 'invoiceDate', 'invoiceNumber', 'invoiceCode', 'transactionId',
-        'lastErrorMessage', 'recordIds', 'billingPeriods', 'source', 'sources', 'template', 'buyer', 'restoredAt', 'createdBy', 'createdAt', 'updatedAt'])
+        'invoiceUrl', 'lastErrorMessage', 'recordIds', 'billingPeriods', 'source', 'sources', 'template', 'buyer', 'restoredAt', 'createdBy', 'createdAt', 'updatedAt'])
       return { id: d.document_id, refId: x.refId, status: x.status, revision: int(x.revision), invoiceDate: day(x.invoiceDate),
-        invoiceNumber: str(x.invoiceNumber), invoiceCode: str(x.invoiceCode), transactionId: str(x.transactionId), lastErrorMessage: str(x.lastErrorMessage),
+        invoiceNumber: str(x.invoiceNumber), invoiceCode: str(x.invoiceCode), transactionId: str(x.transactionId), invoiceUrl: str(x.invoiceUrl),
+        lastErrorMessage: str(x.lastErrorMessage),
         recordIds: x.recordIds ?? [], billingPeriods: x.billingPeriods ?? [], source: json(x.source), sources: json(x.sources), template: json(x.template),
         buyer: json(x.buyer), restoredAt: ts(x.restoredAt), createdBy: x.createdBy ?? '', createdAt: ts(x.createdAt), updatedAt: ts(x.updatedAt) ?? ts(x.createdAt) }
     }), rows => tx.misaInvoice.createMany({ data: rows }))
@@ -344,15 +345,10 @@ async function main() {
 
     const runItems: any[] = []
     await insert('monthly_invoice_runs', coll('monthlyInvoiceRuns').map(d => {
-      const { month, year, cutoff, status, leaseToken, leaseUntil, total, excludedAfterCutoff, startedAt, reconciledAt, ...extra } = d.data
-      for (const item of coll('*/items').filter(i => i.path.startsWith(d.path + '/'))) {
-        const x = item.data
-        runItems.push({ runId: d.document_id, id: item.document_id, studentName: x.studentName ?? '', className: x.className ?? '', amount: int(x.amount),
-          status: x.status, reason: x.reason ?? '', linkedInvoiceId: x.linkedInvoiceId ?? '' })
-      }
-      return { id: d.document_id, month: int(month), year: int(year), cutoff: ts(cutoff), status, leaseToken: str(leaseToken),
-        leaseUntil: leaseUntil == null ? null : BigInt(int(leaseUntil)), total: total ?? null, excludedAfterCutoff: excludedAfterCutoff ?? null,
-        startedAt: ts(startedAt), reconciledAt: ts(reconciledAt), extra: Object.keys(extra).length ? extra : Prisma.JsonNull }
+      const { status, leaseToken, leaseUntil, ...data } = d.data
+      for (const item of coll('*/items').filter(i => i.path.startsWith(d.path + '/')))
+        runItems.push({ runId: d.document_id, id: item.document_id, status: item.data.status ?? '', data: item.data })
+      return { id: d.document_id, status: status ?? '', leaseToken: str(leaseToken) ?? '', leaseUntil: BigInt(int(leaseUntil)), data }
     }), rows => tx.monthlyInvoiceRun.createMany({ data: rows }))
     await insert('monthly_invoice_run_items', runItems, rows => tx.monthlyInvoiceRunItem.createMany({ data: rows }))
 

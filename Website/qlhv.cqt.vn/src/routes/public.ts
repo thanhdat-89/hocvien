@@ -1,5 +1,10 @@
 import { Router, Request, Response, NextFunction } from 'express'
-import { db, C, s, toDocs, toObj } from '../lib/firebase'
+import { prisma, api } from '../lib/db'
+import {
+  classDoc, classInclude, enrollmentDoc, enrollmentInclude, monthlyScoreDoc, monthlyScoreInclude, paymentDoc, paymentInclude,
+  privateSessionDoc, privateSessionInclude, scheduleDoc, scheduleInclude, tuitionRecordDoc, tuitionRecordInclude,
+} from '../lib/docs'
+import { s } from '../lib/params'
 import { computeTuitionSummary, loadStudentPromotions } from '../lib/tuition'
 import { currentClassNames } from '../lib/classDisplayNames'
 import { listMaterialsForStudent } from './materials'
@@ -76,7 +81,7 @@ interface PublicReview {
   updatedAt: string
 }
 
-// In-memory response cache to reduce Firestore reads when parents refresh.
+// In-memory response cache when parents refresh repeatedly.
 // 60-second TTL is acceptable: admin updates show up within a minute.
 const publicCache = new Map<string, { at: number; payload: any }>()
 const PUBLIC_TTL_MS = 60_000
@@ -92,12 +97,12 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
       return
     }
 
-    const studentDoc = await db.collection(C.STUDENTS).doc(studentId).get()
-    if (!studentDoc.exists) {
+    const studentRow = await prisma.student.findUnique({ where: { id: studentId } })
+    if (!studentRow) {
       res.status(404).json({ message: 'Không tìm thấy học viên' })
       return
     }
-    const student = toObj<Student>(studentDoc)
+    const student: Student = api(studentRow)
 
     // Chỉ trả về học viên ACTIVE (đã nghỉ thì không cho xem)
     if (student.status !== 'ACTIVE') {
@@ -119,34 +124,25 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
     }
 
     // ─── Lấy lớp + lịch học ────────────────────────────────────
-    const enrollSnap = await db.collection(C.ENROLLMENTS)
-      .where('studentId', '==', studentId)
-      .where('status', '==', 'ACTIVE')
-      .get()
-    const enrollments = toDocs<ClassEnrollment>(enrollSnap)
+    const enrollments: ClassEnrollment[] = (await prisma.classEnrollment.findMany({
+      where: { studentId, status: 'ACTIVE' }, include: enrollmentInclude,
+    })).map(enrollmentDoc)
     const classIds = enrollments.map(e => e.classId)
 
     const classesById = new Map<string, Class>()
     const schedulesByClass = new Map<string, Schedule[]>()
 
     if (classIds.length > 0) {
-      // Firestore `in` query giới hạn 30 phần tử — chia chunk
-      const chunks: string[][] = []
-      for (let i = 0; i < classIds.length; i += 30) {
-        chunks.push(classIds.slice(i, i + 30))
-      }
-      for (const chunk of chunks) {
-        const [classSnap, scheduleSnap] = await Promise.all([
-          db.collection(C.CLASSES).where('__name__', 'in', chunk).get(),
-          db.collection(C.SCHEDULES).where('classId', 'in', chunk).get(),
-        ])
-        toDocs<Class>(classSnap).forEach(c => classesById.set(c.id, c))
-        toDocs<Schedule>(scheduleSnap).forEach(sc => {
-          const arr = schedulesByClass.get(sc.classId) ?? []
-          arr.push(sc)
-          schedulesByClass.set(sc.classId, arr)
-        })
-      }
+      const [classes, schedules] = await Promise.all([
+        prisma.class.findMany({ where: { id: { in: classIds } }, include: classInclude }),
+        prisma.schedule.findMany({ where: { classId: { in: classIds } }, include: scheduleInclude }),
+      ])
+      classes.map(classDoc).forEach((c: Class) => classesById.set(c.id, c))
+      schedules.map(scheduleDoc).forEach((sc: Schedule) => {
+        const arr = schedulesByClass.get(sc.classId) ?? []
+        arr.push(sc)
+        schedulesByClass.set(sc.classId, arr)
+      })
     }
 
     const classes: PublicClass[] = enrollments.map(e => {
@@ -173,28 +169,18 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
     })
 
     // ─── Học phí + lịch sử thanh toán ──────────────────────────
-    const tuitionSnap = await db.collection(C.TUITION_RECORDS)
-      .where('studentId', '==', studentId)
-      .get()
-    const tuitionRecords = toDocs<TuitionRecord>(tuitionSnap)
-    const tuitionIds = tuitionRecords.map(t => t.id)
+    const [tuitionRows, paymentRows] = await Promise.all([
+      prisma.tuitionRecord.findMany({ where: { studentId }, include: tuitionRecordInclude }),
+      prisma.payment.findMany({ where: { tuitionRecord: { studentId } }, include: paymentInclude }),
+    ])
+    const tuitionRecords: TuitionRecord[] = tuitionRows.map(tuitionRecordDoc)
 
     const paymentsByTuition = new Map<string, Payment[]>()
-    if (tuitionIds.length > 0) {
-      const chunks: string[][] = []
-      for (let i = 0; i < tuitionIds.length; i += 30) {
-        chunks.push(tuitionIds.slice(i, i + 30))
-      }
-      for (const chunk of chunks) {
-        const paySnap = await db.collection(C.PAYMENTS)
-          .where('tuitionRecordId', 'in', chunk).get()
-        toDocs<Payment>(paySnap).forEach(p => {
-          const arr = paymentsByTuition.get(p.tuitionRecordId) ?? []
-          arr.push(p)
-          paymentsByTuition.set(p.tuitionRecordId, arr)
-        })
-      }
-    }
+    paymentRows.map(paymentDoc).forEach((p: Payment) => {
+      const arr = paymentsByTuition.get(p.tuitionRecordId) ?? []
+      arr.push(p)
+      paymentsByTuition.set(p.tuitionRecordId, arr)
+    })
 
     const tuition: PublicTuition[] = tuitionRecords
       .sort((a, b) => (b.billingYear - a.billingYear) || (b.billingMonth - a.billingMonth))
@@ -227,23 +213,20 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
       })
 
     // ─── Nhận xét theo tháng ───────────────────────────────────
-    const [reviewSnap, monthlyScoresSnap] = await Promise.all([
-      db.collection(C.STUDENTS).doc(studentId).collection('reviews').orderBy('month', 'desc').get(),
-      db.collection(C.MONTHLY_SCORES).where('studentId', '==', studentId).get(),
+    const [reviewRows, scoreRows] = await Promise.all([
+      prisma.studentReview.findMany({ where: { studentId }, orderBy: { month: 'desc' } }),
+      prisma.monthlyScore.findMany({ where: { studentId }, include: monthlyScoreInclude }),
     ])
-    const reviews: PublicReview[] = reviewSnap.docs.map(d => {
-      const data = d.data()
-      return {
-        id: d.id,
-        month: data.month,
-        content: data.content,
-        teacherName: data.teacherName,
-        updatedAt: data.updatedAt,
-      }
-    })
-    const scoreNames = await currentClassNames(monthlyScoresSnap.docs.map(doc => String(doc.data().classId || '')))
-    const monthlyScores = monthlyScoresSnap.docs
-      .map(d => ({ id: d.id, ...d.data() } as any))
+    const reviews: PublicReview[] = reviewRows.map(r => ({
+      id: r.month, // API cũ dùng tháng làm id nhận xét
+      month: r.month,
+      content: r.content,
+      teacherName: r.teacherName ?? undefined,
+      updatedAt: r.updatedAt.toISOString(),
+    }))
+    const scoreDocs = scoreRows.map(monthlyScoreDoc)
+    const scoreNames = await currentClassNames(scoreDocs.map((m: any) => String(m.classId || '')))
+    const monthlyScores = scoreDocs
       .sort((a, b) => (b.year - a.year) || (b.month - a.month) || (scoreNames.get(a.classId) ?? a.className ?? '').localeCompare(scoreNames.get(b.classId) ?? b.className ?? '', 'vi'))
       .map(m => ({
         id: m.id,
@@ -259,11 +242,11 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
     const [tuitionSummary, promotions, privateSessionsRaw] = await Promise.all([
       computeTuitionSummary(studentId),
       loadStudentPromotions(studentId),
-      db.collection(C.PRIVATE_SCHEDULES).where('studentId', '==', studentId).get(),
+      prisma.privateSession.findMany({ where: { studentId }, include: privateSessionInclude }),
     ])
 
     const startOfMonth = new Date().toISOString().slice(0, 7) + '-01'
-    const privateSchedules = toDocs<PrivateSession>(privateSessionsRaw)
+    const privateSchedules = (privateSessionsRaw.map(privateSessionDoc) as PrivateSession[])
       .filter(p => p.status !== 'CANCELLED' && p.sessionDate >= startOfMonth)
       .sort((a, b) => a.sessionDate.localeCompare(b.sessionDate))
       .slice(0, 60)
@@ -302,29 +285,23 @@ router.get('/payments/:studentId', async (req: Request, res: Response, next: Nex
     const month = Number(req.query.month) || (new Date().getMonth() + 1)
     const year = Number(req.query.year) || new Date().getFullYear()
 
-    const studentDoc = await db.collection(C.STUDENTS).doc(studentId).get()
-    if (!studentDoc.exists || (studentDoc.data() as Student).status !== 'ACTIVE') {
+    const studentRow = await prisma.student.findUnique({ where: { id: studentId }, select: { status: true } })
+    if (!studentRow || studentRow.status !== 'ACTIVE') {
       res.status(404).json({ message: 'Học viên không khả dụng' })
       return
     }
 
-    const recordsSnap = await db.collection(C.TUITION_RECORDS)
-      .where('studentId', '==', studentId)
-      .where('billingMonth', '==', month)
-      .where('billingYear', '==', year)
-      .get()
-
-    const records = toDocs<TuitionRecord>(recordsSnap)
+    const records: TuitionRecord[] = (await prisma.tuitionRecord.findMany({
+      where: { studentId, billingMonth: month, billingYear: year }, include: tuitionRecordInclude,
+    })).map(tuitionRecordDoc)
     if (records.length === 0) {
       res.json({ month, year, records: [], totalFinalAmount: 0, totalPaid: 0 })
       return
     }
 
-    const recordIds = records.map(r => r.id)
-    const paymentsSnap = await db.collection(C.PAYMENTS)
-      .where('tuitionRecordId', 'in', recordIds.slice(0, 10))
-      .get()
-    const payments = toDocs<Payment>(paymentsSnap)
+    const payments = (await prisma.payment.findMany({
+      where: { tuitionRecordId: { in: records.map(r => r.id).slice(0, 10) } }, include: paymentInclude,
+    })).map(paymentDoc) as Payment[]
 
     const result = records.map(r => {
       const paid = payments.filter(p => p.tuitionRecordId === r.id)

@@ -615,6 +615,8 @@ model MisaInvoice {
   invoiceNumber    String?
   invoiceCode      String?
   transactionId    String?
+  /// Link xem hoá đơn trên meinvoice.vn sau khi phát hành.
+  invoiceUrl       String?
   lastErrorMessage String?
   /// Phiếu học phí được gộp vào hoá đơn này.
   recordIds        String[]
@@ -687,35 +689,28 @@ model InvoiceOutbox {
   @@map("invoice_outbox")
 }
 
-/// Đối soát hoá đơn cuối tháng — 1 dòng mỗi kỳ "YYYY-MM".
+/// Đối soát hoá đơn cuối tháng — 1 dòng mỗi kỳ "YYYY-MM". Máy trạng thái ghi nhiều trường theo từng bước
+/// (thống kê, nội dung báo cáo Telegram, lỗi...) → giữ trong `data`; cột riêng chỉ cho trạng thái và lease.
 model MonthlyInvoiceRun {
-  id                  String    @id // "YYYY-MM"
-  month               Int
-  year                Int
-  cutoff              DateTime  @db.Timestamptz(3)
-  status              String
-  leaseToken          String?
-  leaseUntil          BigInt?
-  total               Int?
-  excludedAfterCutoff Int?
-  startedAt           DateTime? @db.Timestamptz(3)
-  reconciledAt        DateTime? @db.Timestamptz(3)
-  extra               Json?
+  id         String  @id // "YYYY-MM"
+  status     String
+  leaseToken String  @default("")
+  /// Epoch ms; 0 = không có lease.
+  leaseUntil BigInt  @default(0)
+  data       Json
 
   items MonthlyInvoiceRunItem[]
 
+  @@index([status])
   @@map("monthly_invoice_runs")
 }
 
+/// Một phiếu học phí trong lượt đối soát; `data` = entry + kết quả (refId, amount, reason, processingAt...).
 model MonthlyInvoiceRunItem {
-  runId           String
-  id              String // = tuitionRecordId
-  studentName     String
-  className       String
-  amount          Int
-  status          String
-  reason          String
-  linkedInvoiceId String
+  runId  String
+  id     String // = tuitionRecordId
+  status String
+  data   Json
 
   run MonthlyInvoiceRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 

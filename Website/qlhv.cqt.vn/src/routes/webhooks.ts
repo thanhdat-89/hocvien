@@ -3,7 +3,7 @@
 // =============================================================
 
 import { Router, Request, Response, NextFunction } from 'express'
-import { db, C } from '../lib/firebase'
+import { prisma, newId, toDay } from '../lib/db'
 import { refreshTuitionStatus, getPaymentStatus } from '../services/tuitionCalculator'
 import { tryCreateAutomaticMisaDraft } from '../services/misaAutoDraft'
 import { sendMessage as sendZaloMessage } from '../services/zaloService'
@@ -13,7 +13,7 @@ import {
   findStudentsByShortId,
   findTuitionRecords,
 } from '../services/sepayMatcher'
-import type { BankTransaction, Payment } from '../types/models'
+import type { BankTransaction } from '../types/models'
 
 const router = Router()
 
@@ -80,13 +80,40 @@ router.post('/sepay', async (req: Request, res: Response, next: NextFunction) =>
     }
 
     const docId = `tx_${body.id}`
-    const txRef = db.collection(C.BANK_TRANSACTIONS).doc(docId)
 
     // Idempotency: nếu đã xử lý trước đó (do retry) → trả 200 ngay.
-    const existing = await txRef.get()
-    if (existing.exists) {
+    const existing = await prisma.bankTransaction.findUnique({ where: { sepayId: BigInt(body.id) }, select: { id: true } })
+    if (existing) {
       res.json({ success: true, idempotent: true })
       return
+    }
+
+    // Ghi sổ giao dịch (và khoản thu nếu khớp) trong một transaction. sepayId là unique: một lần gửi lại đồng thời
+    // vi phạm unique → rollback cả khoản thu → trả idempotent như trên.
+    const saveTx = async (record: BankTransaction, payment?: { tuitionRecordId: string; studentId: string; amount: number; paymentDate: string; notes: string }) => {
+      try {
+        return await prisma.$transaction(async tx => {
+          let paymentId: string | undefined
+          if (payment) {
+            paymentId = newId()
+            await tx.payment.create({
+              data: { id: paymentId, ...payment, paymentDate: toDay(payment.paymentDate)!, method: 'BANK_TRANSFER' },
+            })
+            await refreshTuitionStatus(payment.tuitionRecordId, tx)
+          }
+          await tx.bankTransaction.create({
+            data: {
+              ...record, sepayId: BigInt(record.sepayId), accumulated: BigInt(record.accumulated),
+              transactionDate: new Date(String(record.transactionDate).replace(' ', 'T') + 'Z'),
+              receivedAt: new Date(record.receivedAt), matchedPaymentId: paymentId ?? record.matchedPaymentId,
+            },
+          })
+          return { paymentId, duplicate: false }
+        })
+      } catch (err: any) {
+        if (err?.code === 'P2002') return { paymentId: undefined, duplicate: true }
+        throw err
+      }
     }
 
     const baseRecord = {
@@ -108,7 +135,7 @@ router.post('/sepay', async (req: Request, res: Response, next: NextFunction) =>
       const record: BankTransaction = {
         id: docId, ...baseRecord, status: 'ignored_outbound',
       }
-      await txRef.set(record)
+      if ((await saveTx(record)).duplicate) { res.json({ success: true, idempotent: true }); return }
       res.json({ success: true, status: 'ignored_outbound' })
       return
     }
@@ -120,7 +147,7 @@ router.post('/sepay', async (req: Request, res: Response, next: NextFunction) =>
         id: docId, ...baseRecord, status: 'unmatched',
         matchReason: 'Không parse được shortId hoặc tháng từ nội dung CK',
       }
-      await txRef.set(record)
+      if ((await saveTx(record)).duplicate) { res.json({ success: true, idempotent: true }); return }
       res.json({ success: true, status: 'unmatched' })
       return
     }
@@ -131,7 +158,7 @@ router.post('/sepay', async (req: Request, res: Response, next: NextFunction) =>
         id: docId, ...baseRecord, status: 'unmatched',
         matchReason: `Không tìm thấy HV với shortId=${parsed.shortId}`,
       }
-      await txRef.set(record)
+      if ((await saveTx(record)).duplicate) { res.json({ success: true, idempotent: true }); return }
       res.json({ success: true, status: 'unmatched' })
       return
     }
@@ -140,7 +167,7 @@ router.post('/sepay', async (req: Request, res: Response, next: NextFunction) =>
         id: docId, ...baseRecord, status: 'unmatched',
         matchReason: `Trùng shortId (${students.length} HV) — admin cần xác nhận thủ công`,
       }
-      await txRef.set(record)
+      if ((await saveTx(record)).duplicate) { res.json({ success: true, idempotent: true }); return }
       res.json({ success: true, status: 'unmatched' })
       return
     }
@@ -156,7 +183,7 @@ router.post('/sepay', async (req: Request, res: Response, next: NextFunction) =>
         matchedStudentId: student.id,
         matchReason: reason,
       }
-      await txRef.set(record)
+      if ((await saveTx(record)).duplicate) { res.json({ success: true, idempotent: true }); return }
       await notifyAdminUnmatched({ amount: Number(body.transferAmount) || 0, reason })
       res.json({ success: true, status: 'unmatched' })
       return
@@ -168,7 +195,7 @@ router.post('/sepay', async (req: Request, res: Response, next: NextFunction) =>
         matchedStudentId: student.id,
         matchReason: reason,
       }
-      await txRef.set(record)
+      if ((await saveTx(record)).duplicate) { res.json({ success: true, idempotent: true }); return }
       await notifyAdminUnmatched({ amount: Number(body.transferAmount) || 0, reason })
       res.json({ success: true, status: 'unmatched' })
       return
@@ -179,34 +206,29 @@ router.post('/sepay', async (req: Request, res: Response, next: NextFunction) =>
     const amount = Number(body.transferAmount) || 0
     const now = new Date().toISOString()
 
-    const paymentData: Omit<Payment, 'id'> = {
-      tuitionRecordId: target.id,
-      studentId: student.id,
-      studentName: student.fullName,
-      classId: target.classId,
-      amount,
-      paymentDate: (body.transactionDate || now).slice(0, 10),
-      method: 'BANK_TRANSFER',
-      notes: `Auto SePay #${body.referenceCode || body.id}`,
-      createdAt: now,
-    }
-    const paymentRef = await db.collection(C.PAYMENTS).add(paymentData)
-
-    await refreshTuitionStatus(target.id)
-    const invoiceDraft = await tryCreateAutomaticMisaDraft(target.id, 'sepay-webhook')
-
     const record: BankTransaction = {
       id: docId, ...baseRecord, status: 'matched',
       matchedStudentId: student.id,
       matchedTuitionRecordId: target.id,
-      matchedPaymentId: paymentRef.id,
       matchReason: `Auto-confirm ${amount.toLocaleString('vi-VN')}đ cho phiếu T${parsed.month}/${txYear}`,
     }
-    await txRef.set(record)
+    const saved = await saveTx(record, {
+      tuitionRecordId: target.id,
+      studentId: student.id,
+      amount,
+      paymentDate: (body.transactionDate || now).slice(0, 10),
+      notes: `Auto SePay #${body.referenceCode || body.id}`,
+    })
+    if (saved.duplicate) { res.json({ success: true, idempotent: true }); return }
+    const paymentRef = { id: saved.paymentId! }
+
+    const invoiceDraft = await tryCreateAutomaticMisaDraft(target.id, 'sepay-webhook')
 
     await notifyAfterMatch({
       studentName: student.fullName,
-      parentZalo: (student as any).primaryParentZalo || '',
+      parentZalo: (await prisma.parent.findFirst({
+        where: { studentId: student.id }, orderBy: [{ isPrimaryContact: 'desc' }, { createdAt: 'asc' }], select: { zalo: true },
+      }))?.zalo || '',
       amount,
       month: parsed.month,
       tuitionRecordId: target.id,

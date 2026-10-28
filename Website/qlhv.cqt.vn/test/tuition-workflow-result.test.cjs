@@ -1,36 +1,56 @@
-const {test}=require('node:test')
-const assert=require('node:assert/strict')
-const Module=require('node:module')
+const { test, before, after } = require('node:test')
+const assert = require('node:assert/strict')
+const { prisma, reset, seed } = require('./helpers/pg.cjs')
+const { getTuitionWorkflowResult } = require('../dist/services/tuitionWorkflowResult')
+const { saveInvoiceCopies } = require('../dist/services/misaInvoiceStore')
 
-test('lost-response reconciliation reads canonical fee, payments and invoice without writes',async()=>{
- const load=Module._load
- const fee={studentId:'s1',classId:'c1',billingMonth:7,billingYear:2026,finalAmount:100000,status:'PENDING',paidAmount:0}
- const values=new Map([['tuitionRecords/f1',fee],['payments/p1',{tuitionRecordId:'f1',amount:100000}],['misaInvoices/f1',{status:'DRAFT_CREATED',refId:'ref1'}]])
- const doc=(id,data)=>({id,exists:data!==undefined,data:()=>data})
- let duplicates=false
- const db={collection(name){return {
-  doc(id){return {get:async()=>doc(id,values.get(name+'/'+id)),set(){throw Error('must not write')},update(){throw Error('must not write')}}},
-  where(){return this},limit(){return this},async get(){const docs=[...values].filter(([key])=>key.startsWith(name+'/')).map(([key,value])=>doc(key.split('/')[1],value));if(duplicates&&name==='tuitionRecords')docs.push(doc('f2',fee));return {docs,size:docs.length,empty:!docs.length}},
- }}}
- const path=require.resolve('../dist/services/tuitionWorkflowResult'),calc=require.resolve('../dist/services/tuitionCalculator')
- delete require.cache[path];delete require.cache[calc]
- Module._load=function(name,parent,isMain){if(name==='../lib/firebase')return {db,C:{TUITION_RECORDS:'tuitionRecords',PAYMENTS:'payments'},toObj:d=>({id:d.id,...d.data()}),toDocs:snap=>snap.docs.map(d=>({id:d.id,...d.data()}))};return load.call(this,name,parent,isMain)}
- try{
-  const {getTuitionWorkflowResult}=require(path)
-  const input={studentId:'s1',classId:'c1',month:7,year:2026}
-  let result=await getTuitionWorkflowResult(input)
-  assert.equal(result.paid,true);assert.equal(result.finalStatus.totalPaid,100000)
-  assert.equal(result.invoiceDraft.status,'DRAFT_CREATED');assert.equal(result.invoiceDraft.refId,'ref1')
-  values.delete('misaInvoices/f1')
-  result=await getTuitionWorkflowResult(input)
-  assert.equal(result.invoiceDraft.status,'SKIPPED_BEFORE_INVOICE_START')
-  assert.equal(result.invoiceDraft.enabled,false)
-  fee.billingMonth=10
-  result=await getTuitionWorkflowResult({...input,month:10})
-  assert.equal(result.invoiceDraft.status,'OUTCOME_UNKNOWN','eligible fees without metadata still need reconciliation')
-  fee.billingMonth=7
-  await assert.rejects(getTuitionWorkflowResult({...input,month:10,recordId:'f1'}),e=>e.status===409)
-  duplicates=true;await assert.rejects(getTuitionWorkflowResult(input),e=>e.status===409)
-  duplicates=false;values.delete('tuitionRecords/f1');assert.equal(await getTuitionWorkflowResult(input),null)
- }finally{Module._load=load;delete require.cache[path];delete require.cache[calc]}
+before(reset)
+after(() => prisma.$disconnect())
+
+test('lost-response reconciliation reads canonical fee, payments and invoice without writes', async () => {
+  const student = await seed.student()
+  const cls = await seed.klass()
+  const fee = await seed.tuition({ studentId: student.id, classId: cls.id, billingMonth: 7, billingYear: 2026, finalAmount: 100000, status: 'PENDING' })
+  await seed.payment({ tuitionRecordId: fee.id, studentId: student.id, amount: 100000 })
+  await saveInvoiceCopies([fee.id], { refId: 'ref1', status: 'DRAFT_CREATED', invoiceDate: '2026-07-31', recordIds: [fee.id],
+    source: {}, template: {}, buyer: {}, createdBy: 'test', createdAt: new Date().toISOString() })
+  const tables = async () => JSON.stringify([await prisma.tuitionRecord.findMany(), await prisma.payment.findMany(), await prisma.misaInvoice.findMany()])
+  const snapshot = await tables()
+
+  const input = { studentId: student.id, classId: cls.id, month: 7, year: 2026 }
+  let result = await getTuitionWorkflowResult(input)
+  assert.equal(result.paid, true)
+  assert.equal(result.finalStatus.totalPaid, 100000)
+  assert.equal(result.invoiceDraft.status, 'DRAFT_CREATED')
+  assert.equal(result.invoiceDraft.refId, 'ref1')
+  assert.equal(await tables(), snapshot, 'Chỉ đọc, không ghi gì')
+
+  await prisma.misaInvoice.deleteMany()
+  result = await getTuitionWorkflowResult(input)
+  assert.equal(result.invoiceDraft.status, 'SKIPPED_BEFORE_INVOICE_START')
+  assert.equal(result.invoiceDraft.enabled, false)
+
+  await prisma.tuitionRecord.update({ where: { id: fee.id }, data: { billingMonth: 10 } })
+  result = await getTuitionWorkflowResult({ ...input, month: 10 })
+  assert.equal(result.invoiceDraft.status, 'OUTCOME_UNKNOWN', 'eligible fees without metadata still need reconciliation')
+  await prisma.tuitionRecord.update({ where: { id: fee.id }, data: { billingMonth: 7 } })
+
+  await assert.rejects(getTuitionWorkflowResult({ ...input, month: 10, recordId: fee.id }), e => e.status === 409)
+
+  // Firestore cần kiểm tra "nhiều phiếu trùng" khi đọc; PostgreSQL chặn ngay khi ghi bằng unique index.
+  await assert.rejects(seed.tuition({ studentId: student.id, classId: cls.id, billingMonth: 7, billingYear: 2026 }), e => e.code === 'P2002')
+
+  await prisma.payment.deleteMany()
+  await prisma.tuitionRecord.deleteMany()
+  assert.equal(await getTuitionWorkflowResult(input), null)
+})
+
+test('private tuition uses classId "private" in the API and NULL in the database', async () => {
+  await reset()
+  const student = await seed.student()
+  const fee = await seed.tuition({ studentId: student.id, classId: null, billingMonth: 10, billingYear: 2026, finalAmount: 0, status: 'PAID' })
+  const result = await getTuitionWorkflowResult({ studentId: student.id, classId: 'private', month: 10, year: 2026 })
+  assert.equal(result.recordId, fee.id)
+  await assert.rejects(seed.tuition({ studentId: student.id, classId: null, billingMonth: 10, billingYear: 2026 }), e => e.code === 'P2002',
+    'Một phiếu học riêng mỗi học viên mỗi tháng')
 })

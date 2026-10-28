@@ -1,7 +1,8 @@
 import { buildTuitionExport } from '../services/tuitionExport'
 import { Router, Request, Response, NextFunction } from 'express'
 import { timingSafeEqual } from 'crypto'
-import { db, C, toDocs } from '../lib/firebase'
+import { prisma, api } from '../lib/db'
+import { classDoc, classInclude, enrollmentDoc, enrollmentInclude, tuitionRecordDoc, tuitionRecordInclude } from '../lib/docs'
 
 const router = Router()
 interface Row { id: string; [key: string]: any }
@@ -42,7 +43,7 @@ router.get('/snapshot', async (req: Request, res: Response, next: NextFunction) 
     return monday.toISOString().slice(0, 10)
   })()
   try {
-    const { students, classes, enrollments, tuition } = await loadReportDataFromFirebase(kind, year, month)
+    const { students, classes, enrollments, tuition } = await loadReportData(kind, year, month)
     const ids = new Set(students.map(s => s.id))
     const activeIds = new Set(students.filter(s => s.status === 'ACTIVE').map(s => s.id))
     const classIds = new Set(classes.map(c => c.id))
@@ -66,17 +67,15 @@ router.get('/snapshot', async (req: Request, res: Response, next: NextFunction) 
   } catch (error) { next(error) }
 })
 
-async function loadReportDataFromFirebase(kind: 'week' | 'month', year: number, month: number) {
-  const [studentSnap, classSnap, enrollmentSnap, tuitionSnap] = await Promise.all([
-    db.collection(C.STUDENTS).get(), db.collection(C.CLASSES).get(),
-    db.collection(C.ENROLLMENTS).where('status', '==', 'ACTIVE').get(),
-    kind === 'month' ? db.collection(C.TUITION_RECORDS).where('billingYear', '==', year).where('billingMonth', '==', month).get() : Promise.resolve(null),
+async function loadReportData(kind: 'week' | 'month', year: number, month: number) {
+  const [students, classes, enrollments, tuition] = await Promise.all([
+    prisma.student.findMany().then(rows => api(rows) as Row[]),
+    prisma.class.findMany({ include: classInclude }).then(rows => rows.map(classDoc) as Row[]),
+    prisma.classEnrollment.findMany({ where: { status: 'ACTIVE' }, include: enrollmentInclude }).then(rows => rows.map(enrollmentDoc) as Row[]),
+    kind === 'month'
+      ? prisma.tuitionRecord.findMany({ where: { billingYear: year, billingMonth: month }, include: tuitionRecordInclude }).then(rows => rows.map(tuitionRecordDoc) as Row[])
+      : Promise.resolve([] as Row[]),
   ])
-  return {
-    students: toDocs<Row>(studentSnap),
-    classes: toDocs<Row>(classSnap),
-    enrollments: toDocs<Row>(enrollmentSnap),
-    tuition: tuitionSnap ? toDocs<Row>(tuitionSnap) : [],
-  }
+  return { students, classes, enrollments, tuition }
 }
 export default router

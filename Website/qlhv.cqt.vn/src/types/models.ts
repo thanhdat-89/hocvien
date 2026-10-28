@@ -1,5 +1,5 @@
 // =============================================================
-// TypeScript interfaces cho dữ liệu Firestore
+// Kiểu dữ liệu API — giữ hình dạng tài liệu Firestore cũ (xem src/lib/docs.ts)
 // =============================================================
 
 export type Role = 'ADMIN' | 'TEACHER' | 'STAFF'

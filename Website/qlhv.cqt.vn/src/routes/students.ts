@@ -1,4 +1,5 @@
 import { Router, Response, NextFunction } from 'express'
+import bcrypt from 'bcryptjs'
 import type { Prisma } from '@prisma/client'
 import { prisma, api, newId, toDay } from '../lib/db'
 import {
@@ -320,11 +321,12 @@ router.delete('/:id/hard', requireRole('ADMIN'), async (req: AuthRequest, res: R
   }
 })
 
-// POST /api/students/bulk-delete — HARD DELETE xoá vĩnh viễn tất cả học viên (xác nhận MK)
+// POST /api/students/bulk-delete — HARD DELETE xoá vĩnh viễn tất cả học viên (xác nhận bằng mật khẩu tài khoản admin đang đăng nhập)
 router.post('/bulk-delete', requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { password } = req.body
-    if (password !== 'cqt263' && password !== 'Cqt@263') {
+    const { password } = req.body as { password?: string }
+    const user = await prisma.user.findUnique({ where: { id: req.user!.userId }, select: { passwordHash: true } })
+    if (!password || !user || !(await bcrypt.compare(password, user.passwordHash))) {
       res.status(400).json({ message: 'Mật khẩu xác nhận không chính xác' })
       return
     }

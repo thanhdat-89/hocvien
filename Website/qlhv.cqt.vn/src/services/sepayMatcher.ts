@@ -3,8 +3,9 @@
 // Parse webhook content → find target student & tuition record.
 // =============================================================
 
-import { db, C } from '../lib/firebase'
-import type { Student, TuitionRecord } from '../types/models'
+import { prisma } from '../lib/db'
+import { tuitionRecordDoc, tuitionRecordInclude } from '../lib/docs'
+import type { TuitionRecord } from '../types/models'
 
 export interface ParsedNote {
   shortId: string
@@ -50,17 +51,11 @@ export function studentShortId(studentId: string): string {
  * Nếu trùng nhiều → trả về danh sách để gọi quyết định.
  */
 const STUDENT_SCAN_LIMIT = 5000
-export async function findStudentsByShortId(shortId: string): Promise<Student[]> {
+export async function findStudentsByShortId(shortId: string): Promise<{ id: string; fullName: string }[]> {
   if (!shortId) return []
   const target = shortId.toUpperCase()
-  const snap = await db.collection(C.STUDENTS).limit(STUDENT_SCAN_LIMIT).get()
-  const matches: Student[] = []
-  snap.forEach(doc => {
-    if (studentShortId(doc.id) === target) {
-      matches.push({ id: doc.id, ...(doc.data() as any) } as Student)
-    }
-  })
-  return matches
+  const students = await prisma.student.findMany({ select: { id: true, fullName: true }, take: STUDENT_SCAN_LIMIT })
+  return students.filter(s => studentShortId(s.id) === target)
 }
 
 /**
@@ -73,10 +68,6 @@ export async function findTuitionRecords(
   month: number,
   year: number,
 ): Promise<TuitionRecord[]> {
-  const snap = await db.collection(C.TUITION_RECORDS)
-    .where('studentId', '==', studentId)
-    .where('billingMonth', '==', month)
-    .where('billingYear', '==', year)
-    .get()
-  return snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as TuitionRecord))
+  const records = await prisma.tuitionRecord.findMany({ where: { studentId, billingMonth: month, billingYear: year }, include: tuitionRecordInclude })
+  return records.map(tuitionRecordDoc)
 }

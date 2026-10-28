@@ -3,13 +3,16 @@
 // =============================================================
 // Tất cả endpoints yêu cầu role ADMIN.
 // Template được Zalo duyệt qua portal ZCA — endpoint này chỉ
-// lưu mapping (templateId → name + paramKeys + useCase) vào Firestore
+// lưu mapping (templateId → name + paramKeys + useCase) vào database
 // để các luồng nghiệp vụ (Case A/B/C) tham chiếu.
 
 import { Router, Request, Response, NextFunction } from 'express'
-import { db, C, serverTimestamp, toDocs, toObj, paginate, s } from '../lib/firebase'
+import type { Prisma } from '@prisma/client'
+import { prisma, api, newId } from '../lib/db'
+import { s } from '../lib/params'
 import { authenticate, requireRole } from '../middleware/auth'
 import type { AuthRequest } from '../types'
+import { tuitionRecordDoc, tuitionRecordInclude } from '../lib/docs'
 import {
   sendZnsTemplate,
   normalizeVnPhone,
@@ -79,8 +82,7 @@ interface ZnsLogDoc {
 // GET /api/zns/templates
 router.get('/templates', requireRole('ADMIN'), async (_req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const snap = await db.collection(C.ZNS_TEMPLATES).orderBy('useCase').get()
-    const templates = toDocs<ZnsTemplateDoc>(snap)
+    const templates = api(await prisma.znsTemplate.findMany({ orderBy: { useCase: 'asc' } }))
     res.json({ data: templates, total: templates.length })
   } catch (err) {
     next(err)
@@ -91,12 +93,12 @@ router.get('/templates', requireRole('ADMIN'), async (_req: AuthRequest, res: Re
 router.get('/templates/:id', requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const id = s(req.params.id)
-    const doc = await db.collection(C.ZNS_TEMPLATES).doc(id).get()
-    if (!doc.exists) {
+    const template = await prisma.znsTemplate.findUnique({ where: { id } })
+    if (!template) {
       res.status(404).json({ message: 'Không tìm thấy template' })
       return
     }
-    res.json(toObj<ZnsTemplateDoc>(doc))
+    res.json(api(template))
   } catch (err) {
     next(err)
   }
@@ -117,22 +119,20 @@ router.post('/templates', requireRole('ADMIN'), async (req: AuthRequest, res: Re
       return
     }
 
-    const ref = db.collection(C.ZNS_TEMPLATES).doc(id)
-    const existing = await ref.get()
-
-    await ref.set({
+    const existing = await prisma.znsTemplate.findUnique({ where: { id }, select: { id: true } })
+    const fields = {
       name,
       useCase,
       paramKeys: Array.isArray(paramKeys) ? paramKeys : [],
       cost: typeof cost === 'number' ? cost : 0,
       active: active ?? true,
       note: note ?? '',
-      updatedAt: serverTimestamp(),
-      ...(existing.exists ? {} : { createdAt: serverTimestamp() }),
-    }, { merge: true })
+      updatedAt: new Date(),
+    }
+    await prisma.znsTemplate.upsert({ where: { id }, create: { id, ...fields, createdAt: new Date() }, update: fields })
 
-    req.activity = { resourceType: 'zns', resourceId: id, description: `${existing.exists ? 'Cập nhật' : 'Tạo'} template ZNS: ${name}` }
-    res.status(existing.exists ? 200 : 201).json({ id, updated: existing.exists })
+    req.activity = { resourceType: 'zns', resourceId: id, description: `${existing ? 'Cập nhật' : 'Tạo'} template ZNS: ${name}` }
+    res.status(existing ? 200 : 201).json({ id, updated: !!existing })
   } catch (err) {
     next(err)
   }
@@ -142,20 +142,19 @@ router.post('/templates', requireRole('ADMIN'), async (req: AuthRequest, res: Re
 router.patch('/templates/:id', requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const id = s(req.params.id)
-    const ref = db.collection(C.ZNS_TEMPLATES).doc(id)
-    const existing = await ref.get()
-    if (!existing.exists) {
+    const existing = await prisma.znsTemplate.findUnique({ where: { id }, select: { id: true } })
+    if (!existing) {
       res.status(404).json({ message: 'Không tìm thấy template' })
       return
     }
 
     const allowed = ['name', 'useCase', 'paramKeys', 'cost', 'active', 'note'] as const
-    const update: Record<string, unknown> = { updatedAt: serverTimestamp() }
+    const update: Record<string, unknown> = { updatedAt: new Date() }
     for (const k of allowed) {
       if (k in req.body) update[k] = (req.body as Record<string, unknown>)[k]
     }
 
-    await ref.update(update)
+    await prisma.znsTemplate.update({ where: { id }, data: update as Prisma.ZnsTemplateUpdateInput })
     req.activity = { resourceType: 'zns', resourceId: id, description: `Cập nhật template ZNS: ${id}` }
     res.json({ id })
   } catch (err) {
@@ -167,13 +166,11 @@ router.patch('/templates/:id', requireRole('ADMIN'), async (req: AuthRequest, re
 router.delete('/templates/:id', requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const id = s(req.params.id)
-    const ref = db.collection(C.ZNS_TEMPLATES).doc(id)
-    const existing = await ref.get()
-    if (!existing.exists) {
+    const { count } = await prisma.znsTemplate.deleteMany({ where: { id } })
+    if (!count) {
       res.status(404).json({ message: 'Không tìm thấy template' })
       return
     }
-    await ref.delete()
     req.activity = { resourceType: 'zns', resourceId: id, description: `Xoá template ZNS: ${id}` }
     res.json({ id, deleted: true })
   } catch (err) {
@@ -229,19 +226,19 @@ router.get('/logs', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res:
     const page  = Math.max(parseInt(s(req.query.page  as string) || '1', 10), 1)
     const limit = Math.min(Math.max(parseInt(s(req.query.limit as string) || '20', 10), 1), 100)
 
-    // Lấy 500 log gần nhất rồi filter in-memory để tránh phải tạo nhiều composite index.
-    const snap = await db.collection(C.ZNS_LOGS)
-      .orderBy('createdAt', 'desc')
-      .limit(500)
-      .get()
-    let logs = toDocs<ZnsLogDoc>(snap)
+    // Trong 500 log gần nhất (như trước), lọc theo điều kiện.
+    const recent = await prisma.znsLog.findMany({ orderBy: { createdAt: 'desc' }, take: 500, select: { id: true } })
+    const where: Prisma.ZnsLogWhereInput = { id: { in: recent.map(l => l.id) } }
+    if (useCase)   where.useCase = useCase
+    if (status)    where.status = status
+    if (studentId) where.studentId = studentId
+    if (invoiceId) where.invoiceId = invoiceId
 
-    if (useCase)   logs = logs.filter(l => l.useCase === useCase)
-    if (status)    logs = logs.filter(l => l.status === status)
-    if (studentId) logs = logs.filter(l => l.studentId === studentId)
-    if (invoiceId) logs = logs.filter(l => l.invoiceId === invoiceId)
-
-    res.json(paginate(logs, page, limit))
+    const [total, logs] = await prisma.$transaction([
+      prisma.znsLog.count({ where }),
+      prisma.znsLog.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit }),
+    ])
+    res.json({ data: api(logs) as ZnsLogDoc[], total, page, limit, totalPages: Math.ceil(total / limit) })
   } catch (err) {
     next(err)
   }
@@ -251,12 +248,12 @@ router.get('/logs', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res:
 router.get('/logs/:id', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const id = s(req.params.id)
-    const doc = await db.collection(C.ZNS_LOGS).doc(id).get()
-    if (!doc.exists) {
+    const log = await prisma.znsLog.findUnique({ where: { id } })
+    if (!log) {
       res.status(404).json({ message: 'Không tìm thấy log' })
       return
     }
-    res.json(toObj<ZnsLogDoc>(doc))
+    res.json(api(log))
   } catch (err) {
     next(err)
   }
@@ -284,12 +281,6 @@ function shortInvoiceId(id: string): string {
   return id.slice(-8).toUpperCase()
 }
 
-interface ParentLite {
-  fullName?: string
-  phone?: string | null
-  zalo?: string | null
-}
-
 interface ResolvedRecipient {
   phone: string
   source: 'primary' | 'fallback' | 'none'
@@ -297,26 +288,21 @@ interface ResolvedRecipient {
 }
 
 export async function resolveRecipient(studentId: string): Promise<ResolvedRecipient> {
-  const studentDoc = await db.collection(C.STUDENTS).doc(studentId).get()
-  if (!studentDoc.exists) return { phone: '', source: 'none' }
-  const stu = studentDoc.data() as Record<string, unknown>
+  const student = await prisma.student.findUnique({
+    where: { id: studentId },
+    select: { parents: { orderBy: [{ isPrimaryContact: 'desc' }, { createdAt: 'asc' }], take: 5 } },
+  })
+  if (!student) return { phone: '', source: 'none' }
 
-  const primaryPhone = (stu.primaryParentPhone as string | null | undefined)
-                    || (stu.primaryParentZalo as string | null | undefined)
-                    || ''
+  // Phụ huynh liên hệ chính (trước đây là bản denorm primaryParent* trên học viên)
+  const [primary, ...others] = student.parents
+  const primaryPhone = primary ? (primary.phone || primary.zalo || '') : ''
   if (primaryPhone) {
-    return {
-      phone: primaryPhone,
-      source: 'primary',
-      parentName: (stu.primaryParentName as string | undefined) ?? undefined,
-    }
+    return { phone: primaryPhone, source: 'primary', parentName: primary!.fullName || undefined }
   }
 
-  // Fallback: lấy SĐT/Zalo của bất kỳ parent nào trong subcollection
-  const parentsSnap = await db.collection(C.STUDENTS).doc(studentId)
-    .collection('parents').limit(5).get()
-  for (const doc of parentsSnap.docs) {
-    const p = doc.data() as ParentLite
+  // Fallback: lấy SĐT/Zalo của bất kỳ phụ huynh nào khác
+  for (const p of others) {
     const phone = p.phone || p.zalo
     if (phone) {
       return { phone, source: 'fallback', parentName: p.fullName }
@@ -327,15 +313,8 @@ export async function resolveRecipient(studentId: string): Promise<ResolvedRecip
 }
 
 export async function findActiveTemplate(useCase: UseCase): Promise<{ id: string; name: string } | null> {
-  // In-memory filter để không cần composite index
-  const snap = await db.collection(C.ZNS_TEMPLATES).get()
-  for (const doc of snap.docs) {
-    const t = doc.data() as { useCase?: string; active?: boolean; name?: string }
-    if (t.useCase === useCase && t.active === true) {
-      return { id: doc.id, name: t.name ?? doc.id }
-    }
-  }
-  return null
+  const t = await prisma.znsTemplate.findFirst({ where: { useCase, active: true }, select: { id: true, name: true } })
+  return t ? { id: t.id, name: t.name ?? t.id } : null
 }
 
 // POST /api/zns/tuition-notice
@@ -355,12 +334,12 @@ router.post('/tuition-notice', requireRole('ADMIN', 'STAFF'), async (req: AuthRe
     }
 
     // 1. Phiếu học phí
-    const recordDoc = await db.collection(C.TUITION_RECORDS).doc(tuitionRecordId).get()
-    if (!recordDoc.exists) {
+    const recordRow = await prisma.tuitionRecord.findUnique({ where: { id: tuitionRecordId }, include: tuitionRecordInclude })
+    if (!recordRow) {
       res.status(404).json({ message: 'Không tìm thấy phiếu học phí' })
       return
     }
-    const record = { id: recordDoc.id, ...(recordDoc.data() as Record<string, unknown>) } as {
+    const record = tuitionRecordDoc(recordRow) as {
       id: string
       studentId: string
       studentName?: string
@@ -408,9 +387,7 @@ router.post('/tuition-notice', requireRole('ADMIN', 'STAFF'), async (req: AuthRe
       }
     } else {
       // useCase === 'C' — overdue reminder. Tính số tiền còn lại + số ngày quá hạn.
-      const paymentsSnap = await db.collection(C.PAYMENTS)
-        .where('tuitionRecordId', '==', record.id).get()
-      const totalPaid = paymentsSnap.docs.reduce((sum, d) => sum + (Number(d.data().amount) || 0), 0)
+      const totalPaid = (await prisma.payment.aggregate({ where: { tuitionRecordId: record.id }, _sum: { amount: true } }))._sum.amount ?? 0
       const remaining = Math.max(final - totalPaid, 0)
 
       const dueIso = record.dueDate
@@ -494,47 +471,46 @@ export async function sendZnsAndLog(input: SendAndLogInput): Promise<SendAndLogR
   const phone84 = normalizeVnPhone(input.parentPhone)
   const trackingId = `${input.useCase}_${input.studentId ?? 'na'}_${Date.now()}`
 
-  const logRef = db.collection(C.ZNS_LOGS).doc()
+  const logId = newId()
   const stringParams: Record<string, string> = {}
   for (const [k, v] of Object.entries(input.params)) {
     stringParams[k] = String(v ?? '')
   }
 
-  const baseLog: Record<string, unknown> = {
-    studentId: input.studentId,
-    parentPhone: input.parentPhone,
-    parentPhoneIntl: phone84,
-    templateId: input.templateId,
-    useCase: input.useCase,
-    invoiceId: input.invoiceId,
-    reminderCount: input.reminderCount,
-    params: stringParams,
-    trackingId,
-    status: 'queued',
-    createdAt: serverTimestamp(),
-  }
-  await logRef.set(baseLog)
+  await prisma.znsLog.create({
+    data: {
+      id: logId,
+      studentId: input.studentId,
+      parentPhone: input.parentPhone,
+      parentPhoneIntl: phone84 || '',
+      templateId: input.templateId,
+      useCase: input.useCase,
+      invoiceId: input.invoiceId,
+      reminderCount: input.reminderCount,
+      params: stringParams,
+      trackingId,
+      status: 'queued',
+      createdAt: new Date(),
+    },
+  })
 
   if (!phone84 || phone84.length < 10) {
-    await logRef.update({
-      status: 'phone_invalid',
-      error: 'Số điện thoại không hợp lệ',
-      sentAt: serverTimestamp(),
+    await prisma.znsLog.update({
+      where: { id: logId },
+      data: { status: 'phone_invalid', error: 'Số điện thoại không hợp lệ', sentAt: new Date() },
     })
-    return { logId: logRef.id, success: false, error: 'INVALID_PHONE' }
+    return { logId, success: false, error: 'INVALID_PHONE' }
   }
 
   const result = await sendZnsTemplate(phone84, input.templateId, input.params, trackingId)
 
-  await logRef.update({
-    status: result.success ? 'sent' : 'failed',
-    msgId: result.msgId ?? null,
-    error: result.error ?? null,
-    sentAt: serverTimestamp(),
+  await prisma.znsLog.update({
+    where: { id: logId },
+    data: { status: result.success ? 'sent' : 'failed', msgId: result.msgId ?? null, error: result.error ?? null, sentAt: new Date() },
   })
 
   return {
-    logId: logRef.id,
+    logId,
     success: result.success,
     msgId: result.msgId,
     error: result.error,
@@ -571,61 +547,53 @@ async function runOverdueReminderCron(): Promise<OverdueCronResult> {
   }
 
   // Lấy tất cả phiếu chưa thanh toán đủ
-  const recordsSnap = await db.collection(C.TUITION_RECORDS)
-    .where('status', 'in', ['PENDING', 'PARTIAL', 'OVERDUE'])
-    .get()
-  result.total = recordsSnap.size
+  const records = (await prisma.tuitionRecord.findMany({
+    where: { status: { in: ['PENDING', 'PARTIAL', 'OVERDUE'] } }, include: tuitionRecordInclude,
+  })).map(tuitionRecordDoc)
+  result.total = records.length
 
   const nowMs = Date.now()
   const dayMs = 1000 * 60 * 60 * 24
 
-  for (const rDoc of recordsSnap.docs) {
-    const rec = toObj<{
-      studentId: string
-      studentName?: string
-      billingMonth: number
-      billingYear: number
-      finalAmount: number
-      dueDate?: string
-      createdAt?: string
-      status: string
-    }>(rDoc)
-
+  for (const rec of records as Array<{
+    id: string
+    studentId: string
+    studentName?: string
+    billingMonth: number
+    billingYear: number
+    finalAmount: number
+    dueDate?: string
+    createdAt?: string
+    status: string
+  }>) {
     // Đếm số reminder Case C đã gửi (sent + delivered)
-    const priorSnap = await db.collection(C.ZNS_LOGS)
-      .where('invoiceId', '==', rec.id)
-      .where('useCase', '==', 'C')
-      .get()
-    let priorCount  = 0
-    let lastSentMs  = 0
-    for (const lDoc of priorSnap.docs) {
-      const lg = toObj<{ status: string; sentAt?: string }>(lDoc)
-      if (lg.status === 'sent' || lg.status === 'delivered') {
-        priorCount++
-        const ms = lg.sentAt ? Date.parse(lg.sentAt) : 0
-        if (ms > lastSentMs) lastSentMs = ms
-      }
-    }
+    const prior = await prisma.znsLog.findMany({
+      where: { invoiceId: rec.id, useCase: 'C', status: { in: ['sent', 'delivered'] } }, select: { sentAt: true },
+    })
+    const priorCount = prior.length
+    const lastSentMs = Math.max(0, ...prior.map(lg => lg.sentAt?.getTime() ?? 0))
 
     // Cap: đã gửi 5 lần → tạo admin_alert (idempotent), skip
     if (priorCount >= REMINDER_CAP) {
-      const alertSnap = await db.collection(C.ADMIN_ALERTS)
-        .where('type', '==', 'overdue_reminder_cap')
-        .where('invoiceId', '==', rec.id)
-        .limit(1)
-        .get()
-      if (alertSnap.empty) {
-        await db.collection(C.ADMIN_ALERTS).add({
-          type:        'overdue_reminder_cap',
-          invoiceId:   rec.id,
-          studentId:   rec.studentId,
-          studentName: rec.studentName ?? '',
-          billingMonth: rec.billingMonth,
-          billingYear:  rec.billingYear,
-          reminderCount: priorCount,
-          message: `Phiếu T${rec.billingMonth}/${rec.billingYear} của ${rec.studentName ?? ''} đã gửi đủ ${REMINDER_CAP} lần nhắc Zalo nhưng chưa thanh toán.`,
-          read:        false,
-          createdAt:   serverTimestamp(),
+      const alert = await prisma.adminAlert.findFirst({
+        where: { type: 'overdue_reminder_cap', data: { path: ['invoiceId'], equals: rec.id } }, select: { id: true },
+      })
+      if (!alert) {
+        await prisma.adminAlert.create({
+          data: {
+            id: newId(),
+            type: 'overdue_reminder_cap',
+            message: `Phiếu T${rec.billingMonth}/${rec.billingYear} của ${rec.studentName ?? ''} đã gửi đủ ${REMINDER_CAP} lần nhắc Zalo nhưng chưa thanh toán.`,
+            read: false,
+            data: {
+              invoiceId:     rec.id,
+              studentId:     rec.studentId,
+              studentName:   rec.studentName ?? '',
+              billingMonth:  rec.billingMonth,
+              billingYear:   rec.billingYear,
+              reminderCount: priorCount,
+            },
+          },
         })
       }
       result.capped++
@@ -647,9 +615,7 @@ async function runOverdueReminderCron(): Promise<OverdueCronResult> {
     }
 
     // Compute remaining + overdue days
-    const paymentsSnap = await db.collection(C.PAYMENTS)
-      .where('tuitionRecordId', '==', rec.id).get()
-    const totalPaid = paymentsSnap.docs.reduce((s, d) => s + (Number(d.data().amount) || 0), 0)
+    const totalPaid = (await prisma.payment.aggregate({ where: { tuitionRecordId: rec.id }, _sum: { amount: true } }))._sum.amount ?? 0
     const remaining = Math.max((Number(rec.finalAmount) || 0) - totalPaid, 0)
     if (remaining <= 0) {
       // Đã trả đủ nhưng status chưa cập nhật — skip (sẽ refresh lần sau).
