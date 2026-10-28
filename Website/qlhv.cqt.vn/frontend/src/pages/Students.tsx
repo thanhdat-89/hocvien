@@ -464,8 +464,8 @@ export default function Students() {
   const handleBulkDelete = async () => {
     const password = await prompt({
       title: 'Xoá hoàn toàn tất cả học viên',
-      message: '⚠️ Bạn có chắc chắn muốn XOÁ HOÀN TOÀN dữ liệu của TẤT CẢ học viên?\n\nThao tác này sẽ xoá:\n• Hồ sơ tất cả học viên + thông tin phụ huynh\n• Toàn bộ ghi danh, lịch học riêng, điểm danh\n• Phiếu học phí, thanh toán, khuyến mại\n\nKhông thể hoàn tác. Vui lòng nhập mật khẩu quản lý để xác nhận:',
-      placeholder: 'Nhập mật khẩu cqt263...',
+      message: '⚠️ Bạn có chắc chắn muốn XOÁ HOÀN TOÀN dữ liệu của TẤT CẢ học viên?\n\nThao tác này sẽ xoá:\n• Hồ sơ tất cả học viên + thông tin phụ huynh\n• Toàn bộ ghi danh, lịch học riêng, điểm danh\n• Phiếu học phí, thanh toán, khuyến mại\n\nKhông thể hoàn tác. Vui lòng nhập mật khẩu tài khoản của bạn để xác nhận:',
+      placeholder: 'Mật khẩu đăng nhập của bạn',
       inputType: 'password',
       danger: true,
       confirmLabel: 'Xoá vĩnh viễn tất cả',

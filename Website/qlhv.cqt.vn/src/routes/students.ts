@@ -1,4 +1,5 @@
 import { Router, Response, NextFunction } from 'express'
+import bcrypt from 'bcryptjs'
 import { admin, db, C, s, toObj, toDocs, paginate } from '../lib/firebase'
 import { syncPrimaryParentToStudent } from '../lib/studentSync'
 import { recountClassActiveStudents } from '../lib/classSync'
@@ -440,8 +441,11 @@ async function deleteQueryDocs(querySnap: FirebaseFirestore.QuerySnapshot) {
 // POST /api/students/bulk-delete — HARD DELETE xoá vĩnh viễn tất cả học viên (xác nhận MK)
 router.post('/bulk-delete', requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { password } = req.body
-    if (password !== 'cqt263' && password !== 'Cqt@263') {
+    // Xác nhận bằng mật khẩu tài khoản admin đang đăng nhập (không dùng mật khẩu cố định trong code).
+    const { password } = req.body as { password?: string }
+    const userDoc = await db.collection(C.USERS).doc(req.user!.userId).get()
+    const passwordHash = String(userDoc.data()?.passwordHash || '')
+    if (!password || !passwordHash || !(await bcrypt.compare(password, passwordHash))) {
       res.status(400).json({ message: 'Mật khẩu xác nhận không chính xác' })
       return
     }
