@@ -1,13 +1,15 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { db, C, toObj } from '../lib/firebase'
+import { prisma, api } from '../lib/db'
 import { authenticate } from '../middleware/auth'
 import { AuthRequest } from '../types'
-import type { User } from '../types/models'
 
 const router = Router()
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-secret'
+
+// User không còn cột teacherId; liên kết nằm ở teachers.userId.
+const withTeacher = { teacher: { select: { id: true } } } as const
 
 // POST /api/auth/login
 router.post('/login', async (req: Request, res: Response, next: NextFunction) => {
@@ -19,18 +21,12 @@ router.post('/login', async (req: Request, res: Response, next: NextFunction) =>
       return
     }
 
-    // Tìm user theo username
-    const snap = await db.collection(C.USERS)
-      .where('username', '==', username)
-      .limit(1)
-      .get()
+    const user = await prisma.user.findUnique({ where: { username }, include: withTeacher })
 
-    if (snap.empty) {
+    if (!user) {
       res.status(401).json({ message: 'Tài khoản không tồn tại' })
       return
     }
-
-    const user = toObj<User>(snap.docs[0])
 
     if (!user.isActive) {
       res.status(401).json({ message: 'Tài khoản đã bị khoá' })
@@ -57,7 +53,7 @@ router.post('/login', async (req: Request, res: Response, next: NextFunction) =>
         fullName: user.fullName,
         role: user.role,
         email: user.email ?? null,
-        teacherId: user.teacherId ?? null,
+        teacherId: user.teacher?.id ?? null,
       },
     })
   } catch (err) {
@@ -68,12 +64,11 @@ router.post('/login', async (req: Request, res: Response, next: NextFunction) =>
 // GET /api/auth/me
 router.get('/me', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const doc = await db.collection(C.USERS).doc(req.user!.userId).get()
-    if (!doc.exists) { res.status(404).json({ message: 'Không tìm thấy tài khoản' }); return }
+    const user = await prisma.user.findUnique({ where: { id: req.user!.userId }, include: withTeacher })
+    if (!user) { res.status(404).json({ message: 'Không tìm thấy tài khoản' }); return }
 
-    const user = toObj<User>(doc)
-    const { passwordHash: _, ...safeUser } = user
-    res.json(safeUser)
+    const { passwordHash: _, teacher, ...safeUser } = user
+    res.json(api({ ...safeUser, teacherId: teacher?.id }))
   } catch (err) {
     next(err)
   }
@@ -84,9 +79,8 @@ router.post('/verify-password', authenticate, async (req: AuthRequest, res: Resp
   try {
     const { password } = req.body as { password?: string }
     if (!password) { res.status(400).json({ message: 'Vui lòng nhập mật khẩu' }); return }
-    const doc = await db.collection(C.USERS).doc(req.user!.userId).get()
-    if (!doc.exists) { res.status(404).json({ message: 'Không tìm thấy tài khoản' }); return }
-    const user = toObj<User>(doc)
+    const user = await prisma.user.findUnique({ where: { id: req.user!.userId } })
+    if (!user) { res.status(404).json({ message: 'Không tìm thấy tài khoản' }); return }
     if (!(await bcrypt.compare(password, user.passwordHash))) {
       res.status(403).json({ message: 'Mật khẩu không đúng' }); return
     }
@@ -99,10 +93,9 @@ router.put('/change-password', authenticate, async (req: AuthRequest, res: Respo
   try {
     const { oldPassword, newPassword } = req.body as { oldPassword: string; newPassword: string }
 
-    const doc = await db.collection(C.USERS).doc(req.user!.userId).get()
-    if (!doc.exists) { res.status(404).json({ message: 'Không tìm thấy tài khoản' }); return }
+    const user = await prisma.user.findUnique({ where: { id: req.user!.userId } })
+    if (!user) { res.status(404).json({ message: 'Không tìm thấy tài khoản' }); return }
 
-    const user = toObj<User>(doc)
     const valid = await bcrypt.compare(oldPassword, user.passwordHash)
     if (!valid) { res.status(400).json({ message: 'Mật khẩu cũ không đúng' }); return }
 
@@ -111,9 +104,9 @@ router.put('/change-password', authenticate, async (req: AuthRequest, res: Respo
       return
     }
 
-    await db.collection(C.USERS).doc(user.id).update({
-      passwordHash: await bcrypt.hash(newPassword, 10),
-      updatedAt: new Date().toISOString(),
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: await bcrypt.hash(newPassword, 10) },
     })
 
     res.json({ message: 'Đổi mật khẩu thành công' })

@@ -10,7 +10,7 @@
 // - Bỏ các trường denormalized (studentName, className, teacherName...) — lấy qua join.
 //   Chỉ giữ "ảnh chụp" khi giá trị lịch sử phải đứng yên (khuyến mãi đã áp, hoá đơn MISA, log).
 // - Học riêng: Firestore dùng classId = "private"; ở đây classId = NULL.
-// - Các ràng buộc Prisma không diễn đạt được nằm ở db/constraints.sql.
+// - Các ràng buộc Prisma không diễn đạt được nằm cuối migration init.
 // =============================================================
 
 generator client {
@@ -309,7 +309,7 @@ model ClassEnrollment {
   class   Class   @relation(fields: [classId], references: [id], onDelete: Restrict)
   student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
-  // Một học viên chỉ có 1 ghi danh ACTIVE mỗi lớp: partial unique index trong constraints.sql
+  // Một học viên chỉ có 1 ghi danh ACTIVE mỗi lớp: partial unique index ở cuối migration init
   @@index([classId, status])
   @@index([studentId, status])
   @@map("class_enrollments")
@@ -502,7 +502,7 @@ model TuitionRecord {
   class    Class?    @relation(fields: [classId], references: [id], onDelete: Restrict)
   payments Payment[]
 
-  // Unique (studentId, COALESCE(classId,'private'), billingYear, billingMonth): constraints.sql
+  // Unique (studentId, COALESCE(classId,'private'), billingYear, billingMonth): cuối migration init
   @@index([billingYear, billingMonth, status])
   @@index([studentId])
   @@map("tuition_records")

@@ -5,10 +5,11 @@
 | File | Nội dung |
 |---|---|
 | `schema.prisma` | Schema (Prisma 6.19, cùng phiên bản với site hocthemtoan.vn) |
-| `constraints.sql` | Unique có điều kiện và CHECK mà Prisma không diễn đạt được |
+| `migrations/` | Migration Prisma; `20261028000000_init` gồm cả unique có điều kiện và CHECK mà Prisma không diễn đạt được |
+| `import-firestore.ts` | Nhập bản export vào PostgreSQL trống, kiểm SHA-256, báo cáo bất thường và trường không ánh xạ |
 | `export-firestore.cjs` | Xuất toàn bộ Firestore ra NDJSON + manifest SHA-256 (chỉ đọc) |
 
-Đã kiểm tra: `prisma validate` hợp lệ; `db push` + `constraints.sql` chạy sạch trên PostgreSQL 17 (35 bảng); unique phiếu học phí chặn đúng phiếu học riêng trùng tháng.
+Đã kiểm tra: `prisma validate` hợp lệ; migration init chạy sạch trên PostgreSQL 17 (35 bảng); unique phiếu học phí chặn đúng phiếu học riêng trùng tháng.
 
 ## Quyết định thiết kế
 
@@ -40,13 +41,14 @@
 
 ## Hiện trạng dữ liệu (đo ngày 28/10/2026, chỉ đọc)
 
-Khoảng 5.500 tài liệu; lớn nhất: activityLogs 2.024, privateSchedules 849, sessions 630, tuitionRecords 528, payments 514, misaInvoices 224, students 174.
+Bản export 28/10/2026: 5.443 tài liệu. Nhập thử vào PostgreSQL dev: không còn trường nào chưa ánh xạ; tổng học phí, tổng đã thu và tổng thanh toán từng tháng (07–10/2026) khớp hoàn toàn với Firestore. Khoảng 5.500 tài liệu; lớn nhất: activityLogs 2.024, privateSchedules 849, sessions 630, tuitionRecords 528, payments 514, misaInvoices 224, students 174.
 
 Script nhập phải xử lý và báo cáo các điểm sau (không tự sửa im lặng):
 
 | Vấn đề | Số lượng | Cách xử lý khi nhập |
 |---|---|---|
-| `students.dateOfBirth` dạng `d/m/yy` | 81 | Chuyển sang ngày, năm `yy` → `20yy`; giá trị không hợp lệ → báo cáo |
+| `students.dateOfBirth` dạng `m/d/yy` (nhập từ Excel kiểu Mỹ) | 81 | Đọc tháng trước, năm `yy` → `20yy`; năm sinh khớp khối lớp ở 76/81 |
+| `students.dateOfBirth` không khớp khối lớp (năm 2026, 2018 cho HV lớp 8) | 5 | Giữ nguyên, báo cáo để sửa tay |
 | `students.enrollmentDate` dạng `15-Jul` (thiếu năm) | 3 | Báo cáo để sửa tay; tạm dùng ngày của `createdAt` |
 | `tuitionRecords.classId = "private"` | 90 | → `classId = NULL` |
 | `studentPromotions.classId = "private"` | 6 | → `classId = NULL` |
@@ -55,6 +57,8 @@ Script nhập phải xử lý và báo cáo các điểm sau (không tự sửa 
 | `bankTransactions.matchedPaymentId` trỏ tới thanh toán đã xoá | 1 | Giữ nguyên (sổ nhật ký) |
 | Phiếu học phí T7/2026: `paidAmount` ≠ tổng thanh toán và `paid + remaining ≠ final` | 1 | Báo cáo để kiểm tra; nhập nguyên giá trị |
 | `misaInvoices.refId` trùng | 6 nhóm | Không đặt unique trên `refId` |
+| `monthlyScores` của học viên đã xoá | 5 | Bỏ qua (có báo cáo) |
+| `teacherAttendances` trỏ tới buổi học đã xoá | 8 | Bỏ qua (có báo cáo) |
 | `leads.status` tiếng Việt từ CTV ("Chờ tư vấn", "Đã hủy") | 9 | Giữ nguyên chuỗi gốc |
 
 ## Việc tiếp theo
