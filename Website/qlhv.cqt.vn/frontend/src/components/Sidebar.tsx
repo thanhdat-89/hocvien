@@ -166,6 +166,16 @@ export default function Sidebar({ open, onClose, compact }: { open: boolean; onC
             </div>
           </div>
         )}
+        <NavLink
+          to="/settings"
+          onClick={() => { dismissed.current = true; collapse(); onClose() }}
+          aria-label="Cài đặt"
+          className={({ isActive }) => `sidebar-logout w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-lg transition-all ${
+            isActive ? 'text-blue-600 bg-white shadow-sm' : 'text-slate-600 hover:text-blue-500 hover:bg-blue-50/50'}`}
+        >
+          <span className="material-symbols-outlined text-xl" aria-hidden="true">settings</span>
+          <span className="sidebar-label">Cài đặt</span>
+        </NavLink>
         <button
           aria-label="Đăng xuất"
           onClick={handleLogout}

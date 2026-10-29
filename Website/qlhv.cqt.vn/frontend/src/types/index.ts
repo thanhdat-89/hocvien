@@ -2,6 +2,7 @@ export interface User {
   userId: string
   username: string
   fullName: string
+  email?: string | null
   role: 'ADMIN' | 'STAFF' | 'TEACHER'
 }
 

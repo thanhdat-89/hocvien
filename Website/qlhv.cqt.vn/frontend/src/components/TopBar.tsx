@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useMobileNavigation } from './MobileNavigation'
 
@@ -41,9 +42,9 @@ export default function TopBar({ title = 'MathFlow Logic', onSearch }: Props) {
           <span className="material-symbols-outlined">notifications</span>
           <span className="absolute top-2 right-2 w-2 h-2 bg-error rounded-full"></span>
         </button>
-        <button aria-label="Cài đặt" className="p-2 text-slate-500 hover:bg-slate-50 transition-colors rounded-full max-lg:hidden">
-          <span className="material-symbols-outlined">settings</span>
-        </button>
+        <Link to="/settings" aria-label="Cài đặt" title="Cài đặt" className="p-2 text-slate-500 hover:bg-slate-50 transition-colors rounded-full max-lg:hidden">
+          <span className="material-symbols-outlined" aria-hidden="true">settings</span>
+        </Link>
         <div className="h-8 w-px bg-slate-200 mx-2 max-lg:hidden"></div>
         <div className="flex items-center gap-3">
           <div className="text-right hidden lg:block">

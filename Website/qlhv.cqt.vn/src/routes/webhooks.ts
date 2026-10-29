@@ -14,6 +14,7 @@ import {
   findTuitionRecords,
 } from '../services/sepayMatcher'
 import type { BankTransaction } from '../types/models'
+import { authenticate, requireRole } from '../middleware/auth'
 
 const router = Router()
 
@@ -62,6 +63,17 @@ function passesIpCheck(req: Request): boolean {
   const ip = (req.ip || '').replace(/^::ffff:/, '')
   return SEPAY_IPS.has(ip)
 }
+
+// GET /api/webhooks/sepay/status — trang Cài đặt; chỉ báo biến nào đã có, không trả giá trị.
+router.get('/sepay/status', authenticate, requireRole('ADMIN'), (_req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store')
+  res.json({
+    webhookKeySet: Boolean(process.env.SEPAY_WEBHOOK_KEY),
+    ipCheck: process.env.SEPAY_SKIP_IP_CHECK !== 'true',
+    notifyParents: process.env.SEPAY_NOTIFY_PARENTS === 'true',
+    notifyAdminZalo: Boolean(process.env.SEPAY_NOTIFY_ADMIN_ZALO),
+  })
+})
 
 // POST /api/webhooks/sepay
 router.post('/sepay', async (req: Request, res: Response, next: NextFunction) => {

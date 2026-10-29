@@ -20,6 +20,7 @@ import Materials from './pages/Materials'
 import Activity from './pages/Activity'
 import Zns from './pages/Zns'
 import Holidays from './pages/Holidays'
+import Settings from './pages/Settings'
 import RequireRole from './components/RequireRole'
 
 export default function App() {
@@ -47,6 +48,8 @@ export default function App() {
             <Route path="/leads" element={<RequireRole roles={['ADMIN', 'STAFF']}><Leads /></RequireRole>} />
             <Route path="/activity" element={<RequireRole roles={['ADMIN', 'STAFF']}><Activity /></RequireRole>} />
             <Route path="/zns" element={<RequireRole roles={['ADMIN']}><Zns /></RequireRole>} />
+            <Route path="/settings" element={<Navigate to="/settings/account" replace />} />
+            <Route path="/settings/:section" element={<Settings />} />
             <Route path="/holidays" element={<RequireRole roles={['ADMIN', 'STAFF']}><Holidays /></RequireRole>} />
           </Route>
         </Routes>

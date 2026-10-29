@@ -32,7 +32,7 @@ function Avatar({ name }: { name: string }) {
 
 const fmtVND = (n: number) => new Intl.NumberFormat('vi-VN').format(Math.round(n))
 
-export default function Teachers() {
+export default function Teachers({ embedded = false }: { embedded?: boolean }) {
   const [teachers, setTeachers] = useState<Teacher[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -85,12 +85,12 @@ export default function Teachers() {
 
   return (
     <div>
-      <TopBar title="Quản lý Giáo viên" />
-      <div className="page-content px-8 py-8 space-y-8">
+      {!embedded && <TopBar title="Quản lý Giáo viên" />}
+      <div className={embedded ? 'space-y-6' : 'page-content px-8 py-8 space-y-8'}>
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
           <div>
             <span className="text-[11px] font-bold text-primary tracking-[0.2em] uppercase mb-2 block">Nhân sự</span>
-            <h2 className="text-4xl font-black text-on-surface font-headline tracking-tight">Quản lý Giáo viên</h2>
+            <h2 className={`${embedded ? 'text-2xl' : 'text-4xl'} font-black text-on-surface font-headline tracking-tight`}>Quản lý Giáo viên</h2>
           </div>
           <button className="btn-primary" onClick={() => { setEditing(null); setShowModal(true) }}>
             <span className="material-symbols-outlined">person_add</span>

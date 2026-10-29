@@ -7,6 +7,7 @@ interface AuthContextType {
   loading: boolean
   login: (username: string, password: string) => Promise<void>
   logout: () => void
+  updateUser: (changes: Partial<User>) => void
   isAdmin: boolean
   isStaff: boolean
   isTeacher: boolean
@@ -43,6 +44,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
   }
 
+  const updateUser = (changes: Partial<User>) => setUser(current => {
+    if (!current) return current
+    const next = { ...current, ...changes }
+    localStorage.setItem('user', JSON.stringify(next))
+    return next
+  })
+
   const role = user?.role
   const isAdmin = role === 'ADMIN'
   const isStaff = role === 'STAFF'
@@ -54,7 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={{
-      user, loading, login, logout,
+      user, loading, login, logout, updateUser,
       isAdmin, isStaff, isTeacher,
       canManageStudents, canManageClasses, canSeeFinance, canImportStudents,
     }}>

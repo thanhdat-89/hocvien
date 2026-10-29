@@ -74,6 +74,22 @@ router.get('/me', authenticate, async (req: AuthRequest, res: Response, next: Ne
   }
 })
 
+// PUT /api/auth/me — họ tên, email của chính mình
+router.put('/me', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { fullName, email } = req.body as { fullName?: string; email?: string | null }
+    if (!fullName?.trim()) { res.status(400).json({ message: 'Vui lòng nhập họ tên' }); return }
+    const user = await prisma.user.update({
+      where: { id: req.user!.userId }, include: withTeacher,
+      data: { fullName: fullName.trim(), email: email?.trim() || null },
+    })
+    const { passwordHash: _, teacher, ...safeUser } = user
+    res.json(api({ ...safeUser, teacherId: teacher?.id }))
+  } catch (err) {
+    next(err)
+  }
+})
+
 // POST /api/auth/verify-password — re-authenticate sensitive actions.
 router.post('/verify-password', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {

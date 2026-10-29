@@ -27,6 +27,7 @@ import znsRoutes from './routes/zns'
 import holidayRoutes from './routes/holidays'
 import reportRoutes from './routes/reports'
 import telegramRoutes from './routes/telegram'
+import userRoutes from './routes/users'
 
 import { errorHandler, notFound } from './middleware/errorHandler'
 import { prisma } from './lib/db'
@@ -109,6 +110,7 @@ app.use('/api/zns',            znsRoutes)
 app.use('/api/holidays',       holidayRoutes)
 app.use('/api/reports',        reportRoutes)
 app.use('/api/telegram',       telegramRoutes)
+app.use('/api/users',          userRoutes)
 
 // ─── Error handlers ───────────────────────────────────────────
 app.use(notFound)
