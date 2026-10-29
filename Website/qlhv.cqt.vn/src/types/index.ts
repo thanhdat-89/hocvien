@@ -7,6 +7,8 @@ export interface AuthPayload {
 
 export interface AuthRequest extends Request {
   user?: AuthPayload
+  /** Cơ sở làm việc của request (authenticate) — ghi vào lịch sử hoạt động */
+  branchId?: string | null
 }
 
 export interface PaginatedResult<T> {

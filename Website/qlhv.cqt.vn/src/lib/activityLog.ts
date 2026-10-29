@@ -16,6 +16,7 @@ export interface ActivityLogInput {
   ip?: string
   before?: unknown
   after?: unknown
+  branchId?: string | null
 }
 
 const SENSITIVE_KEYS = new Set([
@@ -64,6 +65,7 @@ export async function logActivity(input: ActivityLogInput): Promise<void> {
       userId: input.userId,
       userName,
       userRole: input.userRole,
+      branchId: input.branchId ?? null,
       action: input.action,
       resourceType: input.resourceType,
       resourceId: input.resourceId,

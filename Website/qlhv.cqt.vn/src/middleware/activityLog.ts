@@ -18,6 +18,8 @@ declare module 'express-serve-static-core' {
 }
 
 const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+/** Thao tác cấp hệ thống: không gắn cơ sở, hiện trong lịch sử của mọi cơ sở */
+const GLOBAL_RESOURCES = new Set(['users', 'branches', 'school-years'])
 
 const SKIP_PATTERNS: RegExp[] = [
   /^\/api\/tuition\/misa\/connection/,
@@ -99,6 +101,7 @@ export function activityLogMiddleware(req: AuthRequest, res: Response, next: Nex
       ip: req.ip,
       before: hint.before,
       after: hint.after,
+      branchId: GLOBAL_RESOURCES.has(resourceType) ? null : req.branchId ?? null,
     }).catch(err => console.error('[activityLog] failed:', err))
   })
 

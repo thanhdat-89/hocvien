@@ -167,3 +167,23 @@ test('trong phạm vi cơ sở, tạo bản ghi cha rồi bản ghi con trong c�
   })
   assert.equal(await prisma.parent.count({ where: { student: { branchId: A } } }), 2)
 })
+
+test('lịch sử hoạt động ghi cơ sở làm việc; mỗi cơ sở chỉ thấy của mình và thao tác cấp hệ thống', async () => {
+  const { EventEmitter } = require('node:events')
+  const { activityLogMiddleware } = require('../dist/middleware/activityLog')
+  const { A, B } = await twoBranches()
+  const user = await seed.user()
+  const write = async (path, branchId) => {
+    const res = Object.assign(new EventEmitter(), { statusCode: 201 })
+    activityLogMiddleware({ method: 'POST', originalUrl: path, body: { fullName: path }, user: { userId: user.id, role: 'ADMIN' }, branchId }, res, () => {})
+    res.emit('finish')
+    for (let i = 0; i < 50 && !(await prisma.activityLog.count({ where: { path } })); i++) await new Promise(r => setTimeout(r, 20))
+  }
+  await write('/api/students', A)
+  await write('/api/classes', B)
+  await write('/api/users', A)
+  const seen = async branchId => runInScope({ branchIds: [branchId], schoolYearId: null }, async () => (await prisma.activityLog.findMany({ select: { path: true } })).map(l => l.path).sort())
+  assert.deepEqual(await seen(A), ['/api/students', '/api/users'])
+  assert.deepEqual(await seen(B), ['/api/classes', '/api/users'])
+  assert.equal((await prisma.activityLog.findFirstOrThrow({ where: { path: '/api/users' } })).branchId, null)
+})

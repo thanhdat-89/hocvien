@@ -26,6 +26,7 @@ const SCOPED: Record<string, (ids: string[]) => Where> = {
   Teacher: ids => ({ branches: { some: inBranches(ids) } }),
   Holiday: ids => ({ branches: { some: inBranches(ids) } }),
   MisaInvoice: inBranches,
+  ActivityLog: ids => ({ OR: [inBranches(ids), { branchId: null }] }),
   ClassEnrollment: viaClass, Schedule: viaClass, Session: viaClass, ClassTuitionRate: viaClass,
   StudentAttendance: viaClass, TeacherAttendance: viaClass,
   Parent: viaStudent, StudentReview: viaStudent, PrivateSession: viaStudent, TuitionRecord: viaStudent,

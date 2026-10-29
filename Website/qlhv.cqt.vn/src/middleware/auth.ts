@@ -58,6 +58,7 @@ export function authenticate(req: AuthRequest, res: Response, next: NextFunction
       return
     }
     req.user = { userId: payload.userId, role: account.role }
+    req.branchId = account.workingBranchId
     runInScope(requestScope(req, account), next)
   }, next)
 }

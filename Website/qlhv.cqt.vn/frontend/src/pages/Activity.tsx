@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import TopBar from '../components/TopBar'
+import { useWorkspace } from '../hooks/useWorkspace'
 import api from '../services/api'
 
 interface ActivityLog {
@@ -62,6 +63,7 @@ interface ActivityPage { data: ActivityLog[]; nextCursor: string | null }
 const PAGE_SIZE = 10
 
 export default function Activity({ embedded = false }: { embedded?: boolean }) {
+  const { branches, branchId } = useWorkspace()
   const [logs, setLogs] = useState<ActivityLog[]>([])
   const [loading, setLoading] = useState(true)
   const [pageIndex, setPageIndex] = useState(0)
@@ -153,7 +155,7 @@ export default function Activity({ embedded = false }: { embedded?: boolean }) {
       <div className={embedded ? 'bg-surface rounded-3xl p-6 md:p-8 shadow-sm' : 'page-content bg-surface rounded-3xl p-6 md:p-8 shadow-sm'}>
         <p className="text-[10px] uppercase tracking-widest text-primary font-bold mb-1">Audit log</p>
         <h2 className="font-headline text-2xl font-bold text-on-surface mb-6">
-          Toàn bộ thay đổi trên hệ thống
+          Thay đổi tại {branches.find(b => b.id === branchId)?.name ?? 'cơ sở đang làm việc'}
         </h2>
 
         {/* Filter bar */}

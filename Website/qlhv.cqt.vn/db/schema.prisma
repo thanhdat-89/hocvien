@@ -936,9 +936,12 @@ model ActivityLog {
   /// Dữ liệu trước/sau khi sửa (đã lọc khoá nhạy cảm) cho màn hình diff.
   before       Json?
   after        Json?
+  /// Cơ sở làm việc của người thao tác; NULL = thao tác cấp hệ thống (tài khoản, cơ sở, năm học), hiện ở mọi cơ sở.
+  branchId     String?
   createdAt    DateTime @db.Timestamptz(3)
 
   @@index([createdAt])
+  @@index([branchId, createdAt])
   @@index([resourceType, resourceId])
   @@map("activity_logs")
 }
