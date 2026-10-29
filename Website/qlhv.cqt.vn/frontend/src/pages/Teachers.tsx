@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react'
 import TopBar from '../components/TopBar'
 import { useAlert, useConfirm } from '../components/ConfirmDialog'
 import api from '../services/api'
+import BranchChecklist from '../components/BranchChecklist'
+import { useWorkspace } from '../hooks/useWorkspace'
 
 interface Teacher {
   id: string
@@ -17,6 +19,7 @@ interface Teacher {
   status: 'ACTIVE' | 'INACTIVE'
   notes?: string
   activeClassCount?: number
+  branches?: { branchId: string }[]
 }
 
 function Avatar({ name }: { name: string }) {
@@ -242,6 +245,8 @@ function TeacherModal({ editing, onClose, onSaved }: { editing: Teacher | null; 
     salaryRatePerSession: editing?.salaryRatePerSession ?? 0,
     notes: editing?.notes ?? '',
   })
+  const { branches, branchId: viewing } = useWorkspace()
+  const [branchIds, setBranchIds] = useState<string[]>(editing?.branches?.map(b => b.branchId) ?? (viewing ? [viewing] : branches.filter(b => b.isActive).slice(0, 1).map(b => b.id)))
   const [saving, setSaving] = useState(false)
 
   const handleSubmit = async () => {
@@ -249,11 +254,16 @@ function TeacherModal({ editing, onClose, onSaved }: { editing: Teacher | null; 
       await alert({ title: 'Thiếu tên', message: 'Vui lòng nhập tên giáo viên.' })
       return
     }
+    if (!branchIds.length) {
+      await alert({ title: 'Chưa chọn cơ sở', message: 'Chọn ít nhất một cơ sở giáo viên dạy.' })
+      return
+    }
     setSaving(true)
     try {
       const payload = {
         ...form,
         salaryRatePerSession: Number(form.salaryRatePerSession) || 0,
+        branchIds,
       }
       if (editing) await api.put(`/teachers/${editing.id}`, payload)
       else await api.post('/teachers', payload)
@@ -311,6 +321,9 @@ function TeacherModal({ editing, onClose, onSaved }: { editing: Teacher | null; 
             <div>
               <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Số tài khoản</label>
               <input className="input" value={form.bankAccount} onChange={e => setForm({ ...form, bankAccount: e.target.value })} />
+            </div>
+            <div className="md:col-span-2">
+              <BranchChecklist branches={branches} value={branchIds} onChange={setBranchIds} label="Cơ sở giảng dạy *" />
             </div>
             <div className="md:col-span-2">
               <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Ghi chú</label>

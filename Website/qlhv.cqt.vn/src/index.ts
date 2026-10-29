@@ -28,6 +28,8 @@ import holidayRoutes from './routes/holidays'
 import reportRoutes from './routes/reports'
 import telegramRoutes from './routes/telegram'
 import userRoutes from './routes/users'
+import branchRoutes from './routes/branches'
+import schoolYearRoutes from './routes/schoolYears'
 
 import { errorHandler, notFound } from './middleware/errorHandler'
 import { prisma } from './lib/db'
@@ -111,6 +113,8 @@ app.use('/api/holidays',       holidayRoutes)
 app.use('/api/reports',        reportRoutes)
 app.use('/api/telegram',       telegramRoutes)
 app.use('/api/users',          userRoutes)
+app.use('/api/branches',       branchRoutes)
+app.use('/api/school-years',   schoolYearRoutes)
 
 // ─── Error handlers ───────────────────────────────────────────
 app.use(notFound)

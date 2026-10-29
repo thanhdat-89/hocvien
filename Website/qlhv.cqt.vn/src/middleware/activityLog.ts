@@ -34,7 +34,7 @@ const RESOURCE_LABEL: Record<string, string> = {
   students: 'học viên', classes: 'lớp học', schedules: 'lịch học', sessions: 'buổi học',
   attendance: 'điểm danh', tuition: 'học phí', teachers: 'giáo viên', subjects: 'môn học',
   parents: 'phụ huynh', leads: 'lead', reviews: 'nhận xét', 'monthly-scores': 'điểm kiểm tra tháng',
-  materials: 'tài liệu', notifications: 'thông báo', zns: 'template ZNS', users: 'tài khoản',
+  materials: 'tài liệu', notifications: 'thông báo', zns: 'template ZNS', users: 'tài khoản', branches: 'cơ sở', 'school-years': 'năm học',
 }
 
 function deriveResourceType(path: string): string {

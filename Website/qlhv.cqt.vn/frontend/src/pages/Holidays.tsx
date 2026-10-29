@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import api from '../services/api'
 import TopBar from '../components/TopBar'
+import BranchChecklist from '../components/BranchChecklist'
+import { useWorkspace } from '../hooks/useWorkspace'
 
 interface Holiday {
   id: string
@@ -11,6 +13,7 @@ interface Holiday {
   dates?: string[]
   description?: string
   createdAt: string
+  branches?: { id: string; name: string }[]
 }
 
 export default function Holidays() {
@@ -20,6 +23,10 @@ export default function Holidays() {
   const [deleteModal, setDeleteModal] = useState<{ open: boolean; holiday: Holiday | null }>({ open: false, holiday: null })
   
   const [formData, setFormData] = useState({ name: '', startDate: '', endDate: '', description: '' })
+  // Cơ sở áp dụng: mặc định cơ sở đang xem, hoặc mọi cơ sở khi xem tất cả
+  const { branches, branchId: viewing } = useWorkspace()
+  const defaultBranchIds = () => viewing ? [viewing] : branches.filter(b => b.isActive).map(b => b.id)
+  const [branchIds, setBranchIds] = useState<string[]>([])
   const [restoreSessions, setRestoreSessions] = useState(false)
   const [toastMsg, setToastMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
@@ -73,6 +80,10 @@ export default function Holidays() {
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault()
     const { name, startDate, endDate, description } = formData
+    if (branches.filter(b => b.isActive).length > 1 && !branchIds.length) {
+      toast('error', 'Chọn ít nhất một cơ sở áp dụng')
+      return
+    }
     if (!name.trim() || !startDate) {
       toast('error', 'Vui lòng nhập tên và ngày bắt đầu nghỉ lễ')
       return
@@ -90,7 +101,9 @@ export default function Holidays() {
         date: startDate,
         startDate,
         endDate: effectiveEnd,
-        description: description.trim()
+        description: description.trim(),
+        // Trống = server áp mọi cơ sở trong quyền (khi chỉ có một cơ sở, ô chọn bị ẩn)
+        branchIds: branchIds.length ? branchIds : undefined,
       })
       toast('success', res.data.message || 'Thêm ngày nghỉ lễ thành công')
       setShowAddModal(false)
@@ -135,6 +148,7 @@ export default function Holidays() {
             <button
               onClick={() => {
                 setFormData({ name: '', startDate: '', endDate: '', description: '' })
+                setBranchIds(defaultBranchIds())
                 setShowAddModal(true)
               }}
               className="flex items-center gap-2 px-4 py-2.5 bg-primary text-on-primary rounded-xl font-semibold shadow-sm hover:bg-primary-dim transition-colors"
@@ -203,6 +217,9 @@ export default function Holidays() {
                           )}
                           {h.description && ` • ${h.description}`}
                         </p>
+                        {h.branches && branches.length > 1 && (
+                          <p className="text-xs text-outline mt-1">Áp dụng: {h.branches.map(b => b.name).join(', ')}</p>
+                        )}
                       </div>
                       <button
                         onClick={() => confirmDelete(h)}
@@ -288,6 +305,10 @@ export default function Holidays() {
                 </div>
               )}
 
+              {branches.filter(b => b.isActive).length > 1 && (
+                <BranchChecklist branches={branches} value={branchIds} onChange={setBranchIds} label="Cơ sở áp dụng *" />
+              )}
+
               <div>
                 <label className="block text-sm font-medium text-on-surface mb-1">Mô tả thêm (Tùy chọn)</label>
                 <textarea
@@ -303,7 +324,7 @@ export default function Holidays() {
                 <div className="p-3 bg-secondary-container/40 text-on-secondary-container rounded-xl text-sm flex items-start gap-2 border border-outline-variant/30">
                   <span className="material-symbols-outlined text-lg shrink-0 text-blue-600">info</span>
                   <p className="text-xs leading-relaxed">
-                    Khi thêm ngày nghỉ lễ, tất cả các buổi học (cả lớp chung và học riêng) rơi vào toàn bộ giai đoạn này sẽ tự động được chuyển sang trạng thái <b>Hủy</b> và học sinh sẽ không bị tính học phí.
+                    Khi thêm ngày nghỉ lễ, các buổi học (cả lớp chung và học riêng) của cơ sở áp dụng rơi vào giai đoạn này sẽ tự động được chuyển sang trạng thái <b>Hủy</b> và học sinh sẽ không bị tính học phí.
                   </p>
                 </div>
               </div>

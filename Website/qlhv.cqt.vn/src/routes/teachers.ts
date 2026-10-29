@@ -13,7 +13,7 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
     const status = (req.query.status as string) || 'ACTIVE'
     const teachers = await prisma.teacher.findMany({
       where: status === 'ALL' ? {} : { status: status as 'ACTIVE' | 'INACTIVE' },
-      include: { _count: { select: { classes: { where: { status: 'ACTIVE' } } } } },
+      include: { _count: { select: { classes: { where: { status: 'ACTIVE' } } } }, branches: { select: { branchId: true } } },
     })
     teachers.sort((a, b) => a.fullName.localeCompare(b.fullName, 'vi'))
     res.json(api(teachers.map(({ _count, ...t }) => ({ ...t, activeClassCount: _count.classes }))))

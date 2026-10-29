@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useMobileNavigation } from './MobileNavigation'
+import WorkspaceSwitcher from './WorkspaceSwitcher'
 
 interface Props {
   title?: string
@@ -35,6 +36,10 @@ export default function TopBar({ title = 'MathFlow Logic', onSearch }: Props) {
             />
           </div>
         )}
+      </div>
+
+      <div className="mr-4 min-w-0 max-lg:order-last max-lg:mr-0 max-lg:basis-full">
+        <WorkspaceSwitcher />
       </div>
 
       <div className="flex items-center gap-4 max-lg:gap-1 max-lg:shrink-0">

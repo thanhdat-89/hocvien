@@ -4,7 +4,7 @@ import { invalidateReadView, ViewKind } from '../services/readViews'
 /** Deliver mutation responses after the shared view revision has changed. */
 export function readViewInvalidation(req: Request, res: Response, next: NextFunction) {
   const mutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)
-  const studentOrClass = mutation && /^\/api\/(students|classes)(\/|$)/.test(req.path)
+  const studentOrClass = mutation && /^\/api\/(students|classes|branches|school-years)(\/|$)/.test(req.path)
   const financial = mutation && /^\/api\/(tuition|schedules|sessions|holidays|parents)(\/|$)/.test(req.path)
     && !/^\/api\/tuition\/misa(\/|$)/.test(req.path)
   const sepay = mutation && req.path === '/api/webhooks/sepay'

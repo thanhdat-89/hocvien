@@ -3,14 +3,15 @@ import { createError } from '../middleware/errorHandler'
 import { currentScope } from './scope'
 
 // ─── Cơ sở & năm học mặc định ─────────────────────────────────
-// Bản ghi mới vào cơ sở đang chọn (hoặc cơ sở đang hoạt động đầu tiên trong phạm vi khi xem nhiều cơ sở)
-// và năm học đang xem (mặc định năm học đang chạy).
+// Bản ghi mới vào cơ sở đang chọn và năm học đang xem (mặc định năm học đang chạy). Đang xem nhiều cơ sở
+// thì chỉ tự chọn khi trong phạm vi có đúng một cơ sở hoạt động, tránh ghi nhầm cơ sở.
 
 export async function defaultBranchId(db: Tx | typeof prisma = prisma): Promise<string> {
   const ids = currentScope()?.branchIds
-  const branch = await db.branch.findFirst({ where: { isActive: true, ...(ids ? { id: { in: ids } } : {}) }, orderBy: { createdAt: 'asc' }, select: { id: true } })
-  if (!branch) throw createError('Chưa có cơ sở nào đang hoạt động', 409)
-  return branch.id
+  const branches = await db.branch.findMany({ where: { isActive: true, ...(ids ? { id: { in: ids } } : {}) }, select: { id: true }, take: 2 })
+  if (!branches.length) throw createError('Chưa có cơ sở nào đang hoạt động', 409)
+  if (branches.length > 1) throw createError('Chọn một cơ sở ở thanh trên cùng trước khi thêm', 400)
+  return branches[0].id
 }
 
 export async function currentSchoolYearId(db: Tx | typeof prisma = prisma): Promise<string> {

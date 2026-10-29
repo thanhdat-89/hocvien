@@ -45,3 +45,15 @@ test('không có năm học đang chạy thì tạo lớp báo 409, không ghi g
   await assert.rejects(routeHandler(classes, '/', 'post')({ user: await admin(), body: { name: 'Toán 9A' } }), err => err.status === 409)
   assert.equal(await prisma.class.count(), 0)
 })
+
+test('xem nhiều cơ sở thì phải chọn cơ sở trước khi thêm lớp, học viên', async () => {
+  const { runInScope } = require('../dist/lib/scope')
+  const { branchId: A } = await context()
+  await prisma.branch.create({ data: { id: newId(), name: 'Cơ sở B' } })
+  const user = await admin()
+  const post = routeHandler(classes, '/', 'post')
+  await assert.rejects(runInScope({ branchIds: null, schoolYearId: null }, () => post({ user, body: { name: 'Toán 9A' } })), err => err.status === 400)
+  const created = await runInScope({ branchIds: [A], schoolYearId: null }, () => post({ user, body: { name: 'Toán 9A' } }))
+  assert.equal(created.status, 201)
+  assert.equal((await prisma.class.findUniqueOrThrow({ where: { id: created.body.id } })).branchId, A)
+})

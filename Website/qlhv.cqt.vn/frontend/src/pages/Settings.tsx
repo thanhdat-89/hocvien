@@ -4,9 +4,11 @@ import TopBar from '../components/TopBar'
 import Toast, { ToastMessage } from '../components/Toast'
 import { useAlert, useConfirm, usePrompt } from '../components/ConfirmDialog'
 import { useAuth } from '../hooks/useAuth'
+import { useWorkspace, type Branch, type SchoolYear } from '../hooks/useWorkspace'
 import api from '../services/api'
 import { User } from '../types'
 import Teachers from './Teachers'
+import BranchChecklist from '../components/BranchChecklist'
 
 type Role = User['role']
 type Notify = (message: string, type?: ToastMessage['type']) => void
@@ -15,6 +17,8 @@ const SECTIONS: { key: string; icon: string; label: string; adminOnly?: boolean 
   { key: 'account', icon: 'account_circle', label: 'Tài khoản của tôi' },
   { key: 'users', icon: 'manage_accounts', label: 'Người dùng', adminOnly: true },
   { key: 'teachers', icon: 'badge', label: 'Giáo viên', adminOnly: true },
+  { key: 'branches', icon: 'apartment', label: 'Cơ sở', adminOnly: true },
+  { key: 'school-years', icon: 'calendar_month', label: 'Năm học', adminOnly: true },
   { key: 'integrations', icon: 'hub', label: 'Kết nối & tích hợp', adminOnly: true },
 ]
 
@@ -56,6 +60,8 @@ export default function Settings() {
             {section === 'account' && <AccountSection notify={notify} />}
             {section === 'users' && <UsersSection notify={notify} />}
             {section === 'teachers' && <Teachers embedded />}
+            {section === 'branches' && <BranchesSection notify={notify} />}
+            {section === 'school-years' && <SchoolYearsSection notify={notify} />}
             {section === 'integrations' && <IntegrationsSection />}
           </div>
         </div>
@@ -72,7 +78,7 @@ function SectionHeader({ title, description, action }: { title: string; descript
         <h3 className="text-2xl font-black text-on-surface font-headline">{title}</h3>
         <p className="text-sm text-outline mt-1">{description}</p>
       </div>
-      {action}
+      {action && <div className="shrink-0">{action}</div>}
     </div>
   )
 }
@@ -189,6 +195,7 @@ interface AppUser {
   role: Role
   isActive: boolean
   teacher?: { id: string; fullName: string } | null
+  branches: { id: string; name: string }[]
 }
 
 function UsersSection({ notify }: { notify: Notify }) {
@@ -249,7 +256,7 @@ function UsersSection({ notify }: { notify: Notify }) {
           <thead>
             <tr className="bg-surface-container-low/50">
               <th className="table-header">Người dùng</th>
-              <th className="table-header">Vai trò</th>
+              <th className="table-header">Vai trò · Cơ sở</th>
               <th className="table-header">Trạng thái</th>
               <th className="table-header text-right">Thao tác</th>
             </tr>
@@ -264,7 +271,10 @@ function UsersSection({ notify }: { notify: Notify }) {
                   <p className="text-xs text-outline">{u.username}{u.email ? ` · ${u.email}` : ''}</p>
                   {u.teacher && <p className="text-xs text-outline">Hồ sơ giáo viên: {u.teacher.fullName}</p>}
                 </td>
-                <td className="table-cell text-sm">{ROLE_LABEL[u.role]}</td>
+                <td className="table-cell text-sm">
+                  {ROLE_LABEL[u.role]}
+                  <p className="text-xs text-outline">{u.role === 'ADMIN' ? 'Mọi cơ sở' : u.branches.map(b => b.name).join(', ') || 'Chưa phân cơ sở'}</p>
+                </td>
                 <td className="table-cell">
                   <span className={u.isActive ? 'status-badge-active' : 'status-badge-inactive'}>{u.isActive ? 'Hoạt động' : 'Đã khoá'}</span>
                 </td>
@@ -321,6 +331,8 @@ function UserModal({ editing, self, onClose, onSaved }: { editing: AppUser | nul
     username: editing?.username ?? '', fullName: editing?.fullName ?? '', email: editing?.email ?? '',
     role: editing?.role ?? 'STAFF' as Role, password: '', teacherId: '',
   })
+  const { branches, branchId: viewing } = useWorkspace()
+  const [branchIds, setBranchIds] = useState<string[]>(editing?.branches.map(b => b.id) ?? (viewing ? [viewing] : branches.filter(b => b.isActive).slice(0, 1).map(b => b.id)))
   const [teachers, setTeachers] = useState<{ id: string; fullName: string; userId?: string | null }[]>([])
   const [saving, setSaving] = useState(false)
 
@@ -331,8 +343,9 @@ function UserModal({ editing, self, onClose, onSaved }: { editing: AppUser | nul
   const submit = async () => {
     setSaving(true)
     try {
-      if (editing) await api.put(`/users/${editing.id}`, { fullName: form.fullName, email: form.email, role: form.role })
-      else await api.post('/users', { ...form, teacherId: form.role === 'TEACHER' ? form.teacherId || undefined : undefined })
+      if (form.role !== 'ADMIN' && !branchIds.length) { await alert({ title: 'Chưa chọn cơ sở', message: 'Chọn ít nhất một cơ sở người dùng được làm việc.' }); return }
+      if (editing) await api.put(`/users/${editing.id}`, { fullName: form.fullName, email: form.email, role: form.role, branchIds })
+      else await api.post('/users', { ...form, branchIds, teacherId: form.role === 'TEACHER' ? form.teacherId || undefined : undefined })
       onSaved()
     } catch (err) {
       await alert({ title: 'Không lưu được', message: errorMessage(err, 'Vui lòng thử lại.') })
@@ -370,6 +383,7 @@ function UserModal({ editing, self, onClose, onSaved }: { editing: AppUser | nul
         </select>
         {self && <p className="text-xs text-outline mt-1">Không thể đổi vai trò của chính mình.</p>}
       </div>
+      {form.role !== 'ADMIN' && <BranchChecklist branches={branches} value={branchIds} onChange={setBranchIds} label="Cơ sở được làm việc *" />}
       {!editing && form.role === 'TEACHER' && (
         <div>
           <label htmlFor="user-teacher" className={labelClass}>Gắn với hồ sơ giáo viên</label>
@@ -386,6 +400,222 @@ function UserModal({ editing, self, onClose, onSaved }: { editing: AppUser | nul
             onChange={e => setForm({ ...form, password: e.target.value })} />
         </div>
       )}
+    </Modal>
+  )
+}
+
+// ─── Cơ sở ───────────────────────────────────────────────────
+
+function BranchesSection({ notify }: { notify: Notify }) {
+  const { branches, reload } = useWorkspace()
+  const confirm = useConfirm()
+  const [editing, setEditing] = useState<Branch | 'new' | null>(null)
+
+  const toggleActive = async (b: Branch) => {
+    const ok = await confirm({
+      title: b.isActive ? `Ngừng hoạt động ${b.name}?` : `Mở lại ${b.name}?`,
+      message: b.isActive ? 'Cơ sở sẽ ẩn khỏi ô chọn cơ sở và không nhận học viên, lớp mới. Dữ liệu cũ vẫn giữ nguyên.' : 'Cơ sở sẽ hiện lại trong ô chọn cơ sở.',
+      confirmLabel: b.isActive ? 'Ngừng hoạt động' : 'Mở lại', danger: b.isActive,
+    })
+    if (!ok) return
+    try { await api.put(`/branches/${b.id}`, { isActive: !b.isActive }); notify(b.isActive ? 'Đã ngừng hoạt động cơ sở' : 'Đã mở lại cơ sở'); await reload() }
+    catch (err) { notify(errorMessage(err, 'Không cập nhật được'), 'error') }
+  }
+
+  return (
+    <div>
+      <SectionHeader title="Cơ sở" description="Mỗi học viên thuộc một cơ sở. Nhân viên, giáo viên làm việc ở các cơ sở được phân công (sửa trong mục Người dùng, Giáo viên)."
+        action={<button className="btn-primary" onClick={() => setEditing('new')}>
+          <span className="material-symbols-outlined" aria-hidden="true">add_business</span>Thêm cơ sở
+        </button>} />
+      <div className={`${panelClass} overflow-x-auto`}>
+        <table className="w-full min-w-[640px] text-left border-collapse">
+          <thead>
+            <tr className="bg-surface-container-low/50">
+              <th className="table-header">Cơ sở</th>
+              <th className="table-header text-center">Học viên</th>
+              <th className="table-header text-center">Lớp</th>
+              <th className="table-header text-center">Tài khoản · GV</th>
+              <th className="table-header">Trạng thái</th>
+              <th className="table-header text-right">Thao tác</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-outline-variant/10">
+            {branches.map(b => (
+              <tr key={b.id} className={b.isActive ? '' : 'opacity-60'}>
+                <td className="table-cell">
+                  <p className="font-semibold text-on-surface">{b.name}</p>
+                  <p className="text-xs text-outline">{[b.address, b.phone].filter(Boolean).join(' · ') || '—'}</p>
+                </td>
+                <td className="table-cell text-center text-sm">{b.counts?.students ?? '—'}</td>
+                <td className="table-cell text-center text-sm">{b.counts?.classes ?? '—'}</td>
+                <td className="table-cell text-center text-sm" title="Tài khoản · giáo viên">{b.counts ? `${b.counts.users} · ${b.counts.teachers}` : '—'}</td>
+                <td className="table-cell"><span className={b.isActive ? 'status-badge-active' : 'status-badge-pending'}>{b.isActive ? 'Hoạt động' : 'Ngừng'}</span></td>
+                <td className="table-cell">
+                  <div className="flex items-center justify-end gap-1">
+                    <IconButton icon="edit_square" label="Chỉnh sửa" onClick={() => setEditing(b)} />
+                    <IconButton icon={b.isActive ? 'block' : 'replay'} label={b.isActive ? 'Ngừng hoạt động' : 'Mở lại'} danger={b.isActive} onClick={() => toggleActive(b)} />
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {editing && <BranchModal editing={editing === 'new' ? null : editing} onClose={() => setEditing(null)}
+        onSaved={async () => { notify(editing === 'new' ? 'Đã tạo cơ sở' : 'Đã lưu cơ sở'); setEditing(null); await reload() }} />}
+    </div>
+  )
+}
+
+function BranchModal({ editing, onClose, onSaved }: { editing: Branch | null; onClose: () => void; onSaved: () => void }) {
+  const alert = useAlert()
+  const [form, setForm] = useState({ name: editing?.name ?? '', address: editing?.address ?? '', phone: editing?.phone ?? '' })
+  const [saving, setSaving] = useState(false)
+  const submit = async () => {
+    setSaving(true)
+    try {
+      if (editing) await api.put(`/branches/${editing.id}`, form)
+      else await api.post('/branches', form)
+      onSaved()
+    } catch (err) { await alert({ title: 'Không lưu được', message: errorMessage(err, 'Vui lòng thử lại.') }) }
+    finally { setSaving(false) }
+  }
+  return (
+    <Modal title={editing ? `Sửa ${editing.name}` : 'Thêm cơ sở'} onClose={onClose}
+      footer={<>
+        <button type="button" onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-semibold text-on-surface-variant hover:bg-surface-container-low">Huỷ</button>
+        <button type="button" onClick={submit} disabled={saving} className="btn-primary disabled:opacity-50">{saving ? 'Đang lưu...' : editing ? 'Cập nhật' : 'Tạo cơ sở'}</button>
+      </>}>
+      <div>
+        <label htmlFor="branch-name" className={labelClass}>Tên cơ sở *</label>
+        <input id="branch-name" className="input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="vd: CQT 263" />
+      </div>
+      <div>
+        <label htmlFor="branch-address" className={labelClass}>Địa chỉ</label>
+        <input id="branch-address" className="input" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} />
+      </div>
+      <div>
+        <label htmlFor="branch-phone" className={labelClass}>Điện thoại</label>
+        <input id="branch-phone" className="input" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
+      </div>
+    </Modal>
+  )
+}
+
+// ─── Năm học ─────────────────────────────────────────────────
+
+const YEAR_STATUS: Record<SchoolYear['status'], [string, string]> = {
+  CURRENT: ['Đang chạy', 'status-badge-active'], UPCOMING: ['Sắp tới', 'status-badge-pending'], CLOSED: ['Đã đóng', 'status-badge-inactive'],
+}
+const viDate = (ymd: string) => ymd.split('-').reverse().join('/')
+
+function SchoolYearsSection({ notify }: { notify: Notify }) {
+  const { years, reload } = useWorkspace()
+  const confirm = useConfirm()
+  const [editing, setEditing] = useState<SchoolYear | 'new' | null>(null)
+  const current = years.find(y => y.status === 'CURRENT')
+
+  const setStatus = async (y: SchoolYear, status: SchoolYear['status']) => {
+    const ok = await confirm(status === 'CURRENT'
+      ? { title: `Đặt ${y.name} làm năm học hiện tại?`, message: `${current ? `Năm ${current.name} sẽ chuyển sang Đã đóng: chỉ xem, không ghi danh hay tạo lớp mới (phiếu học phí cũ vẫn thu được). ` : ''}Lớp mới sẽ mặc định vào năm ${y.name}.`, confirmLabel: 'Đặt làm năm hiện tại' }
+      : status === 'CLOSED'
+        ? { title: `Đóng năm học ${y.name}?`, message: 'Lớp của năm này chỉ còn xem được: không ghi danh hay tạo lớp mới.', confirmLabel: 'Đóng năm học', danger: true }
+        : { title: `Mở lại năm học ${y.name}?`, message: 'Năm học chuyển về Sắp tới, lớp của năm này nhận ghi danh trở lại.', confirmLabel: 'Mở lại' })
+    if (!ok) return
+    try { await api.put(`/school-years/${y.id}`, { status }); notify('Đã cập nhật năm học'); await reload() }
+    catch (err) { notify(errorMessage(err, 'Không cập nhật được'), 'error') }
+  }
+  const remove = async (y: SchoolYear) => {
+    if (!(await confirm({ title: `Xoá năm học ${y.name}?`, message: 'Chỉ xoá được năm học chưa có lớp.', confirmLabel: 'Xoá', danger: true }))) return
+    try { await api.delete(`/school-years/${y.id}`); notify('Đã xoá năm học'); await reload() }
+    catch (err) { notify(errorMessage(err, 'Không xoá được'), 'error') }
+  }
+
+  return (
+    <div>
+      <SectionHeader title="Năm học" description="Năm học dùng chung cho mọi cơ sở. Mỗi lớp thuộc một năm học; sang năm mới tạo lớp mới, lớp cũ giữ làm lịch sử."
+        action={<button className="btn-primary" onClick={() => setEditing('new')}>
+          <span className="material-symbols-outlined" aria-hidden="true">add</span>Thêm năm học
+        </button>} />
+      <div className={`${panelClass} overflow-x-auto`}>
+        <table className="w-full min-w-[640px] text-left border-collapse">
+          <thead>
+            <tr className="bg-surface-container-low/50">
+              <th className="table-header">Năm học</th>
+              <th className="table-header">Thời gian</th>
+              <th className="table-header text-center">Lớp</th>
+              <th className="table-header">Trạng thái</th>
+              <th className="table-header text-right">Thao tác</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-outline-variant/10">
+            {years.map(y => (
+              <tr key={y.id}>
+                <td className="table-cell font-semibold text-on-surface">{y.name}</td>
+                <td className="table-cell text-sm">{viDate(y.startDate)} – {viDate(y.endDate)}</td>
+                <td className="table-cell text-center text-sm">{y.classCount}</td>
+                <td className="table-cell"><span className={YEAR_STATUS[y.status][1]}>{YEAR_STATUS[y.status][0]}</span></td>
+                <td className="table-cell">
+                  <div className="flex items-center justify-end gap-1">
+                    {y.status !== 'CURRENT' && <IconButton icon="play_circle" label="Đặt làm năm hiện tại" onClick={() => setStatus(y, 'CURRENT')} />}
+                    {y.status === 'UPCOMING' && <IconButton icon="lock" label="Đóng năm học" danger onClick={() => setStatus(y, 'CLOSED')} />}
+                    {y.status === 'CLOSED' && <IconButton icon="lock_open" label="Mở lại" onClick={() => setStatus(y, 'UPCOMING')} />}
+                    <IconButton icon="edit_square" label="Sửa tên, ngày" onClick={() => setEditing(y)} />
+                    {y.status !== 'CURRENT' && y.classCount === 0 && <IconButton icon="delete" label="Xoá" danger onClick={() => remove(y)} />}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {editing && <SchoolYearModal editing={editing === 'new' ? null : editing} latest={years[0]} onClose={() => setEditing(null)}
+        onSaved={async () => { notify(editing === 'new' ? 'Đã tạo năm học' : 'Đã lưu năm học'); setEditing(null); await reload() }} />}
+    </div>
+  )
+}
+
+/** Gợi ý năm mới: bắt đầu 01/07 năm sau năm mới nhất, kết thúc 30/06 năm kế tiếp */
+function nextYearDefaults(latest?: SchoolYear) {
+  const from = latest ? Number(latest.endDate.slice(0, 4)) : new Date().getFullYear()
+  return { name: `${from}–${from + 1}`, startDate: `${from}-07-01`, endDate: `${from + 1}-06-30` }
+}
+
+function SchoolYearModal({ editing, latest, onClose, onSaved }: { editing: SchoolYear | null; latest?: SchoolYear; onClose: () => void; onSaved: () => void }) {
+  const alert = useAlert()
+  const [form, setForm] = useState(editing ? { name: editing.name, startDate: editing.startDate, endDate: editing.endDate } : nextYearDefaults(latest))
+  const [saving, setSaving] = useState(false)
+  const submit = async () => {
+    setSaving(true)
+    try {
+      if (editing) await api.put(`/school-years/${editing.id}`, form)
+      else await api.post('/school-years', form)
+      onSaved()
+    } catch (err) { await alert({ title: 'Không lưu được', message: errorMessage(err, 'Vui lòng thử lại.') }) }
+    finally { setSaving(false) }
+  }
+  return (
+    <Modal title={editing ? `Sửa năm học ${editing.name}` : 'Thêm năm học'} onClose={onClose}
+      footer={<>
+        <button type="button" onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-semibold text-on-surface-variant hover:bg-surface-container-low">Huỷ</button>
+        <button type="button" onClick={submit} disabled={saving} className="btn-primary disabled:opacity-50">{saving ? 'Đang lưu...' : editing ? 'Cập nhật' : 'Tạo năm học'}</button>
+      </>}>
+      <div>
+        <label htmlFor="year-name" className={labelClass}>Tên năm học *</label>
+        <input id="year-name" className="input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label htmlFor="year-start" className={labelClass}>Ngày bắt đầu *</label>
+          <input id="year-start" className="input" type="date" value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })} />
+        </div>
+        <div>
+          <label htmlFor="year-end" className={labelClass}>Ngày kết thúc *</label>
+          <input id="year-end" className="input" type="date" value={form.endDate} onChange={e => setForm({ ...form, endDate: e.target.value })} />
+        </div>
+      </div>
+      {!editing && <p className="text-xs text-outline">Năm mới ở trạng thái Sắp tới: tạo lớp cho năm mới bằng cách chọn năm này ở thanh trên cùng. Khi bắt đầu năm học, bấm "Đặt làm năm hiện tại".</p>}
     </Modal>
   )
 }
