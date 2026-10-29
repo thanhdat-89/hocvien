@@ -307,11 +307,11 @@ function IconButton({ icon, label, onClick, danger }: { icon: string; label: str
   )
 }
 
-function Modal({ title, onClose, children, footer }: { title: string; onClose: () => void; children: React.ReactNode; footer: React.ReactNode }) {
+function Modal({ title, onClose, children, footer, wide }: { title: string; onClose: () => void; children: React.ReactNode; footer: React.ReactNode; wide?: boolean }) {
   return (
     <div className="responsive-dialog fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
       <div role="dialog" aria-modal="true" aria-label={title} onClick={e => e.stopPropagation()}
-        className="bg-surface rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col">
+        className={`bg-surface rounded-2xl shadow-xl w-full ${wide ? 'max-w-5xl' : 'max-w-lg'} max-h-[90vh] flex flex-col`}>
         <div className="p-6 border-b border-outline-variant/10 flex items-center justify-between">
           <h3 className="font-headline text-xl font-bold text-on-surface">{title}</h3>
           <button type="button" onClick={onClose} aria-label="Đóng" className="p-2 hover:bg-surface-container-low text-outline rounded-lg">
@@ -514,6 +514,7 @@ function SchoolYearsSection({ notify }: { notify: Notify }) {
   const { years, reload } = useWorkspace()
   const confirm = useConfirm()
   const [editing, setEditing] = useState<SchoolYear | 'new' | null>(null)
+  const [rollover, setRollover] = useState<SchoolYear | null>(null)
   const current = years.find(y => y.status === 'CURRENT')
 
   const setStatus = async (y: SchoolYear, status: SchoolYear['status']) => {
@@ -558,6 +559,7 @@ function SchoolYearsSection({ notify }: { notify: Notify }) {
                 <td className="table-cell"><span className={YEAR_STATUS[y.status][1]}>{YEAR_STATUS[y.status][0]}</span></td>
                 <td className="table-cell">
                   <div className="flex items-center justify-end gap-1">
+                    {y.status !== 'CLOSED' && y.classCount > 0 && <IconButton icon="next_plan" label="Chuyển sang năm học mới" onClick={() => setRollover(y)} />}
                     {y.status !== 'CURRENT' && <IconButton icon="play_circle" label="Đặt làm năm hiện tại" onClick={() => setStatus(y, 'CURRENT')} />}
                     {y.status === 'UPCOMING' && <IconButton icon="lock" label="Đóng năm học" danger onClick={() => setStatus(y, 'CLOSED')} />}
                     {y.status === 'CLOSED' && <IconButton icon="lock_open" label="Mở lại" onClick={() => setStatus(y, 'UPCOMING')} />}
@@ -570,9 +572,157 @@ function SchoolYearsSection({ notify }: { notify: Notify }) {
           </tbody>
         </table>
       </div>
+      {rollover && <RolloverModal source={rollover} years={years} onClose={() => setRollover(null)}
+        onDone={async message => { notify(message); setRollover(null); await reload() }} />}
       {editing && <SchoolYearModal editing={editing === 'new' ? null : editing} latest={years[0]} onClose={() => setEditing(null)}
         onSaved={async () => { notify(editing === 'new' ? 'Đã tạo năm học' : 'Đã lưu năm học'); setEditing(null); await reload() }} />}
     </div>
+  )
+}
+
+// ─── Chuyển năm học ──────────────────────────────────────────
+
+type RolloverAction = 'promote' | 'empty' | 'skip'
+interface RolloverClass {
+  id: string; name: string; branchName: string; gradeLevel: number | null; teacherName: string | null; students: number; schedules: number
+  tuitionRate: number; suggestedName: string; suggestedGrade: number | null; suggestedAction: RolloverAction; blocked: string | null
+}
+interface RolloverPreview { cutoff: string; classes: RolloverClass[]; graduating: { id: string; fullName: string; gradeLevel: number }[] }
+const ACTION_LABEL: Record<RolloverAction, string> = { promote: 'Lên lớp (giữ học sinh)', empty: 'Tạo lớp trống', skip: 'Không mở lại' }
+
+function RolloverModal({ source, years, onClose, onDone }: { source: SchoolYear; years: SchoolYear[]; onClose: () => void; onDone: (message: string) => void }) {
+  const confirm = useConfirm()
+  const { branches, branchId } = useWorkspace()
+  const targets = years.filter(y => y.status !== 'CLOSED' && y.startDate > source.startDate).sort((a, b) => a.startDate.localeCompare(b.startDate))
+  const [targetId, setTargetId] = useState(targets[0]?.id ?? '')
+  const [preview, setPreview] = useState<RolloverPreview | null>(null)
+  const [error, setError] = useState('')
+  const [rows, setRows] = useState<Record<string, { action: RolloverAction; name: string; gradeLevel: string }>>({})
+  const [bumpGrades, setBumpGrades] = useState(true)
+  const [graduateIds, setGraduateIds] = useState<string[]>([])
+  const [saving, setSaving] = useState(false)
+  const scopeName = branchId ? branches.find(b => b.id === branchId)?.name : 'tất cả cơ sở'
+
+  useEffect(() => {
+    if (!targetId) return
+    setPreview(null); setError('')
+    api.get<RolloverPreview>(`/school-years/${source.id}/rollover`, { params: { targetYearId: targetId } }).then(r => {
+      setPreview(r.data)
+      setRows(Object.fromEntries(r.data.classes.map(c => [c.id, { action: c.suggestedAction, name: c.suggestedName, gradeLevel: c.suggestedGrade?.toString() ?? '' }])))
+      setGraduateIds(r.data.graduating.map(s => s.id))
+    }).catch(err => setError(errorMessage(err, 'Không tải được danh sách lớp')))
+  }, [source.id, targetId])
+
+  const open = preview?.classes.filter(c => !c.blocked) ?? []
+  const created = open.filter(c => rows[c.id]?.action !== 'skip')
+  const moving = open.filter(c => rows[c.id]?.action === 'promote').reduce((n, c) => n + c.students, 0)
+  const target = years.find(y => y.id === targetId)
+  const setRow = (id: string, change: Partial<{ action: RolloverAction; name: string; gradeLevel: string }>) => setRows(prev => ({ ...prev, [id]: { ...prev[id], ...change } }))
+
+  const submit = async () => {
+    if (!preview || !target) return
+    const ok = await confirm({
+      title: `Chuyển sang năm học ${target.name}?`,
+      message: `Tạo ${created.length} lớp mới, chuyển ${moving} lượt học viên, kết thúc ${open.length} lớp năm ${source.name} vào ngày ${viDate(preview.cutoff)} (buổi chưa học sau ngày này bị xoá). ${graduateIds.length} học viên chuyển sang Đã tốt nghiệp.${bumpGrades ? ' Học viên đang học được tăng khối.' : ''} Không hoàn tác tự động được.`,
+      confirmLabel: 'Chuyển năm học',
+    })
+    if (!ok) return
+    setSaving(true); setError('')
+    try {
+      const { data } = await api.post(`/school-years/${source.id}/rollover`, {
+        targetYearId: targetId, bumpGrades, graduateIds,
+        classes: open.map(c => ({ classId: c.id, action: rows[c.id].action, name: rows[c.id].name, gradeLevel: rows[c.id].gradeLevel ? Number(rows[c.id].gradeLevel) : null })),
+      })
+      onDone(`Đã chuyển năm: ${data.created.length} lớp mới ở năm ${data.targetYear}, ${data.graduated} học viên tốt nghiệp`)
+    } catch (err) { setError(errorMessage(err, 'Không chuyển được năm học')) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <Modal wide title={`Chuyển năm học từ ${source.name}`} onClose={onClose}
+      footer={<>
+        <button type="button" onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-semibold text-on-surface-variant hover:bg-surface-container-low">Huỷ</button>
+        <button type="button" onClick={submit} disabled={saving || !preview || !open.length} className="btn-primary disabled:opacity-50">{saving ? 'Đang chuyển...' : 'Xem lại và chuyển năm'}</button>
+      </>}>
+      {!targets.length ? (
+        <p className="text-sm text-on-surface">Chưa có năm học nào sau {source.name}. Đóng cửa sổ này, bấm <b>Thêm năm học</b> rồi quay lại.</p>
+      ) : <>
+        <div className="flex flex-wrap items-end gap-4">
+          <div>
+            <label htmlFor="rollover-target" className={labelClass}>Sang năm học</label>
+            <select id="rollover-target" className="input" value={targetId} onChange={e => setTargetId(e.target.value)}>
+              {targets.map(y => <option key={y.id} value={y.id}>{y.name} ({viDate(y.startDate)} – {viDate(y.endDate)})</option>)}
+            </select>
+          </div>
+          <p className="text-sm text-outline pb-2">Áp dụng cho lớp của <b>{scopeName}</b>{preview && <> · lớp cũ kết thúc ngày <b>{viDate(preview.cutoff)}</b></>}</p>
+        </div>
+        {error && <p role="alert" className="text-sm text-error">{error}</p>}
+        {!preview && !error && <p className="text-sm text-outline">Đang tải danh sách lớp…</p>}
+        {preview && (
+          <div className="overflow-x-auto rounded-xl border border-outline-variant/20">
+            <table className="w-full min-w-[760px] text-left border-collapse text-sm">
+              <thead>
+                <tr className="bg-surface-container-low/50">
+                  <th className="px-3 py-2 font-semibold text-outline">Lớp năm {source.name}</th>
+                  <th className="px-3 py-2 font-semibold text-outline">Cách xử lý</th>
+                  <th className="px-3 py-2 font-semibold text-outline">Tên lớp mới</th>
+                  <th className="px-3 py-2 font-semibold text-outline w-28">Khối</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-outline-variant/10">
+                {preview.classes.map(c => {
+                  const row = rows[c.id]
+                  return (
+                    <tr key={c.id} className={c.blocked ? 'opacity-60' : ''}>
+                      <td className="px-3 py-2">
+                        <p className="font-semibold text-on-surface">{c.name}</p>
+                        <p className="text-xs text-outline">{[!branchId && c.branchName, c.teacherName, `${c.students} học viên`, `${c.schedules} lịch/tuần`, c.tuitionRate ? `${new Intl.NumberFormat('vi-VN').format(c.tuitionRate)}đ/buổi` : null].filter(Boolean).join(' · ')}</p>
+                      </td>
+                      {c.blocked ? <td colSpan={3} className="px-3 py-2 text-xs text-amber-800">{c.blocked}</td> : <>
+                        <td className="px-3 py-2">
+                          <select aria-label={`Cách xử lý ${c.name}`} className="input py-1.5" value={row?.action} onChange={e => setRow(c.id, { action: e.target.value as RolloverAction })}>
+                            {(Object.keys(ACTION_LABEL) as RolloverAction[]).map(a => <option key={a} value={a}>{ACTION_LABEL[a]}</option>)}
+                          </select>
+                        </td>
+                        <td className="px-3 py-2">
+                          <input aria-label={`Tên lớp mới ${c.name}`} className="input py-1.5" disabled={row?.action === 'skip'} value={row?.name ?? ''} onChange={e => setRow(c.id, { name: e.target.value })} />
+                        </td>
+                        <td className="px-3 py-2">
+                          <input aria-label={`Khối ${c.name}`} className="input py-1.5" type="number" min={1} max={12} disabled={row?.action === 'skip'} value={row?.gradeLevel ?? ''} onChange={e => setRow(c.id, { gradeLevel: e.target.value })} />
+                        </td>
+                      </>}
+                    </tr>
+                  )
+                })}
+                {!preview.classes.length && <tr><td colSpan={4} className="px-3 py-6 text-center text-outline">Năm {source.name} không còn lớp đang hoạt động trong phạm vi này.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {preview && <>
+          <label className="flex items-center gap-2 text-sm text-on-surface">
+            <input type="checkbox" checked={bumpGrades} onChange={e => setBumpGrades(e.target.checked)} />
+            Tăng khối cho mọi học viên đang học (khối 12 giữ nguyên)
+          </label>
+          {preview.graduating.length > 0 && (
+            <fieldset>
+              <legend className={labelClass}>Học viên khối 12 chuyển sang Đã tốt nghiệp ({graduateIds.length}/{preview.graduating.length})</legend>
+              <div className="flex flex-wrap gap-2">
+                {preview.graduating.map(s => (
+                  <label key={s.id} className={`inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-sm cursor-pointer ${graduateIds.includes(s.id) ? 'border-primary bg-primary/5 text-primary' : 'border-outline-variant/30'}`}>
+                    <input type="checkbox" checked={graduateIds.includes(s.id)} onChange={e => setGraduateIds(ids => e.target.checked ? [...ids, s.id] : ids.filter(id => id !== s.id))} />
+                    {s.fullName}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
+          <p className="rounded-xl bg-primary/5 px-4 py-3 text-sm text-on-surface">
+            Sẽ tạo <b>{created.length}</b> lớp mới, chuyển <b>{moving}</b> lượt học viên, kết thúc <b>{open.length}</b> lớp cũ. Buổi học của lớp mới được tạo dần theo lịch từ ngày {target && viDate(target.startDate)}.
+          </p>
+        </>}
+      </>}
+    </Modal>
   )
 }
 

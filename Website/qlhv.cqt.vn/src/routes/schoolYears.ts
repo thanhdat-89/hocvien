@@ -3,6 +3,7 @@ import { prisma, api, newId, toDay } from '../lib/db'
 import { s } from '../lib/params'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
+import { applyRollover, previewRollover } from '../services/schoolYearRollover'
 
 const router = Router()
 router.use(authenticate)
@@ -68,6 +69,29 @@ router.put('/:id', requireRole('ADMIN'), async (req: AuthRequest, res: Response,
     req.activity = { resourceType: 'school-years', resourceId: id, description: `${change} năm học ${updated.name}` }
     const { _count, ...rest } = updated
     res.json(api({ ...rest, classCount: _count.classes }))
+  } catch (err) { next(err) }
+})
+
+// GET /api/school-years/:id/rollover?targetYearId= — xem trước chuyển năm (lớp trong phạm vi cơ sở đang xem)
+router.get('/:id/rollover', requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const targetYearId = typeof req.query.targetYearId === 'string' ? req.query.targetYearId : ''
+    if (!targetYearId) { res.status(400).json({ message: 'Chọn năm học đích' }); return }
+    res.json(await previewRollover(s(req.params.id), targetYearId))
+  } catch (err) { next(err) }
+})
+
+// POST /api/school-years/:id/rollover — { targetYearId, classes: [{ classId, action, name, gradeLevel }], bumpGrades, graduateIds }
+router.post('/:id/rollover', requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { targetYearId, classes, bumpGrades, graduateIds } = req.body ?? {}
+    if (typeof targetYearId !== 'string' || !Array.isArray(classes) || (graduateIds !== undefined && !Array.isArray(graduateIds))) {
+      res.status(400).json({ message: 'Dữ liệu chuyển năm không hợp lệ' }); return
+    }
+    const result = await applyRollover(s(req.params.id), { targetYearId, classes, bumpGrades: bumpGrades !== false, graduateIds })
+    req.activity = { action: 'CREATE', resourceType: 'school-years', resourceId: targetYearId,
+      description: `Chuyển năm học sang ${result.targetYear}: ${result.created.length} lớp mới, kết thúc ${result.closed} lớp cũ, ${result.graduated} học viên tốt nghiệp` }
+    res.json(result)
   } catch (err) { next(err) }
 })
 

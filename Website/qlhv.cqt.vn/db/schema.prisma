@@ -342,6 +342,8 @@ model Class {
   /// Lớp thuộc một cơ sở và một năm học; sang năm mới tạo lớp mới, lớp cũ giữ làm lịch sử.
   branchId           String
   schoolYearId       String
+  /// Lớp năm trước được chuyển lên thành lớp này (Chuyển năm học); mỗi lớp cũ có tối đa một lớp kế tiếp.
+  promotedFromId     String?     @unique
   /// Denorm có chủ đích (đếm nhanh cho danh sách); cập nhật trong cùng transaction ghi danh.
   activeStudentCount Int         @default(0)
   createdAt          DateTime    @default(now()) @db.Timestamptz(3)
@@ -349,6 +351,8 @@ model Class {
 
   branch            Branch              @relation(fields: [branchId], references: [id], onDelete: Restrict)
   schoolYear        SchoolYear          @relation(fields: [schoolYearId], references: [id], onDelete: Restrict)
+  promotedFrom      Class?              @relation("ClassPromotion", fields: [promotedFromId], references: [id], onDelete: SetNull)
+  promotedTo        Class?              @relation("ClassPromotion")
   subject           Subject?            @relation(fields: [subjectId], references: [id], onDelete: SetNull)
   teacher           Teacher?            @relation(fields: [teacherId], references: [id], onDelete: SetNull)
   rateHistory       ClassTuitionRate[]
