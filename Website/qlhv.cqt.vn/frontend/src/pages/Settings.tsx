@@ -15,13 +15,11 @@ const SECTIONS: { key: string; icon: string; label: string; adminOnly?: boolean 
   { key: 'account', icon: 'account_circle', label: 'Tài khoản của tôi' },
   { key: 'users', icon: 'manage_accounts', label: 'Người dùng', adminOnly: true },
   { key: 'teachers', icon: 'badge', label: 'Giáo viên', adminOnly: true },
-  { key: 'subjects', icon: 'menu_book', label: 'Môn học & đơn giá', adminOnly: true },
   { key: 'integrations', icon: 'hub', label: 'Kết nối & tích hợp', adminOnly: true },
 ]
 
 const ROLE_LABEL: Record<Role, string> = { ADMIN: 'Quản trị viên', STAFF: 'Nhân viên', TEACHER: 'Giáo viên' }
 const errorMessage = (err: any, fallback: string) => err?.response?.data?.message ?? fallback
-const fmtVND = (n: number) => new Intl.NumberFormat('vi-VN').format(Math.round(n))
 const labelClass = 'text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5'
 const panelClass = 'bg-surface-container-lowest rounded-2xl shadow-sm border border-outline-variant/10'
 
@@ -58,7 +56,6 @@ export default function Settings() {
             {section === 'account' && <AccountSection notify={notify} />}
             {section === 'users' && <UsersSection notify={notify} />}
             {section === 'teachers' && <Teachers embedded />}
-            {section === 'subjects' && <SubjectsSection notify={notify} />}
             {section === 'integrations' && <IntegrationsSection />}
           </div>
         </div>
@@ -389,141 +386,6 @@ function UserModal({ editing, self, onClose, onSaved }: { editing: AppUser | nul
             onChange={e => setForm({ ...form, password: e.target.value })} />
         </div>
       )}
-    </Modal>
-  )
-}
-
-// ─── Môn học & đơn giá ───────────────────────────────────────
-
-interface Subject {
-  id: string
-  name: string
-  gradeLevel?: number | null
-  tuitionRatePerSession: number
-  description?: string | null
-  isActive: boolean
-}
-
-function SubjectsSection({ notify }: { notify: Notify }) {
-  const [subjects, setSubjects] = useState<Subject[]>([])
-  const [loading, setLoading] = useState(true)
-  const [editing, setEditing] = useState<Subject | 'new' | null>(null)
-
-  const load = () => {
-    setLoading(true)
-    api.get('/subjects?all=1').then(r => setSubjects(r.data)).catch(err => notify(errorMessage(err, 'Không tải được môn học'), 'error'))
-      .finally(() => setLoading(false))
-  }
-  useEffect(load, [])
-
-  const toggleActive = async (subject: Subject) => {
-    try {
-      await api.put(`/subjects/${subject.id}`, { name: subject.name, isActive: !subject.isActive })
-      notify(subject.isActive ? 'Đã ngừng dùng môn học' : 'Đã bật lại môn học')
-      load()
-    } catch (err) { notify(errorMessage(err, 'Không cập nhật được'), 'error') }
-  }
-
-  return (
-    <div>
-      <SectionHeader title="Môn học & đơn giá" description="Đơn giá mặc định mỗi buổi theo môn. Học phí từng lớp vẫn chỉnh riêng trong trang lớp học."
-        action={<button className="btn-primary" onClick={() => setEditing('new')}>
-          <span className="material-symbols-outlined" aria-hidden="true">add</span>Thêm môn học
-        </button>} />
-      <div className={`${panelClass} overflow-x-auto`}>
-        <table className="w-full min-w-[640px] text-left border-collapse">
-          <thead>
-            <tr className="bg-surface-container-low/50">
-              <th className="table-header">Môn học</th>
-              <th className="table-header text-center">Khối</th>
-              <th className="table-header text-right">Đơn giá / buổi</th>
-              <th className="table-header">Trạng thái</th>
-              <th className="table-header text-right">Thao tác</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-outline-variant/10">
-            {loading ? (
-              <tr><td colSpan={5} className="py-16 text-center"><div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></td></tr>
-            ) : subjects.length === 0 ? (
-              <tr><td colSpan={5} className="py-16 text-center text-outline">Chưa có môn học nào</td></tr>
-            ) : subjects.map(subject => (
-              <tr key={subject.id} className={subject.isActive ? '' : 'opacity-60'}>
-                <td className="table-cell">
-                  <p className="font-semibold text-on-surface">{subject.name}</p>
-                  {subject.description && <p className="text-xs text-outline">{subject.description}</p>}
-                </td>
-                <td className="table-cell text-center text-sm">{subject.gradeLevel ?? '—'}</td>
-                <td className="table-cell text-right font-bold text-on-surface">{fmtVND(subject.tuitionRatePerSession)}đ</td>
-                <td className="table-cell">
-                  <span className={subject.isActive ? 'status-badge-active' : 'status-badge-pending'}>{subject.isActive ? 'Đang dùng' : 'Ngừng dùng'}</span>
-                </td>
-                <td className="table-cell">
-                  <div className="flex items-center justify-end gap-1">
-                    <IconButton icon="edit_square" label="Chỉnh sửa" onClick={() => setEditing(subject)} />
-                    <IconButton icon={subject.isActive ? 'visibility_off' : 'visibility'} label={subject.isActive ? 'Ngừng dùng' : 'Bật lại'}
-                      onClick={() => toggleActive(subject)} />
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {editing && <SubjectModal editing={editing === 'new' ? null : editing} onClose={() => setEditing(null)}
-        onSaved={() => { notify('Đã lưu môn học'); setEditing(null); load() }} />}
-    </div>
-  )
-}
-
-function SubjectModal({ editing, onClose, onSaved }: { editing: Subject | null; onClose: () => void; onSaved: () => void }) {
-  const alert = useAlert()
-  const [form, setForm] = useState({
-    name: editing?.name ?? '', gradeLevel: editing?.gradeLevel?.toString() ?? '',
-    tuitionRatePerSession: editing?.tuitionRatePerSession ?? 0, description: editing?.description ?? '',
-  })
-  const [saving, setSaving] = useState(false)
-
-  const submit = async () => {
-    if (!form.name.trim()) { await alert({ title: 'Thiếu tên', message: 'Vui lòng nhập tên môn học.' }); return }
-    setSaving(true)
-    try {
-      const payload = { ...form, name: form.name.trim(), tuitionRatePerSession: Number(form.tuitionRatePerSession) || 0 }
-      if (editing) await api.put(`/subjects/${editing.id}`, payload)
-      else await api.post('/subjects', payload)
-      onSaved()
-    } catch (err) {
-      await alert({ title: 'Không lưu được', message: errorMessage(err, 'Vui lòng thử lại.') })
-    } finally { setSaving(false) }
-  }
-
-  return (
-    <Modal title={editing ? 'Sửa môn học' : 'Thêm môn học'} onClose={onClose}
-      footer={<>
-        <button type="button" onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-semibold text-on-surface-variant hover:bg-surface-container-low">Huỷ</button>
-        <button type="button" onClick={submit} disabled={saving} className="btn-primary disabled:opacity-50">
-          {saving ? 'Đang lưu...' : editing ? 'Cập nhật' : 'Tạo mới'}
-        </button>
-      </>}>
-      <div>
-        <label htmlFor="subject-name" className={labelClass}>Tên môn học *</label>
-        <input id="subject-name" className="input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Toán 9" />
-      </div>
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label htmlFor="subject-grade" className={labelClass}>Khối lớp</label>
-          <input id="subject-grade" className="input" type="number" min={1} max={12} value={form.gradeLevel}
-            onChange={e => setForm({ ...form, gradeLevel: e.target.value })} />
-        </div>
-        <div>
-          <label htmlFor="subject-rate" className={labelClass}>Đơn giá / buổi (đ)</label>
-          <input id="subject-rate" className="input" type="number" min={0} step={1000} value={form.tuitionRatePerSession}
-            onChange={e => setForm({ ...form, tuitionRatePerSession: Number(e.target.value) })} />
-        </div>
-      </div>
-      <div>
-        <label htmlFor="subject-desc" className={labelClass}>Mô tả</label>
-        <textarea id="subject-desc" className="input min-h-[80px]" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
-      </div>
     </Modal>
   )
 }

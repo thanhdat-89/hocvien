@@ -7,10 +7,9 @@ import { AuthRequest } from '../types'
 const router = Router()
 router.use(authenticate)
 
-router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/', async (_req, res: Response, next: NextFunction) => {
   try {
-    const all = req.query.all === '1' && req.user!.role === 'ADMIN'
-    const subjects = await prisma.subject.findMany({ where: all ? {} : { isActive: true } })
+    const subjects = await prisma.subject.findMany({ where: { isActive: true } })
     subjects.sort((a, b) => (a.gradeLevel ?? 0) - (b.gradeLevel ?? 0))
     res.json(api(subjects))
   } catch (err) { next(err) }
