@@ -56,9 +56,11 @@ test('worker dispatcher authenticates only to the fixed backend and requires imm
   } finally { if (oldSecret === undefined) delete process.env.CRON_SECRET; else process.env.CRON_SECRET = oldSecret }
 })
 
-test('production schedule supports Vercel Hobby daily minimum', () => {
-  const config = require('../vercel.json')
-  const cron = config.crons.find(item => item.path === '/api/tuition/cron/reconcile-monthly-invoices')
-  assert.equal(cron.schedule, '0 0 * * *')
-  assert.equal(config.crons.some(item => item.path === '/api/tuition/cron/monthly-invoice-worker'), false)
+test('production schedule (VPS cron) runs the month-end reconciliation daily and never schedules the worker', () => {
+  const jobs = require('node:fs').readFileSync(require('node:path').resolve(__dirname, '../deploy/cron/qlhv-api'), 'utf8')
+    .split('\n').filter(line => /^\d/.test(line))
+  const reconcile = jobs.find(line => line.endsWith('/api/tuition/cron/reconcile-monthly-invoices'))
+  assert.match(reconcile, /^0 7 \* \* \* /, 'mỗi ngày 07:00; chỉ chạy thật vào ngày cuối tháng')
+  assert.equal(jobs.some(line => line.includes('/api/tuition/cron/monthly-invoice-worker')), false)
+  assert.equal(require('../vercel.json').crons, undefined, 'backend Vercel cũ không được chạy lịch song song')
 })
