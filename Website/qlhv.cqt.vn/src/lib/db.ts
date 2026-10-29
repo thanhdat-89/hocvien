@@ -31,7 +31,7 @@ const SCOPED: Record<string, (ids: string[]) => Where> = {
   Parent: viaStudent, StudentReview: viaStudent, PrivateSession: viaStudent, TuitionRecord: viaStudent,
   Payment: viaStudent, MonthlyScore: viaStudent, StudentPromotion: viaStudent,
 }
-/** Khoá ngoại tới bản ghi có cơ sở: phải nằm trong phạm vi khi tạo / sửa */
+/** Khoá ngoại tới bản ghi có cơ sở: không được trỏ sang cơ sở ngoài phạm vi khi tạo / sửa */
 const REFS: Record<string, string> = { classId: 'Class', studentId: 'Student', sessionId: 'Session', tuitionRecordId: 'TuitionRecord' }
 const FILTERED = new Set(['findUnique', 'findUniqueOrThrow', 'findFirst', 'findFirstOrThrow', 'findMany', 'count', 'aggregate', 'groupBy', 'update', 'updateMany', 'delete', 'deleteMany', 'upsert'])
 const delegate = (model: string) => (base as unknown as Record<string, { count(args: unknown): Promise<number> }>)[model[0].toLowerCase() + model.slice(1)]
@@ -52,7 +52,9 @@ async function checkWrite(model: string, data: unknown, ids: string[]) {
     for (const [field, parent] of Object.entries(REFS)) {
       const id = d[field] ?? d[field.slice(0, -2)]?.connect?.id
       if (typeof id !== 'string' || parent === model) continue
-      if (!(await delegate(parent).count({ where: { id, ...SCOPED[parent](ids) } }))) throw createError('Không tìm thấy dữ liệu', 404)
+      // Chỉ chặn bản ghi cha thuộc cơ sở khác. Không thấy (vừa tạo trong cùng transaction, chưa commit, hoặc không tồn tại)
+      // thì để khoá ngoại của database quyết định.
+      if (await delegate(parent).count({ where: { id, NOT: SCOPED[parent](ids) } })) throw createError('Không tìm thấy dữ liệu', 404)
     }
   }
 }

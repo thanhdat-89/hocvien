@@ -135,3 +135,22 @@ test('hoá đơn MISA nhận cơ sở của học viên và bị lọc theo cơ 
   assert.equal(await inA(A, async () => await prisma.misaInvoice.count()), 0)
   assert.equal(await runInScope({ branchIds: [B], schoolYearId: null }, async () => await prisma.misaInvoice.count()), 1)
 })
+
+test('trong phạm vi cơ sở, tạo bản ghi cha rồi bản ghi con trong cùng transaction vẫn được', async () => {
+  const { A, b } = await twoBranches()
+  const studentId = newId()
+  await inA(A, async () => {
+    await prisma.$transaction(async tx => {
+      await tx.student.create({ data: { id: studentId, fullName: 'Mới', enrollmentDate: day('2026-10-01'), branchId: A } })
+      await tx.parent.create({ data: { id: newId(), studentId, fullName: 'Phụ huynh', isPrimaryContact: true } })
+    })
+    const other = newId()
+    await prisma.$transaction([
+      prisma.student.create({ data: { id: other, fullName: 'Mới 2', enrollmentDate: day('2026-10-01'), branchId: A } }),
+      prisma.parent.create({ data: { id: newId(), studentId: other, fullName: 'Phụ huynh 2', isPrimaryContact: true } }),
+    ])
+    // Vẫn chặn tham chiếu tới bản ghi của cơ sở khác
+    await assert.rejects(prisma.parent.create({ data: { id: newId(), studentId: b.student.id, fullName: 'X', isPrimaryContact: false } }), err => err.status === 404)
+  })
+  assert.equal(await prisma.parent.count({ where: { student: { branchId: A } } }), 2)
+})
