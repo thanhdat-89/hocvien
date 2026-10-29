@@ -23,9 +23,10 @@ export default function Holidays() {
   const [deleteModal, setDeleteModal] = useState<{ open: boolean; holiday: Holiday | null }>({ open: false, holiday: null })
   
   const [formData, setFormData] = useState({ name: '', startDate: '', endDate: '', description: '' })
-  // Cơ sở áp dụng: mặc định cơ sở đang xem, hoặc mọi cơ sở khi xem tất cả
-  const { branches, branchId: viewing } = useWorkspace()
-  const defaultBranchIds = () => viewing ? [viewing] : branches.filter(b => b.isActive).map(b => b.id)
+  // Cơ sở áp dụng: mặc định cơ sở đang làm việc, chọn thêm được các cơ sở khác trong quyền
+  const { branches: allBranches, branchId: working, allowedBranchIds } = useWorkspace()
+  const branches = allBranches.filter(b => allowedBranchIds.includes(b.id))
+  const defaultBranchIds = () => working ? [working] : []
   const [branchIds, setBranchIds] = useState<string[]>([])
   const [restoreSessions, setRestoreSessions] = useState(false)
   const [toastMsg, setToastMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)

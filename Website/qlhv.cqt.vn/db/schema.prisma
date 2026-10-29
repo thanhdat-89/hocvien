@@ -134,6 +134,10 @@ model User {
   promotionsApproved StudentPromotion[]
   materials          Material[]
   branches           UserBranch[]
+  /// Cơ sở làm việc (Cài đặt → Tài khoản của tôi): mọi thao tác xem / thêm học viên, lớp... diễn ra ở cơ sở này.
+  /// Trống hoặc không còn hợp lệ (bị gỡ phân công, cơ sở ngừng) thì dùng cơ sở đầu tiên được phép.
+  defaultBranchId    String?
+  defaultBranch      Branch?            @relation("UserDefaultBranch", fields: [defaultBranchId], references: [id], onDelete: SetNull)
 
   @@map("users")
 }
@@ -175,12 +179,13 @@ model Branch {
   createdAt DateTime @default(now()) @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
-  students Student[]
-  classes  Class[]
-  leads    Lead[]
-  users    UserBranch[]
-  teachers TeacherBranch[]
-  holidays HolidayBranch[]
+  students     Student[]
+  classes      Class[]
+  leads        Lead[]
+  users        UserBranch[]
+  defaultUsers User[]          @relation("UserDefaultBranch")
+  teachers     TeacherBranch[]
+  holidays     HolidayBranch[]
 
   @@map("branches")
 }

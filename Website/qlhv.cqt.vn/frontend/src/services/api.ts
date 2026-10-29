@@ -8,20 +8,14 @@ const api = axios.create({
     : '/api',
 })
 
-/** Cơ sở / năm học đang xem (hooks/useWorkspace); trống = mặc định của server */
-export const BRANCH_KEY = 'qlhv.branch'
+/** Năm học đang xem (hooks/useWorkspace); trống = năm đang chạy. Cơ sở làm việc lưu ở tài khoản (Cài đặt). */
 export const SCHOOL_YEAR_KEY = 'qlhv.schoolYear'
-const BRANCH_DENIED = 'Không có quyền với cơ sở này'
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token')
   if (token) config.headers.Authorization = `Bearer ${token}`
-  // Danh sách để chọn cơ sở / năm học không phụ thuộc lựa chọn hiện tại (lựa chọn có thể đã hết hiệu lực)
-  if (!/^\/(branches|school-years|auth)(\/|\?|$)/.test(config.url || '')) {
-    const branch = localStorage.getItem(BRANCH_KEY), year = localStorage.getItem(SCHOOL_YEAR_KEY)
-    if (branch) config.headers['X-Branch-Id'] = branch
-    if (year) config.headers['X-School-Year-Id'] = year
-  }
+  const year = localStorage.getItem(SCHOOL_YEAR_KEY)
+  if (year) config.headers['X-School-Year-Id'] = year
   return config
 })
 
@@ -42,11 +36,6 @@ api.interceptors.response.use(
       localStorage.removeItem('token')
       localStorage.removeItem('user')
       window.location.href = '/login'
-    }
-    // Bị gỡ phân công cơ sở đang chọn: về mặc định
-    if (err.response?.status === 403 && err.response.data?.message === BRANCH_DENIED && localStorage.getItem(BRANCH_KEY)) {
-      localStorage.removeItem(BRANCH_KEY)
-      window.location.reload()
     }
     return Promise.reject(err)
   }

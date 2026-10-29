@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
-import api, { BRANCH_KEY, SCHOOL_YEAR_KEY } from '../services/api'
+import api, { SCHOOL_YEAR_KEY } from '../services/api'
 import { User } from '../types'
 
 interface AuthContextType {
@@ -41,7 +41,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = () => {
     localStorage.removeItem('token')
     localStorage.removeItem('user')
-    localStorage.removeItem(BRANCH_KEY)
     localStorage.removeItem(SCHOOL_YEAR_KEY)
     setUser(null)
   }

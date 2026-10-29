@@ -7,6 +7,7 @@ const { authenticate } = require('../dist/middleware/auth')
 const { readView } = require('../dist/services/readViews')
 const { generateSessionsFromSchedule } = require('../dist/services/sessionGenerator')
 const holidays = require('../dist/routes/holidays').default
+const auth = require('../dist/routes/auth').default
 
 beforeEach(reset)
 
@@ -80,16 +81,28 @@ function asUser(user, headers, fn) {
   })
 }
 
-test('nhân viên chỉ thấy cơ sở được phân công; chọn cơ sở ngoài quyền bị chặn; ADMIN chọn được từng cơ sở', async () => {
+test('mỗi tài khoản làm việc ở đúng một cơ sở; đổi cơ sở làm việc chỉ trong quyền', async () => {
   const { A, B, a, b } = await twoBranches()
-  const staff = await seed.user({ role: 'STAFF', branches: { create: { branchId: A } } })
+  const staff = await seed.user({ role: 'STAFF', branches: { create: [{ branchId: A }, { branchId: B }] } })
   const admin = await seed.user({ role: 'ADMIN' })
-  const ids = () => prisma.student.findMany({ select: { id: true } }).then(rows => rows.map(r => r.id).sort())
+  const ids = () => prisma.student.findMany({ select: { id: true } }).then(rows => rows.map(r => r.id))
+  const putMe = routeHandler(auth, '/me', 'put')
 
+  assert.deepEqual((await asUser(staff, {}, ids)).result, [a.student.id], 'chưa chọn: cơ sở được phân công đầu tiên')
+  assert.deepEqual((await asUser(admin, {}, ids)).result, [a.student.id], 'ADMIN cũng chỉ làm việc ở một cơ sở')
+  assert.deepEqual((await asUser(staff, { 'x-branch-id': B }, ids)).result, [a.student.id], 'header cũ không còn tác dụng')
+
+  assert.equal((await putMe({ user: { userId: staff.id, role: 'STAFF' }, body: { defaultBranchId: B } })).status, 200)
+  assert.deepEqual((await asUser(staff, {}, ids)).result, [b.student.id])
+  const me = await asUser(staff, {}, () => routeHandler(auth, '/me', 'get')({ user: { userId: staff.id, role: 'STAFF' } }))
+  assert.deepEqual([me.result.body.workingBranchId, me.result.body.allowedBranchIds], [B, [A, B]])
+
+  const only = await seed.user({ role: 'STAFF', branches: { create: { branchId: A } } })
+  assert.equal((await putMe({ user: { userId: only.id, role: 'STAFF' }, body: { defaultBranchId: B } })).status, 403)
+  // Bị gỡ phân công cơ sở mặc định → về cơ sở được phép đầu tiên
+  await prisma.userBranch.delete({ where: { userId_branchId: { userId: staff.id, branchId: B } } })
+  require('../dist/middleware/auth').forgetAccount(staff.id)
   assert.deepEqual((await asUser(staff, {}, ids)).result, [a.student.id])
-  assert.equal((await asUser(staff, { 'x-branch-id': B }, ids)).status, 403)
-  assert.deepEqual((await asUser(admin, {}, ids)).result, [a.student.id, b.student.id].sort())
-  assert.deepEqual((await asUser(admin, { 'x-branch-id': B }, ids)).result, [b.student.id])
   const nobody = await seed.user({ role: 'STAFF' })
   assert.deepEqual((await asUser(nobody, {}, ids)).result, [], 'chưa được phân công cơ sở nào thì không thấy gì')
 })

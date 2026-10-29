@@ -1,7 +1,7 @@
 import { Router, Response, NextFunction } from 'express'
 import { prisma, api, newId } from '../lib/db'
 import { s } from '../lib/params'
-import { authenticate, requireRole } from '../middleware/auth'
+import { authenticate, forgetAllAccounts, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
 
 const router = Router()
@@ -31,6 +31,7 @@ router.post('/', requireRole('ADMIN'), async (req: AuthRequest, res: Response, n
     if (!name) { res.status(400).json({ message: 'Vui lòng nhập tên cơ sở' }); return }
     if (await prisma.branch.findUnique({ where: { name } })) { res.status(409).json({ message: 'Tên cơ sở đã tồn tại' }); return }
     const branch = await prisma.branch.create({ data: { id: newId(), name, address: text(req.body.address), phone: text(req.body.phone) }, include: counts })
+    forgetAllAccounts() // ADMIN được làm việc ở cơ sở mới
     req.activity = { resourceType: 'branches', resourceId: branch.id, description: `Tạo cơ sở ${name}` }
     const { _count, ...rest } = branch
     res.status(201).json(api({ ...rest, counts: _count }))
@@ -55,6 +56,7 @@ router.put('/:id', requireRole('ADMIN'), async (req: AuthRequest, res: Response,
       where: { id }, include: counts,
       data: { name, isActive, address: req.body.address === undefined ? undefined : text(req.body.address), phone: req.body.phone === undefined ? undefined : text(req.body.phone) },
     })
+    if (isActive !== undefined) forgetAllAccounts() // cơ sở ngừng / mở lại đổi cơ sở làm việc được phép
     req.activity = { resourceType: 'branches', resourceId: id, description: `${isActive === false ? 'Ngừng hoạt động' : isActive === true && !branch.isActive ? 'Mở lại' : 'Sửa'} cơ sở ${updated.name}` }
     const { _count, ...rest } = updated
     res.json(api({ ...rest, counts: _count }))

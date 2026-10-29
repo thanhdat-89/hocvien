@@ -245,8 +245,8 @@ function TeacherModal({ editing, onClose, onSaved }: { editing: Teacher | null; 
     salaryRatePerSession: editing?.salaryRatePerSession ?? 0,
     notes: editing?.notes ?? '',
   })
-  const { branches, branchId: viewing } = useWorkspace()
-  const [branchIds, setBranchIds] = useState<string[]>(editing?.branches?.map(b => b.branchId) ?? (viewing ? [viewing] : branches.filter(b => b.isActive).slice(0, 1).map(b => b.id)))
+  const { branches, branchId: working } = useWorkspace()
+  const [branchIds, setBranchIds] = useState<string[]>(editing?.branches?.map(b => b.branchId) ?? (working ? [working] : []))
   const [saving, setSaving] = useState(false)
 
   const handleSubmit = async () => {

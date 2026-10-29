@@ -13,11 +13,12 @@ const withBranches = { branches: { select: { branch: { select: { id: true, name:
 const toApi = <T extends { startDate: Date; branches?: { branch: { id: string; name: string } }[] }>({ branches, ...h }: T) =>
   api({ ...h, date: h.startDate, ...(branches ? { branches: branches.map(b => b.branch) } : {}) })
 
-/** Cơ sở áp dụng: danh sách gửi lên (phải trong phạm vi), mặc định mọi cơ sở đang hoạt động trong phạm vi */
+/** Cơ sở áp dụng: danh sách gửi lên (trong các cơ sở được làm việc), mặc định cơ sở đang làm việc */
 async function holidayBranchIds(requested: unknown): Promise<string[] | null> {
-  const scope = currentScope()?.branchIds
-  const active = await prisma.branch.findMany({ where: { isActive: true, ...(scope ? { id: { in: scope } } : {}) }, select: { id: true } })
-  if (requested === undefined) return active.map(b => b.id)
+  const scope = currentScope()
+  const permitted = scope?.allowedBranchIds ?? scope?.branchIds
+  const active = await prisma.branch.findMany({ where: { isActive: true, ...(permitted ? { id: { in: permitted } } : {}) }, select: { id: true } })
+  if (requested === undefined) return scope?.branchIds ?? active.map(b => b.id)
   if (!Array.isArray(requested) || !requested.length || requested.some(id => typeof id !== 'string')) return null
   const allowed = new Set(active.map(b => b.id))
   return requested.every(id => allowed.has(id)) ? [...new Set(requested as string[])] : null
@@ -96,7 +97,7 @@ router.delete('/:id', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, re
     }
     // Xoá ngày nghỉ ảnh hưởng mọi cơ sở áp dụng: phải có quyền với tất cả
     const holidayBranches = holiday.branches.map(b => b.branchId)
-    const scope = currentScope()?.branchIds
+    const scope = currentScope()?.allowedBranchIds ?? currentScope()?.branchIds
     if (scope && holidayBranches.some(id => !scope.includes(id))) {
       res.status(403).json({ message: 'Ngày nghỉ áp dụng cả cơ sở ngoài quyền của bạn' })
       return

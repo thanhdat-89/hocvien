@@ -126,7 +126,8 @@ function AccountSection({ notify }: { notify: Notify }) {
 
   return (
     <div className="space-y-6">
-      <SectionHeader title="Tài khoản của tôi" description="Thông tin hiển thị và mật khẩu đăng nhập của bạn." />
+      <SectionHeader title="Tài khoản của tôi" description="Thông tin hiển thị, cơ sở làm việc và mật khẩu đăng nhập của bạn." />
+      <WorkingBranchPanel />
       <form onSubmit={saveProfile} className={`${panelClass} p-6 space-y-4`}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
@@ -181,6 +182,25 @@ function AccountSection({ notify }: { notify: Notify }) {
           </button>
         </div>
       </form>
+    </div>
+  )
+}
+
+/** Cơ sở làm việc: mọi thao tác xem / thêm học viên, lớp, học phí... diễn ra ở cơ sở này */
+function WorkingBranchPanel() {
+  const { branches, branchId, allowedBranchIds, setBranch } = useWorkspace()
+  const options = branches.filter(b => b.isActive && allowedBranchIds.includes(b.id))
+  const [saving, setSaving] = useState(false)
+  return (
+    <div className={`${panelClass} p-6 space-y-2`}>
+      <label htmlFor="working-branch" className={labelClass}>Cơ sở làm việc</label>
+      {options.length ? (
+        <select id="working-branch" className="input max-w-md" value={branchId} disabled={saving || options.length < 2}
+          onChange={async e => { setSaving(true); try { await setBranch(e.target.value) } finally { setSaving(false) } }}>
+          {options.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+      ) : <p className="text-sm text-error">Bạn chưa được phân công cơ sở nào. Liên hệ quản trị viên.</p>}
+      <p className="text-xs text-outline">Học viên, lớp, lịch, học phí bạn xem và thêm mới đều thuộc cơ sở này.{options.length === 1 ? ' Bạn chỉ được phân công một cơ sở.' : options.length > 1 ? ' Đổi cơ sở thì trang tải lại.' : ''}</p>
     </div>
   )
 }
@@ -331,8 +351,8 @@ function UserModal({ editing, self, onClose, onSaved }: { editing: AppUser | nul
     username: editing?.username ?? '', fullName: editing?.fullName ?? '', email: editing?.email ?? '',
     role: editing?.role ?? 'STAFF' as Role, password: '', teacherId: '',
   })
-  const { branches, branchId: viewing } = useWorkspace()
-  const [branchIds, setBranchIds] = useState<string[]>(editing?.branches.map(b => b.id) ?? (viewing ? [viewing] : branches.filter(b => b.isActive).slice(0, 1).map(b => b.id)))
+  const { branches, branchId: working } = useWorkspace()
+  const [branchIds, setBranchIds] = useState<string[]>(editing?.branches.map(b => b.id) ?? (working ? [working] : []))
   const [teachers, setTeachers] = useState<{ id: string; fullName: string; userId?: string | null }[]>([])
   const [saving, setSaving] = useState(false)
 
@@ -407,7 +427,7 @@ function UserModal({ editing, self, onClose, onSaved }: { editing: AppUser | nul
 // ─── Cơ sở ───────────────────────────────────────────────────
 
 function BranchesSection({ notify }: { notify: Notify }) {
-  const { branches, reload } = useWorkspace()
+  const { branches, reload, branchId, setBranch } = useWorkspace()
   const confirm = useConfirm()
   const [editing, setEditing] = useState<Branch | 'new' | null>(null)
 
@@ -424,7 +444,7 @@ function BranchesSection({ notify }: { notify: Notify }) {
 
   return (
     <div>
-      <SectionHeader title="Cơ sở" description="Mỗi học viên thuộc một cơ sở. Nhân viên, giáo viên làm việc ở các cơ sở được phân công (sửa trong mục Người dùng, Giáo viên)."
+      <SectionHeader title="Cơ sở" description="Mỗi học viên thuộc một cơ sở. Mỗi tài khoản làm việc tại một cơ sở (xem và thêm học viên, lớp... ở cơ sở đó), trong các cơ sở được phân công ở mục Người dùng, Giáo viên."
         action={<button className="btn-primary" onClick={() => setEditing('new')}>
           <span className="material-symbols-outlined" aria-hidden="true">add_business</span>Thêm cơ sở
         </button>} />
@@ -444,7 +464,7 @@ function BranchesSection({ notify }: { notify: Notify }) {
             {branches.map(b => (
               <tr key={b.id} className={b.isActive ? '' : 'opacity-60'}>
                 <td className="table-cell">
-                  <p className="font-semibold text-on-surface">{b.name}</p>
+                  <p className="font-semibold text-on-surface">{b.name}{b.id === branchId && <span className="ml-2 inline-block whitespace-nowrap rounded-full bg-primary/10 px-2 py-0.5 align-middle text-[11px] font-semibold text-primary">Đang làm việc</span>}</p>
                   <p className="text-xs text-outline">{[b.address, b.phone].filter(Boolean).join(' · ') || '—'}</p>
                 </td>
                 <td className="table-cell text-center text-sm">{b.counts?.students ?? '—'}</td>
@@ -453,6 +473,7 @@ function BranchesSection({ notify }: { notify: Notify }) {
                 <td className="table-cell"><span className={b.isActive ? 'status-badge-active' : 'status-badge-pending'}>{b.isActive ? 'Hoạt động' : 'Ngừng'}</span></td>
                 <td className="table-cell">
                   <div className="flex items-center justify-end gap-1">
+                    {b.isActive && b.id !== branchId && <IconButton icon="login" label="Làm việc tại cơ sở này" onClick={() => setBranch(b.id)} />}
                     <IconButton icon="edit_square" label="Chỉnh sửa" onClick={() => setEditing(b)} />
                     <IconButton icon={b.isActive ? 'block' : 'replay'} label={b.isActive ? 'Ngừng hoạt động' : 'Mở lại'} danger={b.isActive} onClick={() => toggleActive(b)} />
                   </div>
@@ -601,7 +622,7 @@ function RolloverModal({ source, years, onClose, onDone }: { source: SchoolYear;
   const [bumpGrades, setBumpGrades] = useState(true)
   const [graduateIds, setGraduateIds] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
-  const scopeName = branchId ? branches.find(b => b.id === branchId)?.name : 'tất cả cơ sở'
+  const scopeName = branches.find(b => b.id === branchId)?.name
 
   useEffect(() => {
     if (!targetId) return
@@ -676,7 +697,7 @@ function RolloverModal({ source, years, onClose, onDone }: { source: SchoolYear;
                     <tr key={c.id} className={c.blocked ? 'opacity-60' : ''}>
                       <td className="px-3 py-2">
                         <p className="font-semibold text-on-surface">{c.name}</p>
-                        <p className="text-xs text-outline">{[!branchId && c.branchName, c.teacherName, `${c.students} học viên`, `${c.schedules} lịch/tuần`, c.tuitionRate ? `${new Intl.NumberFormat('vi-VN').format(c.tuitionRate)}đ/buổi` : null].filter(Boolean).join(' · ')}</p>
+                        <p className="text-xs text-outline">{[c.teacherName, `${c.students} học viên`, `${c.schedules} lịch/tuần`, c.tuitionRate ? `${new Intl.NumberFormat('vi-VN').format(c.tuitionRate)}đ/buổi` : null].filter(Boolean).join(' · ')}</p>
                       </td>
                       {c.blocked ? <td colSpan={3} className="px-3 py-2 text-xs text-amber-800">{c.blocked}</td> : <>
                         <td className="px-3 py-2">

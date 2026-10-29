@@ -1,9 +1,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useState, ReactNode } from 'react'
-import api, { BRANCH_KEY, SCHOOL_YEAR_KEY } from '../services/api'
+import api, { SCHOOL_YEAR_KEY } from '../services/api'
 
-// ─── Cơ sở & năm học đang xem ─────────────────────────────────
-// Lựa chọn nằm trong localStorage; services/api gửi kèm mọi request (X-Branch-Id, X-School-Year-Id).
-// Đổi lựa chọn thì tải lại trang để mọi trang đọc lại dữ liệu theo phạm vi mới.
+// ─── Cơ sở làm việc & năm học đang xem ────────────────────────
+// Cơ sở làm việc lưu ở tài khoản (Cài đặt → Tài khoản của tôi), server tự áp cho mọi request.
+// Năm học nằm trong localStorage, services/api gửi kèm (X-School-Year-Id). Đổi một trong hai thì tải lại trang.
 
 export interface Branch { id: string; name: string; address?: string | null; phone?: string | null; isActive: boolean
   counts?: { students: number; classes: number; users: number; teachers: number } }
@@ -12,42 +12,48 @@ export interface SchoolYear { id: string; name: string; startDate: string; endDa
 interface WorkspaceValue {
   branches: Branch[]
   years: SchoolYear[]
-  /** '' = mọi cơ sở được phép */
+  /** Cơ sở đang làm việc ('' khi chưa được phân công cơ sở nào) */
   branchId: string
+  /** Các cơ sở được làm việc (chọn cơ sở làm việc, cơ sở áp dụng ngày nghỉ) */
+  allowedBranchIds: string[]
   /** Năm học đang xem (mặc định năm đang chạy) */
   year: SchoolYear | null
-  setBranch: (id: string) => void
+  setBranch: (id: string) => Promise<void>
   setYear: (id: string) => void
   reload: () => Promise<void>
 }
 
 const WorkspaceContext = createContext<WorkspaceValue | null>(null)
 const read = (key: string) => { try { return localStorage.getItem(key) || '' } catch { return '' } }
-const choose = (key: string, value: string) => {
-  try { if (value) localStorage.setItem(key, value); else localStorage.removeItem(key) } catch { /* bỏ qua */ }
+const chooseYear = (value: string) => {
+  try { if (value) localStorage.setItem(SCHOOL_YEAR_KEY, value); else localStorage.removeItem(SCHOOL_YEAR_KEY) } catch { /* bỏ qua */ }
   window.location.reload()
 }
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [branches, setBranches] = useState<Branch[]>([])
   const [years, setYears] = useState<SchoolYear[]>([])
-  const branchId = read(BRANCH_KEY), yearId = read(SCHOOL_YEAR_KEY)
+  const [branchId, setBranchId] = useState('')
+  const [allowedBranchIds, setAllowed] = useState<string[]>([])
+  const yearId = read(SCHOOL_YEAR_KEY)
 
   const reload = useCallback(async () => {
-    const [b, y] = await Promise.all([api.get<Branch[]>('/branches'), api.get<SchoolYear[]>('/school-years')])
-    setBranches(b.data); setYears(y.data)
-    // Lựa chọn cũ không còn hợp lệ (bị gỡ phân công, cơ sở ngừng, năm bị xoá): về mặc định
-    if (branchId && !b.data.some(x => x.id === branchId && x.isActive)) choose(BRANCH_KEY, '')
-    else if (yearId && !y.data.some(x => x.id === yearId)) choose(SCHOOL_YEAR_KEY, '')
-  }, [branchId, yearId])
+    const [b, y, me] = await Promise.all([api.get<Branch[]>('/branches'), api.get<SchoolYear[]>('/school-years'),
+      api.get<{ workingBranchId: string | null; allowedBranchIds: string[] }>('/auth/me')])
+    setBranches(b.data); setYears(y.data); setBranchId(me.data.workingBranchId ?? ''); setAllowed(me.data.allowedBranchIds)
+    // Năm học đã chọn bị xoá: về năm đang chạy
+    if (yearId && !y.data.some(x => x.id === yearId)) chooseYear('')
+  }, [yearId])
   useEffect(() => { reload().catch(() => {}) }, [reload])
+  // Bỏ lựa chọn cơ sở cũ trên trình duyệt (trước đây chọn ở thanh trên cùng)
+  useEffect(() => { try { localStorage.removeItem('qlhv.branch') } catch { /* bỏ qua */ } }, [])
 
   const year = years.find(y => y.id === yearId) ?? years.find(y => y.status === 'CURRENT') ?? null
   return (
     <WorkspaceContext.Provider value={{
-      branches, years, branchId, year, reload,
-      setBranch: id => choose(BRANCH_KEY, id),
-      setYear: id => choose(SCHOOL_YEAR_KEY, years.find(y => y.id === id)?.status === 'CURRENT' ? '' : id),
+      branches, years, branchId, allowedBranchIds, year, reload,
+      setBranch: async id => { await api.put('/auth/me', { defaultBranchId: id }); window.location.reload() },
+      setYear: id => chooseYear(years.find(y => y.id === id)?.status === 'CURRENT' ? '' : id),
     }}>
       {children}
     </WorkspaceContext.Provider>

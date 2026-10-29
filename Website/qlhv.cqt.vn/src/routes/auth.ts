@@ -2,7 +2,8 @@ import { Router, Request, Response, NextFunction } from 'express'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { prisma, api } from '../lib/db'
-import { authenticate } from '../middleware/auth'
+import { allowedBranchIds, authenticate, forgetAccount } from '../middleware/auth'
+import { currentScope } from '../lib/scope'
 import { AuthRequest } from '../types'
 
 const router = Router()
@@ -68,21 +69,30 @@ router.get('/me', authenticate, async (req: AuthRequest, res: Response, next: Ne
     if (!user) { res.status(404).json({ message: 'Không tìm thấy tài khoản' }); return }
 
     const { passwordHash: _, teacher, ...safeUser } = user
-    res.json(api({ ...safeUser, teacherId: teacher?.id }))
+    const scope = currentScope()
+    // workingBranchId: cơ sở đang làm việc thực tế (cơ sở mặc định nếu còn hợp lệ, nếu không thì cơ sở đầu tiên được phép)
+    res.json(api({ ...safeUser, teacherId: teacher?.id, workingBranchId: scope?.branchIds?.[0] ?? null, allowedBranchIds: scope?.allowedBranchIds ?? [] }))
   } catch (err) {
     next(err)
   }
 })
 
-// PUT /api/auth/me — họ tên, email của chính mình
+// PUT /api/auth/me — họ tên, email, cơ sở làm việc của chính mình
 router.put('/me', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { fullName, email } = req.body as { fullName?: string; email?: string | null }
-    if (!fullName?.trim()) { res.status(400).json({ message: 'Vui lòng nhập họ tên' }); return }
+    const { fullName, email, defaultBranchId } = req.body as { fullName?: string; email?: string | null; defaultBranchId?: string }
+    if (fullName !== undefined && !fullName.trim()) { res.status(400).json({ message: 'Vui lòng nhập họ tên' }); return }
+    if (defaultBranchId !== undefined) {
+      const assigned = await prisma.userBranch.findMany({ where: { userId: req.user!.userId }, select: { branchId: true } })
+      if (typeof defaultBranchId !== 'string' || !(await allowedBranchIds(req.user!.role, assigned.map(b => b.branchId))).includes(defaultBranchId)) {
+        res.status(403).json({ message: 'Không có quyền làm việc tại cơ sở này' }); return
+      }
+    }
     const user = await prisma.user.update({
       where: { id: req.user!.userId }, include: withTeacher,
-      data: { fullName: fullName.trim(), email: email?.trim() || null },
+      data: { fullName: fullName?.trim(), email: email === undefined ? undefined : email?.trim() || null, defaultBranchId },
     })
+    forgetAccount(user.id)
     const { passwordHash: _, teacher, ...safeUser } = user
     res.json(api({ ...safeUser, teacherId: teacher?.id }))
   } catch (err) {

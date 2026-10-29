@@ -1,12 +1,14 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 
 // ─── Phạm vi cơ sở của request ────────────────────────────────
-// authenticate() đặt phạm vi cho cả request; Prisma client (lib/db) tự thêm điều kiện cơ sở vào mọi truy vấn
+// authenticate() đặt phạm vi cho cả request (cơ sở làm việc của tài khoản); Prisma client (lib/db) tự thêm điều kiện cơ sở vào mọi truy vấn
 // của học viên, lớp và dữ liệu con. Không có phạm vi (cron, webhook, trang phụ huynh) = không lọc.
 
 export interface Scope {
-  /** null = mọi cơ sở (ADMIN không chọn cơ sở cụ thể) */
+  /** Cơ sở được lọc: cơ sở làm việc của tài khoản; null = không lọc (chỉ dùng trong test / tác vụ hệ thống) */
   branchIds: string[] | null
+  /** Mọi cơ sở tài khoản được làm việc (chọn cơ sở áp dụng ngày nghỉ, đổi cơ sở làm việc) */
+  allowedBranchIds?: string[]
   /** Năm học đang xem; null = năm học đang chạy. Chỉ áp cho danh sách lớp, không áp ở tầng Prisma. */
   schoolYearId: string | null
 }
