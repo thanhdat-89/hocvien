@@ -49,3 +49,27 @@ select has_database_privilege('"'"'htt_web'"'"','"'"'qlhv'"'"','"'"'CONNECT'"'"'
 ```
 
 Kết quả đúng: `f|f|qlhv_app`. Luật pg_hba ngăn `qlhv_app` vào `hocthemtoan` có thể kiểm tra bằng `select * from pg_hba_file_rules where '"'"'qlhv_app'"'"' = any(user_name)`.
+
+## Sao lưu lên Google Drive (mã hoá)
+
+Từ 29/10/2026, `qlhv-backup` (02:30 mỗi đêm) sau khi dump còn đẩy bản mới lên Google Drive, thư mục `QLHV-backup`,
+giữ 30 ngày. File trên Drive (`qlhv-YYYY-MM-DD.dump.bin`) được mã hoá bằng rclone crypt; không có mật khẩu thì không đọc được.
+
+- Cấu hình rclone (chỉ root đọc): `/root/.config/rclone/rclone.conf`, gồm remote `qlhv-gdrive` (Drive, quyền `drive.file`:
+  chỉ thấy file do rclone tạo) và `qlhv-gdrive-crypt` (mã hoá, trỏ vào `qlhv-gdrive:QLHV-backup`).
+- Mật khẩu mã hoá: `QLHV_BACKUP_PASSPHRASE` trong `/root/qlhv-secrets.env`. **Phải cất thêm một bản ngoài VPS**
+  (trình quản lý mật khẩu): VPS mất thì chỉ còn mật khẩu này giải mã được bản trên Drive.
+- Đẩy lỗi (ví dụ quyền Google bị thu hồi): bản trên VPS vẫn có, chuông thông báo của QLHV hiện cảnh báo "Sao lưu",
+  `journalctl -u qlhv-backup.service` có chi tiết. Cấp lại quyền: chạy `rclone authorize "drive"` trên máy có trình duyệt
+  rồi thay dòng `token = ...` của `[qlhv-gdrive]` trong file cấu hình.
+
+Khôi phục từ Drive trên một máy bất kỳ có rclone (không cần VPS cũ):
+
+```bash
+rclone config create gd drive scope=drive.file                     # đăng nhập đúng tài khoản Google đã dùng
+rclone config create gdc crypt remote=gd:QLHV-backup filename_encryption=off \
+  directory_name_encryption=false password="$(rclone obscure 'MẬT_KHẨU_ĐÃ_CẤT')"
+rclone ls gdc:                                                      # danh sách bản sao lưu
+rclone copy gdc:qlhv-2026-10-29.dump .                              # tải và giải mã một bản
+pg_restore --list qlhv-2026-10-29.dump | head                       # kiểm tra trước khi khôi phục
+```

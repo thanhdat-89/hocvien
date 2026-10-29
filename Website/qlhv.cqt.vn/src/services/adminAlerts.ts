@@ -5,7 +5,7 @@ import { prisma, newId } from '../lib/db'
 // Việc cần người xử lý: chuyển khoản chưa khớp phiếu, hoá đơn MISA lỗi, nhắc học phí quá số lần...
 // Gắn cơ sở theo học viên (data.studentId) hoặc lớp (data.classId) liên quan; không xác định được thì hiện ở mọi cơ sở.
 
-export type AlertType = 'sepay_unmatched' | 'misa_invoice_failed' | 'overdue_reminder_cap' | 'class_audit'
+export type AlertType = 'sepay_unmatched' | 'misa_invoice_failed' | 'overdue_reminder_cap' | 'class_audit' | 'backup_failed'
 
 export async function studentBranchId(studentId: unknown): Promise<string | null> {
   if (typeof studentId !== 'string' || !studentId) return null

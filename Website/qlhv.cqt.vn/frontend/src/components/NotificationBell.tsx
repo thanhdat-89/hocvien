@@ -11,12 +11,14 @@ const TYPE: Record<string, { icon: string; label: string; tone: string }> = {
   misa_invoice_failed: { icon: 'receipt_long', label: 'Hoá đơn MISA', tone: 'text-error bg-error-container/30' },
   overdue_reminder_cap: { icon: 'schedule', label: 'Học phí quá hạn', tone: 'text-primary bg-primary/10' },
   class_audit: { icon: 'fact_check', label: 'Kiểm tra lớp', tone: 'text-amber-700 bg-amber-100' },
+  backup_failed: { icon: 'cloud_off', label: 'Sao lưu', tone: 'text-error bg-error-container/30' },
 }
 const POLL_MS = 60_000
 
 /** Trang cần mở để xử lý cảnh báo */
 function targetOf(alert: Alert) {
   if (alert.type === 'misa_invoice_failed') return '/tuition/invoices'
+  if (alert.type === 'backup_failed') return '/settings/integrations'
   if (alert.data?.studentId) return `/students/${alert.data.studentId}`
   return alert.type === 'class_audit' ? '/classes' : '/tuition'
 }
