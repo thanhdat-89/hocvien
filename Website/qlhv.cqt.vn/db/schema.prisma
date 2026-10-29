@@ -54,6 +54,12 @@ enum ClassStatus {
   CLOSED
 }
 
+enum SchoolYearStatus {
+  UPCOMING
+  CURRENT
+  CLOSED
+}
+
 enum EnrollmentStatus {
   ACTIVE
   DROPPED
@@ -127,6 +133,7 @@ model User {
   paymentsReceived   Payment[]
   promotionsApproved StudentPromotion[]
   materials          Material[]
+  branches           UserBranch[]
 
   @@map("users")
 }
@@ -153,8 +160,79 @@ model Teacher {
   sessions           Session[]
   attendances        TeacherAttendance[] @relation("attendanceTeacher")
   substituteSessions TeacherAttendance[] @relation("attendanceSubstitute")
+  branches           TeacherBranch[]
 
   @@map("teachers")
+}
+
+// ─── Cơ sở & năm học ─────────────────────────────────────────
+model Branch {
+  id        String   @id
+  name      String   @unique
+  address   String?
+  phone     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  students Student[]
+  classes  Class[]
+  leads    Lead[]
+  users    UserBranch[]
+  teachers TeacherBranch[]
+  holidays HolidayBranch[]
+
+  @@map("branches")
+}
+
+/// Dùng chung cho mọi cơ sở; ADMIN tự đặt ngày bắt đầu / kết thúc.
+/// Ràng buộc trong migration: tối đa một năm CURRENT; endDate >= startDate.
+model SchoolYear {
+  id        String           @id
+  name      String           @unique
+  startDate DateTime         @db.Date
+  endDate   DateTime         @db.Date
+  status    SchoolYearStatus @default(UPCOMING)
+  createdAt DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime         @updatedAt @db.Timestamptz(3)
+
+  classes Class[]
+
+  @@map("school_years")
+}
+
+/// Nhân viên / giáo viên có tài khoản được phân công cơ sở (ADMIN xem mọi cơ sở).
+model UserBranch {
+  userId   String
+  branchId String
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@id([userId, branchId])
+  @@map("user_branches")
+}
+
+model TeacherBranch {
+  teacherId String
+  branchId  String
+
+  teacher Teacher @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  branch  Branch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@id([teacherId, branchId])
+  @@map("teacher_branches")
+}
+
+model HolidayBranch {
+  holidayId String
+  branchId  String
+
+  holiday Holiday @relation(fields: [holidayId], references: [id], onDelete: Cascade)
+  branch  Branch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@id([holidayId, branchId])
+  @@map("holiday_branches")
 }
 
 // ─── Học viên & phụ huynh ────────────────────────────────────
@@ -171,9 +249,12 @@ model Student {
   status         StudentStatus @default(ACTIVE)
   avatarUrl      String?
   notes          String?
+  /// Mỗi học viên thuộc đúng một cơ sở; hồ sơ giữ qua các năm học.
+  branchId       String
   createdAt      DateTime      @default(now()) @db.Timestamptz(3)
   updatedAt      DateTime      @updatedAt @db.Timestamptz(3)
 
+  branch          Branch              @relation(fields: [branchId], references: [id], onDelete: Restrict)
   parents         Parent[]
   enrollments     ClassEnrollment[]
   privateSessions PrivateSession[]
@@ -184,13 +265,14 @@ model Student {
   monthlyScores   MonthlyScore[]
   reviews         StudentReview[]
 
+  @@index([branchId, status])
   @@index([status, gradeLevel])
   @@index([fullName])
   @@map("students")
 }
 
 model Parent {
-  id               String        @id
+  id               String   @id
   studentId        String
   fullName         String
   /// Chữ tự do do người dùng chọn/nhập ("Bố", "Mẹ", "Ông/Bà", "PHỤ HUYNH"...), hiển thị nguyên văn.
@@ -198,8 +280,8 @@ model Parent {
   phone            String?
   zalo             String?
   email            String?
-  isPrimaryContact Boolean       @default(false)
-  createdAt        DateTime      @default(now()) @db.Timestamptz(3)
+  isPrimaryContact Boolean  @default(false)
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
 
   student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
@@ -257,11 +339,16 @@ model Class {
   endDate            DateTime?   @db.Date
   status             ClassStatus @default(ACTIVE)
   notes              String?
+  /// Lớp thuộc một cơ sở và một năm học; sang năm mới tạo lớp mới, lớp cũ giữ làm lịch sử.
+  branchId           String
+  schoolYearId       String
   /// Denorm có chủ đích (đếm nhanh cho danh sách); cập nhật trong cùng transaction ghi danh.
   activeStudentCount Int         @default(0)
   createdAt          DateTime    @default(now()) @db.Timestamptz(3)
   updatedAt          DateTime    @updatedAt @db.Timestamptz(3)
 
+  branch            Branch              @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  schoolYear        SchoolYear          @relation(fields: [schoolYearId], references: [id], onDelete: Restrict)
   subject           Subject?            @relation(fields: [subjectId], references: [id], onDelete: SetNull)
   teacher           Teacher?            @relation(fields: [teacherId], references: [id], onDelete: SetNull)
   rateHistory       ClassTuitionRate[]
@@ -273,6 +360,7 @@ model Class {
   promotions        StudentPromotion[]
   tuitionRecords    TuitionRecord[]
 
+  @@index([branchId, schoolYearId, status])
   @@index([status])
   @@map("classes")
 }
@@ -384,6 +472,9 @@ model Holiday {
   dates       DateTime[] @db.Date
   createdAt   DateTime   @default(now()) @db.Timestamptz(3)
 
+  /// Các cơ sở áp dụng kỳ nghỉ
+  branches HolidayBranch[]
+
   @@map("holidays")
 }
 
@@ -449,22 +540,22 @@ model Promotion {
 }
 
 model StudentPromotion {
-  id           String        @id
-  studentId    String
+  id             String        @id
+  studentId      String
   /// NULL = áp cho học riêng (Firestore classId "private").
-  classId      String?
+  classId        String?
   /// Tên lớp lúc áp khuyến mãi (ảnh chụp); NULL → dùng tên lớp hiện tại.
-  className    String?
-  promotionId  String
+  className      String?
+  promotionId    String
   /// Ảnh chụp khuyến mãi lúc áp — giữ nguyên dù khuyến mãi gốc bị sửa.
   promotionName  String
   promotionType  PromotionType
   promotionValue Int
-  appliedFrom  DateTime      @db.Date
-  appliedTo    DateTime?     @db.Date
-  approvedById String?
-  notes        String?
-  createdAt    DateTime      @default(now()) @db.Timestamptz(3)
+  appliedFrom    DateTime      @db.Date
+  appliedTo      DateTime?     @db.Date
+  approvedById   String?
+  notes          String?
+  createdAt      DateTime      @default(now()) @db.Timestamptz(3)
 
   student    Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
   class      Class?    @relation(fields: [classId], references: [id], onDelete: Cascade)
@@ -607,11 +698,11 @@ model Material {
 // Hoá đơn là chứng từ: giữ nguyên ảnh chụp buyer/source/template dạng JSONB.
 
 model MisaInvoice {
-  id               String   @id
+  id               String    @id
   refId            String
   status           String // NOT_CREATED | CREATING | OUTCOME_UNKNOWN | FAILED | DRAFT_CREATED | ISSUED | SENT_TO_TAX | REMOVED_FROM_MISA
-  revision         Int      @default(0)
-  invoiceDate      DateTime @db.Date
+  revision         Int       @default(0)
+  invoiceDate      DateTime  @db.Date
   invoiceNumber    String?
   invoiceCode      String?
   transactionId    String?
@@ -627,8 +718,8 @@ model MisaInvoice {
   buyer            Json
   restoredAt       DateTime? @db.Timestamptz(3)
   createdBy        String
-  createdAt        DateTime @db.Timestamptz(3)
-  updatedAt        DateTime @db.Timestamptz(3)
+  createdAt        DateTime  @db.Timestamptz(3)
+  updatedAt        DateTime  @db.Timestamptz(3)
 
   @@index([refId])
   @@index([recordIds], type: Gin)
@@ -650,11 +741,11 @@ model MisaInvoiceReplacement {
 
 /// Luồng cũ (meInvoice draft) — còn được worker cũ đọc.
 model InvoiceDraft {
-  id               String    @id
+  id               String   @id
   refId            String
   status           String
-  revision         Int       @default(0)
-  invoiceDate      DateTime  @db.Date
+  revision         Int      @default(0)
+  invoiceDate      DateTime @db.Date
   source           Json
   template         Json
   buyer            Json
@@ -664,26 +755,26 @@ model InvoiceDraft {
   lastErrorMessage String?
   createdBy        String
   updatedBy        String?
-  createdAt        DateTime  @db.Timestamptz(3)
-  updatedAt        DateTime  @db.Timestamptz(3)
+  createdAt        DateTime @db.Timestamptz(3)
+  updatedAt        DateTime @db.Timestamptz(3)
 
   @@map("invoice_drafts")
 }
 
 model InvoiceOutbox {
-  id              String   @id
+  id              String    @id
   draftId         String
   tuitionRecordId String
   operation       String
   status          String
   revision        Int
-  attempts        Int      @default(0)
-  idempotencyKey  String   @unique
+  attempts        Int       @default(0)
+  idempotencyKey  String    @unique
   leaseToken      String?
   leaseUntil      DateTime? @db.Timestamptz(3)
   nextRetryAt     DateTime? @db.Timestamptz(3)
-  createdAt       DateTime @db.Timestamptz(3)
-  updatedAt       DateTime @db.Timestamptz(3)
+  createdAt       DateTime  @db.Timestamptz(3)
+  updatedAt       DateTime  @db.Timestamptz(3)
 
   @@index([status, nextRetryAt])
   @@map("invoice_outbox")
@@ -692,11 +783,11 @@ model InvoiceOutbox {
 /// Đối soát hoá đơn cuối tháng — 1 dòng mỗi kỳ "YYYY-MM". Máy trạng thái ghi nhiều trường theo từng bước
 /// (thống kê, nội dung báo cáo Telegram, lỗi...) → giữ trong `data`; cột riêng chỉ cho trạng thái và lease.
 model MonthlyInvoiceRun {
-  id         String  @id // "YYYY-MM"
+  id         String @id // "YYYY-MM"
   status     String
-  leaseToken String  @default("")
+  leaseToken String @default("")
   /// Epoch ms; 0 = không có lease.
-  leaseUntil BigInt  @default(0)
+  leaseUntil BigInt @default(0)
   data       Json
 
   items MonthlyInvoiceRunItem[]
@@ -772,20 +863,20 @@ model AdminAlert {
 }
 
 model Notification {
-  id          String    @id
-  title       String
-  content     String
-  type        String // GENERAL | PAYMENT_DUE | SCHEDULE_CHANGE | EXAM_REMINDER
-  targetType  String // ALL | CLASS | STUDENT
-  targetId    String?
-  sendViaZalo Boolean   @default(false)
+  id               String    @id
+  title            String
+  content          String
+  type             String // GENERAL | PAYMENT_DUE | SCHEDULE_CHANGE | EXAM_REMINDER
+  targetType       String // ALL | CLASS | STUDENT
+  targetId         String?
+  sendViaZalo      Boolean   @default(false)
   /// Đánh dấu chờ gửi khi Zalo OA chưa cấu hình; thống kê lần gửi gần nhất.
-  zaloQueued       Boolean @default(false)
+  zaloQueued       Boolean   @default(false)
   zaloSentCount    Int?
   zaloTotalTargets Int?
-  sentAt      DateTime? @db.Timestamptz(3)
-  createdById String?
-  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  sentAt           DateTime? @db.Timestamptz(3)
+  createdById      String?
+  createdAt        DateTime  @default(now()) @db.Timestamptz(3)
 
   @@map("notifications")
 }
@@ -805,8 +896,12 @@ model Lead {
   status         String
   chatStep       Int      @default(0)
   note           String?
+  /// Cơ sở phụ trách; NULL = chưa phân cơ sở.
+  branchId       String?
   createdAt      DateTime @db.Timestamptz(3)
   updatedAt      DateTime @db.Timestamptz(3)
+
+  branch Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
 
   @@map("leads")
 }

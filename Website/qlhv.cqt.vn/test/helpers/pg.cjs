@@ -24,10 +24,19 @@ const day = value => new Date(`${value}T00:00:00Z`)
 
 // ─── Dữ liệu mẫu tối thiểu ───────────────────────────────────
 
+// Cơ sở và năm học mặc định (cùng ID với migration); reset() xoá cả hai nên tạo lại khi cần.
+const BRANCH_ID = 'cqt263branch00000001', SCHOOL_YEAR_ID = 'schoolyear2026202700'
+async function context() {
+  await prisma.branch.upsert({ where: { id: BRANCH_ID }, update: {}, create: { id: BRANCH_ID, name: 'CQT 263' } })
+  await prisma.schoolYear.upsert({ where: { id: SCHOOL_YEAR_ID }, update: {},
+    create: { id: SCHOOL_YEAR_ID, name: '2026–2027', startDate: day('2026-01-01'), endDate: day('2027-06-30'), status: 'CURRENT' } })
+  return { branchId: BRANCH_ID, schoolYearId: SCHOOL_YEAR_ID }
+}
+
 const seed = {
   user: (data = {}) => prisma.user.create({ data: { id: newId(), username: newId(), passwordHash: 'x', role: 'ADMIN', fullName: 'Quản trị', ...data } }),
-  student: (data = {}) => prisma.student.create({ data: { id: newId(), fullName: 'Học viên', enrollmentDate: day('2026-01-01'), ...data } }),
-  klass: (data = {}) => prisma.class.create({ data: { id: newId(), name: 'Toán', ...data } }),
+  student: async (data = {}) => prisma.student.create({ data: { id: newId(), fullName: 'Học viên', enrollmentDate: day('2026-01-01'), branchId: (await context()).branchId, ...data } }),
+  klass: async (data = {}) => prisma.class.create({ data: { id: newId(), name: 'Toán', ...(await context()), ...data } }),
   enrollment: ({ enrollmentDate = '2026-01-01', dropDate, ...data }) => prisma.classEnrollment.create({
     data: { id: newId(), enrollmentDate: day(enrollmentDate), dropDate: dropDate ? day(dropDate) : null, ...data },
   }),
@@ -58,4 +67,4 @@ function routeHandler(router, routePath, method) {
   }
 }
 
-module.exports = { prisma, reset, seed, day, routeHandler, newId }
+module.exports = { prisma, reset, seed, day, routeHandler, newId, context }

@@ -17,6 +17,7 @@ import { activityContext } from '../middleware/activityContext'
 import { getMissingPrivateStudents, validPeriod } from '../services/readViews'
 import { getStudentPage } from '../services/studentReadView'
 import { AuthRequest } from '../types'
+import { currentSchoolYearId, defaultBranchId } from '../lib/branchContext'
 import type { ClassEnrollment } from '../types/models'
 
 const router = Router()
@@ -94,8 +95,9 @@ router.post('/bulk', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthR
     }
     if (!students?.length) { res.status(400).json({ message: 'Danh sách rỗng' }); return }
 
-    // Tra lớp theo tên (không phân biệt hoa thường), nạp một lần
-    const classes = await prisma.class.findMany({ select: { id: true, name: true } })
+    // Tra lớp theo tên (không phân biệt hoa thường) trong cơ sở và năm học hiện tại, nạp một lần
+    const branchId = await defaultBranchId()
+    const classes = await prisma.class.findMany({ where: { branchId, schoolYearId: await currentSchoolYearId() }, select: { id: true, name: true } })
     const classByName = new Map(classes.map(c => [c.name.trim().toLowerCase(), c]))
 
     const created: string[] = []
@@ -127,6 +129,7 @@ router.post('/bulk', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthR
               notes: s.notes || null,
               enrollmentDate,
               status: 'ACTIVE',
+              branchId,
             },
           })
           if (s.parentName?.trim()) {
@@ -211,6 +214,7 @@ router.post('/', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthReque
   try {
     const { fullName, dateOfBirth, gender, school, gradeLevel, address, notes, parents } = req.body
     const studentId = newId()
+    const branchId = await defaultBranchId()
 
     const [student] = await prisma.$transaction([
       prisma.student.create({
@@ -223,6 +227,7 @@ router.post('/', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthReque
           gradeLevel: gradeLevel ? Number(gradeLevel) : null,
           address: address || null,
           enrollmentDate: toDay(today())!,
+          branchId,
           status: 'ACTIVE',
           notes: notes || null,
         },

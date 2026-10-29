@@ -7,6 +7,7 @@ import { s } from '../lib/params'
 import { authenticate, requireRole } from '../middleware/auth'
 import { activityContext } from '../middleware/activityContext'
 import { AuthRequest } from '../types'
+import { currentSchoolYearId, defaultBranchId } from '../lib/branchContext'
 import { applyClassChange, prepareClassChange, renameClass } from '../services/classChange'
 import { auditClassTuition } from '../services/classIntegrityAudit'
 
@@ -115,6 +116,8 @@ router.post('/', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Re
         gradeLevel: gradeLevel ? Number(gradeLevel) : null,
         startDate: toDay(startDate),
         endDate: toDay(endDate),
+        branchId: await defaultBranchId(),
+        schoolYearId: await currentSchoolYearId(),
       },
       include: classInclude,
     })

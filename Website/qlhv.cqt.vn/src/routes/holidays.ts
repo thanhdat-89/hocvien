@@ -3,6 +3,7 @@ import { prisma, api, newId, toDay } from '../lib/db'
 import { s } from '../lib/params'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
+import { defaultBranchId } from '../lib/branchContext'
 
 const router = Router()
 router.use(authenticate)
@@ -46,9 +47,10 @@ router.post('/', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Re
     const range = { sessionDate: { gte: toDay(start)!, lte: toDay(end)! }, status: 'SCHEDULED' as const }
 
     // Tạo ngày nghỉ và huỷ các buổi SCHEDULED trong khoảng — cùng một transaction.
+    const branchId = await defaultBranchId()
     const [holiday, sessions, privates] = await prisma.$transaction([
       prisma.holiday.create({
-        data: { id: newId(), name, startDate: toDay(start)!, endDate: toDay(end)!, dates, description: description || '' },
+        data: { id: newId(), name, startDate: toDay(start)!, endDate: toDay(end)!, dates, description: description || '', branches: { create: { branchId } } },
       }),
       prisma.session.updateMany({ where: range, data: { status: 'CANCELLED', cancelReason } }),
       prisma.privateSession.updateMany({ where: range, data: { status: 'CANCELLED', cancelReason } }),
