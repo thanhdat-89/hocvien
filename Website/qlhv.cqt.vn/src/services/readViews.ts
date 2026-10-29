@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { prisma } from '../lib/db'
+import { scopeKey } from '../lib/scope'
 
 export type ViewKind = 'privateMissing' | 'invoices' | 'tuition' | 'studentsIndex' | 'dashboard'
 const MAX_AGE_MS = 15 * 60 * 1000
@@ -17,20 +18,22 @@ export async function invalidateReadView(kind: ViewKind) {
 
 export async function readView<T>(kind: ViewKind, key: string, build: () => Promise<T>, clientVersion?: string, force = false, maxAge = MAX_AGE_MS): Promise<{ data?: T; version: string; unchanged?: boolean }> {
   const revision = revisionOf(kind)
-  const [clientRevision, clientTime] = (clientVersion || '').split(':')
-  if (!force && clientRevision === revision && Date.now() - Number(clientTime) < maxAge && Number(clientTime) <= Date.now()) {
+  // Dữ liệu khác nhau theo cơ sở / năm học: phiên bản và cache gắn với phạm vi của request
+  const scope = encodeURIComponent(scopeKey())
+  const [clientRevision, clientTime, clientScope] = (clientVersion || '').split(':')
+  if (!force && clientRevision === revision && clientScope === scope && Date.now() - Number(clientTime) < maxAge && Number(clientTime) <= Date.now()) {
     return { unchanged: true, version: clientVersion! }
   }
-  const cacheKey = `${kind}-${key}`
+  const cacheKey = `${kind}-${scope}-${key}`
   const cached = cache.get(cacheKey)
   if (!force && cached && cached.revision === revision && Date.now() - cached.generatedAt < maxAge) {
-    return { data: cached.data as T, version: `${revision}:${cached.generatedAt}` }
+    return { data: cached.data as T, version: `${revision}:${cached.generatedAt}:${scope}` }
   }
   const data = await build()
   const generatedAt = Date.now()
   // A concurrent mutation must prevent this snapshot from being reused.
   if (revisionOf(kind) === revision) cache.set(cacheKey, { revision, generatedAt, data })
-  return { data, version: `${revision}:${generatedAt}` }
+  return { data, version: `${revision}:${generatedAt}:${scope}` }
 }
 
 export function validPeriod(month: number, year: number) {

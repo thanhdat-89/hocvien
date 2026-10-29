@@ -42,9 +42,19 @@ export async function readInvoice(id: string, tx: Tx = prisma) {
   return row ? invoiceDoc(row) : null
 }
 
+/** Cơ sở của hoá đơn = cơ sở của học viên có phiếu được gộp (hoặc học viên trong `source`). */
+async function invoiceBranchId(ids: string[], doc: any, tx: Tx): Promise<string | null> {
+  const record = await tx.tuitionRecord.findFirst({ where: { id: { in: ids } }, select: { student: { select: { branchId: true } } } })
+  if (record) return record.student.branchId
+  const studentId = doc?.source?.studentId
+  return typeof studentId === 'string'
+    ? (await tx.student.findUnique({ where: { id: studentId }, select: { branchId: true } }))?.branchId ?? null
+    : null
+}
+
 /** Ghi (thay toàn bộ) bản sao hoá đơn dưới từng phiếu — tương đương `doc(id).set(invoice)` cho mỗi id. */
 export async function saveInvoiceCopies(ids: string[], doc: any, tx: Tx = prisma) {
-  const data = invoiceData(doc) as Prisma.MisaInvoiceUncheckedCreateInput
+  const data = { ...invoiceData(doc), branchId: await invoiceBranchId(ids, doc, tx) } as Prisma.MisaInvoiceUncheckedCreateInput
   for (const id of ids) {
     await tx.misaInvoice.upsert({ where: { id }, create: { ...data, id }, update: data })
   }

@@ -1,14 +1,97 @@
 import { randomInt } from 'node:crypto'
 import { PrismaClient } from '@prisma/client'
+import { currentScope } from './scope'
+import { createError } from '../middleware/errorHandler'
 
 // ─── Prisma client (PostgreSQL `qlhv`) ────────────────────────
 // Một client cho cả tiến trình; khi chạy dev bằng tsx watch, giữ lại qua các lần nạp lại module.
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient }
-export const prisma = globalForPrisma.prisma ?? new PrismaClient()
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
+const base = globalForPrisma.prisma ?? new PrismaClient()
+if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = base
 
-export type Tx = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0]
+// ─── Lọc theo cơ sở ───────────────────────────────────────────
+// Khi request có phạm vi cơ sở (lib/scope), mọi truy vấn của các model dưới đây được thêm điều kiện cơ sở,
+// kể cả findUnique / update / delete theo id; tạo hay chuyển bản ghi sang cơ sở ngoài phạm vi bị chặn.
+// include / select lồng nhau không bị lọc: dữ liệu con đi theo bản ghi gốc đã lọc.
+
+type Where = Record<string, unknown>
+const inBranches = (ids: string[]) => ({ branchId: { in: ids } })
+const viaClass = (ids: string[]) => ({ class: inBranches(ids) })
+const viaStudent = (ids: string[]) => ({ student: inBranches(ids) })
+const SCOPED: Record<string, (ids: string[]) => Where> = {
+  Student: inBranches,
+  Class: inBranches,
+  Lead: ids => ({ OR: [inBranches(ids), { branchId: null }] }),
+  Teacher: ids => ({ branches: { some: inBranches(ids) } }),
+  Holiday: ids => ({ branches: { some: inBranches(ids) } }),
+  MisaInvoice: inBranches,
+  ClassEnrollment: viaClass, Schedule: viaClass, Session: viaClass, ClassTuitionRate: viaClass,
+  StudentAttendance: viaClass, TeacherAttendance: viaClass,
+  Parent: viaStudent, StudentReview: viaStudent, PrivateSession: viaStudent, TuitionRecord: viaStudent,
+  Payment: viaStudent, MonthlyScore: viaStudent, StudentPromotion: viaStudent,
+}
+/** Khoá ngoại tới bản ghi có cơ sở: phải nằm trong phạm vi khi tạo / sửa */
+const REFS: Record<string, string> = { classId: 'Class', studentId: 'Student', sessionId: 'Session', tuitionRecordId: 'TuitionRecord' }
+const FILTERED = new Set(['findUnique', 'findUniqueOrThrow', 'findFirst', 'findFirstOrThrow', 'findMany', 'count', 'aggregate', 'groupBy', 'update', 'updateMany', 'delete', 'deleteMany', 'upsert'])
+const delegate = (model: string) => (base as unknown as Record<string, { count(args: unknown): Promise<number> }>)[model[0].toLowerCase() + model.slice(1)]
+
+const withScope = (where: Where | undefined, scoped: Where): Where => {
+  if (!where) return scoped
+  const and = where.AND === undefined ? [] : Array.isArray(where.AND) ? where.AND : [where.AND]
+  return { ...where, AND: [...and, scoped] } // giữ trường unique ở cấp ngoài cho findUnique / update
+}
+
+async function checkWrite(model: string, data: unknown, ids: string[]) {
+  for (const row of Array.isArray(data) ? data : data ? [data] : []) {
+    const d = row as Record<string, any>
+    const branchId = d.branchId ?? d.branch?.connect?.id
+    if (['Student', 'Class', 'Lead', 'MisaInvoice'].includes(model) && typeof branchId === 'string' && !ids.includes(branchId)) {
+      throw createError('Không có quyền với cơ sở này', 403)
+    }
+    for (const [field, parent] of Object.entries(REFS)) {
+      const id = d[field] ?? d[field.slice(0, -2)]?.connect?.id
+      if (typeof id !== 'string' || parent === model) continue
+      if (!(await delegate(parent).count({ where: { id, ...SCOPED[parent](ids) } }))) throw createError('Không tìm thấy dữ liệu', 404)
+    }
+  }
+}
+
+/** Học viên chỉ ghi danh vào lớp cùng cơ sở, của năm học chưa đóng (áp dụng cả khi không có phạm vi) */
+async function sameBranch(data: unknown) {
+  for (const row of Array.isArray(data) ? data : data ? [data] : []) {
+    const d = row as Record<string, any>
+    const classId = d.classId ?? d.class?.connect?.id, studentId = d.studentId ?? d.student?.connect?.id
+    if (typeof classId !== 'string' || typeof studentId !== 'string') continue
+    const [klass, student] = await Promise.all([
+      base.class.findUnique({ where: { id: classId }, select: { branchId: true, schoolYear: { select: { status: true } } } }),
+      base.student.findUnique({ where: { id: studentId }, select: { branchId: true } }),
+    ])
+    if (klass?.schoolYear.status === 'CLOSED') throw createError('Lớp thuộc năm học đã đóng, không ghi danh thêm được', 409)
+    if (klass && student && klass.branchId !== student.branchId) throw createError('Học viên thuộc cơ sở khác với lớp', 400)
+  }
+}
+
+export const prisma = base.$extends({
+  query: {
+    $allModels: {
+      async $allOperations({ model, operation, args, query }) {
+        const a = (args ?? {}) as Record<string, any>
+        if (model === 'ClassEnrollment' && ['create', 'createMany', 'createManyAndReturn'].includes(operation)) await sameBranch(a.data)
+        const rule = SCOPED[model]
+        const ids = currentScope()?.branchIds
+        if (!rule || !ids) return query(args)
+        if (['create', 'createMany', 'createManyAndReturn'].includes(operation)) await checkWrite(model, a.data, ids)
+        if (['update', 'updateMany'].includes(operation)) await checkWrite(model, a.data, ids)
+        if (operation === 'upsert') { await checkWrite(model, a.create, ids); await checkWrite(model, a.update, ids) }
+        if (FILTERED.has(operation)) return query({ ...a, where: withScope(a.where, rule(ids)) } as typeof args)
+        return query(args)
+      },
+    },
+  },
+})
+
+export type Tx = Parameters<Parameters<typeof prisma['$transaction']>[0]>[0]
 
 // ─── ID ───────────────────────────────────────────────────────
 

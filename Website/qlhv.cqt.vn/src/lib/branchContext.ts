@@ -1,12 +1,14 @@
 import { prisma, Tx } from './db'
 import { createError } from '../middleware/errorHandler'
+import { currentScope } from './scope'
 
 // ─── Cơ sở & năm học mặc định ─────────────────────────────────
-// Chưa có ô chọn cơ sở / năm học trên giao diện: bản ghi mới vào cơ sở đang hoạt động đầu tiên
-// và năm học đang chạy. Khi request mang cơ sở / năm học đã chọn, các route dùng giá trị đó thay thế.
+// Bản ghi mới vào cơ sở đang chọn (hoặc cơ sở đang hoạt động đầu tiên trong phạm vi khi xem nhiều cơ sở)
+// và năm học đang xem (mặc định năm học đang chạy).
 
 export async function defaultBranchId(db: Tx | typeof prisma = prisma): Promise<string> {
-  const branch = await db.branch.findFirst({ where: { isActive: true }, orderBy: { createdAt: 'asc' }, select: { id: true } })
+  const ids = currentScope()?.branchIds
+  const branch = await db.branch.findFirst({ where: { isActive: true, ...(ids ? { id: { in: ids } } : {}) }, orderBy: { createdAt: 'asc' }, select: { id: true } })
   if (!branch) throw createError('Chưa có cơ sở nào đang hoạt động', 409)
   return branch.id
 }
@@ -15,4 +17,34 @@ export async function currentSchoolYearId(db: Tx | typeof prisma = prisma): Prom
   const year = await db.schoolYear.findFirst({ where: { status: 'CURRENT' }, select: { id: true } })
   if (!year) throw createError('Chưa có năm học đang chạy', 409)
   return year.id
+}
+
+/**
+ * Danh sách cơ sở phân công gửi lên (Cài đặt → Người dùng / Giáo viên): undefined = không đổi,
+ * mảng mã cơ sở có thật = thay toàn bộ; sai định dạng hoặc mã không tồn tại → lỗi 400.
+ */
+export async function parseBranchIds(input: unknown, db: Tx | typeof prisma = prisma): Promise<string[] | undefined> {
+  if (input === undefined) return undefined
+  if (!Array.isArray(input) || input.some(id => typeof id !== 'string')) throw createError('Danh sách cơ sở không hợp lệ', 400)
+  const ids = [...new Set(input as string[])]
+  if ((await db.branch.count({ where: { id: { in: ids } } })) !== ids.length) throw createError('Không tìm thấy cơ sở', 400)
+  return ids
+}
+
+/** Năm học để tạo lớp: năm đang xem, trừ năm đã đóng (chỉ xem) */
+export async function openSchoolYearId(db: Tx | typeof prisma = prisma): Promise<string> {
+  const id = await viewedSchoolYearId(db)
+  const year = await db.schoolYear.findUniqueOrThrow({ where: { id }, select: { status: true } })
+  if (year.status === 'CLOSED') throw createError('Năm học đã đóng, chỉ xem được', 409)
+  return id
+}
+
+/** Năm học đang xem: X-School-Year-Id của request, mặc định năm học đang chạy */
+export async function viewedSchoolYearId(db: Tx | typeof prisma = prisma): Promise<string> {
+  const chosen = currentScope()?.schoolYearId
+  if (chosen) {
+    if (!(await db.schoolYear.findUnique({ where: { id: chosen }, select: { id: true } }))) throw createError('Không tìm thấy năm học', 404)
+    return chosen
+  }
+  return currentSchoolYearId(db)
 }

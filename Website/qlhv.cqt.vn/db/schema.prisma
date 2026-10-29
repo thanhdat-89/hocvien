@@ -717,12 +717,15 @@ model MisaInvoice {
   template         Json
   buyer            Json
   restoredAt       DateTime? @db.Timestamptz(3)
+  /// Cơ sở của học viên (để lọc theo cơ sở); mỗi hoá đơn chỉ gộp phiếu của một học viên.
+  branchId         String?
   createdBy        String
   createdAt        DateTime  @db.Timestamptz(3)
   updatedAt        DateTime  @db.Timestamptz(3)
 
   @@index([refId])
   @@index([recordIds], type: Gin)
+  @@index([branchId])
   @@map("misa_invoices")
 }
 

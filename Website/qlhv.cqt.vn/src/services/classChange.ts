@@ -134,7 +134,7 @@ export async function prepareClassChange(classId: string, input: ClassChangeInpu
 
   const holidays = new Set<string>()
   if (scheduleChanged) {
-    for (const h of await prisma.holiday.findMany()) {
+    for (const h of await prisma.holiday.findMany({ where: { branches: { some: { branchId: cls.branchId } } } })) {
       if (h.dates.length) h.dates.forEach(date => holidays.add(date.toISOString().slice(0, 10)))
       else for (let date = new Date(h.startDate); date <= h.endDate; date.setUTCDate(date.getUTCDate() + 1)) holidays.add(date.toISOString().slice(0, 10))
     }

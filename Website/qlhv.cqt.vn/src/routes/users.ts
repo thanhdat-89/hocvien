@@ -4,6 +4,7 @@ import { prisma, api, newId } from '../lib/db'
 import { s } from '../lib/params'
 import { authenticate, requireRole, forgetAccount } from '../middleware/auth'
 import { AuthRequest } from '../types'
+import { defaultBranchId, parseBranchIds } from '../lib/branchContext'
 
 const router = Router()
 router.use(authenticate, requireRole('ADMIN'))
@@ -11,15 +12,16 @@ router.use(authenticate, requireRole('ADMIN'))
 const ROLES = ['ADMIN', 'STAFF', 'TEACHER'] as const
 type Role = typeof ROLES[number]
 const isRole = (value: unknown): value is Role => ROLES.includes(value as Role)
+const userDoc = <T extends { branches: { branch: { id: string; name: string } }[] }>(u: T) => api({ ...u, branches: u.branches.map(b => b.branch) })
 const safeUser = { id: true, username: true, fullName: true, email: true, role: true, isActive: true, createdAt: true,
-  teacher: { select: { id: true, fullName: true } } } as const
+  teacher: { select: { id: true, fullName: true } }, branches: { select: { branch: { select: { id: true, name: true } } } } } as const
 
 // GET /api/users
 router.get('/', async (_req, res: Response, next: NextFunction) => {
   try {
     const users = await prisma.user.findMany({ select: safeUser })
     users.sort((a, b) => Number(b.isActive) - Number(a.isActive) || a.fullName.localeCompare(b.fullName, 'vi'))
-    res.json(api(users))
+    res.json(users.map(userDoc))
   } catch (err) { next(err) }
 })
 
@@ -43,15 +45,16 @@ router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => 
       if (!teacher) { res.status(404).json({ message: 'Không tìm thấy giáo viên' }); return }
       if (teacher.userId) { res.status(409).json({ message: 'Giáo viên này đã có tài khoản' }); return }
     }
+    const branchIds = (await parseBranchIds(req.body.branchIds)) ?? [await defaultBranchId()]
     const id = newId()
     const user = await prisma.$transaction(async tx => {
       await tx.user.create({ data: { id, username: login, fullName: fullName.trim(), email: email?.trim() || null,
-        role, passwordHash: await bcrypt.hash(password, 10) } })
+        role, passwordHash: await bcrypt.hash(password, 10), branches: { create: branchIds.map(branchId => ({ branchId })) } } })
       if (teacherId) await tx.teacher.update({ where: { id: teacherId }, data: { userId: id } })
       return tx.user.findUniqueOrThrow({ where: { id }, select: safeUser })
     })
     req.activity = { resourceType: 'users', resourceId: id, description: `Tạo tài khoản ${login} (${role})` }
-    res.status(201).json(api(user))
+    res.status(201).json(userDoc(user))
   } catch (err) { next(err) }
 })
 
@@ -73,16 +76,18 @@ router.put('/:id', async (req: AuthRequest, res: Response, next: NextFunction) =
     if (losesAdmin && await prisma.user.count({ where: { role: 'ADMIN', isActive: true } }) <= 1) {
       res.status(400).json({ message: 'Phải còn ít nhất một quản trị viên đang hoạt động' }); return
     }
+    const branchIds = await parseBranchIds(req.body.branchIds)
     const updated = await prisma.user.update({
       where: { id }, select: safeUser,
-      data: { fullName: fullName?.trim(), email: email === undefined ? undefined : email?.trim() || null, role: role as Role | undefined, isActive },
+      data: { fullName: fullName?.trim(), email: email === undefined ? undefined : email?.trim() || null, role: role as Role | undefined, isActive,
+        ...(branchIds ? { branches: { deleteMany: {}, create: branchIds.map(branchId => ({ branchId })) } } : {}) },
     })
     forgetAccount(id)
     const change = isActive === false ? 'Khoá' : isActive === true && !user.isActive ? 'Mở khoá' : 'Sửa'
     req.activity = { resourceType: 'users', resourceId: id, description: `${change} tài khoản ${user.username}`,
       before: { fullName: user.fullName, email: user.email, role: user.role, isActive: user.isActive },
       after: { fullName: updated.fullName, email: updated.email, role: updated.role, isActive: updated.isActive } }
-    res.json(api(updated))
+    res.json(userDoc(updated))
   } catch (err) { next(err) }
 })
 

@@ -6,6 +6,7 @@ import { getMissingPrivateStudents, readView } from '../services/readViews'
 import { getStudentIndex } from '../services/studentReadView'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
+import { viewedSchoolYearId } from '../lib/branchContext'
 import type { Session } from '../types/models'
 
 /** Ngày đầu và cuối tháng "YYYY-MM" cho cột @db.Date. */
@@ -59,7 +60,7 @@ async function computeDashboard(force = false) {
     recentPaymentRows,
   ] = await Promise.all([
     getStudentIndex(),
-    prisma.class.count({ where: { status: 'ACTIVE' } }),
+    prisma.class.count({ where: { status: 'ACTIVE', schoolYearId: await viewedSchoolYearId() } }),
     prisma.session.findMany({ where: { sessionDate: todayDate }, include: sessionInclude }),
     prisma.privateSession.count({ where: { sessionDate: todayDate } }),
     prisma.student.count({ where: { enrollmentDate: monthRange(thisMonth) } }),
