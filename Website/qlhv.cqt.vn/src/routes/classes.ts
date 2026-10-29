@@ -10,6 +10,7 @@ import { AuthRequest } from '../types'
 import { defaultBranchId, openSchoolYearId, viewedSchoolYearId } from '../lib/branchContext'
 import { applyClassChange, prepareClassChange, renameClass } from '../services/classChange'
 import { auditClassTuition } from '../services/classIntegrityAudit'
+import { alertClassAudit } from '../services/adminAlerts'
 
 const router = Router()
 
@@ -31,7 +32,8 @@ router.get('/cron/audit', async (req: Request, res: Response, next: NextFunction
       anomalies: report.anomalies as Prisma.InputJsonValue, createdAt: new Date() }
     await prisma.classIntegrityAudit.upsert({ where: { id: localDate }, create: { id: localDate, ...audit }, update: audit })
     if (report.anomalies.length) console.warn('[Class integrity]', JSON.stringify(report))
-    res.json({ period: report.period, checkedClasses: report.checkedClasses, anomalies: report.anomalies.length })
+    const alerts = await alertClassAudit(report.period, report.anomalies)
+    res.json({ period: report.period, checkedClasses: report.checkedClasses, anomalies: report.anomalies.length, alerts })
   } catch (err) { next(err) }
 })
 router.use(authenticate)

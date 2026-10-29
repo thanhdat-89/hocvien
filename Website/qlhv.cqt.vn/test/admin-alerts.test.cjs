@@ -56,3 +56,22 @@ test('chuông: mỗi cơ sở thấy cảnh báo của mình và cảnh báo ch�
   const status = await new Promise(resolve => gate({ user: { userId: 'u', role: 'TEACHER' } }, { status(c) { resolve(c); return this }, json() { return this } }, () => resolve(200)))
   assert.equal(status, 403)
 })
+
+test('bất thường của lần kiểm tra lớp thành cảnh báo theo cơ sở của lớp, mỗi bất thường một lần mỗi tháng', async () => {
+  const { alertClassAudit } = require('../dist/services/adminAlerts')
+  await context()
+  const B = (await prisma.branch.create({ data: { id: newId(), name: 'Cơ sở B' } })).id
+  const klass = await seed.klass({ name: 'Toán 9 - CQT01', branchId: B })
+  const student = await seed.student({ fullName: 'Lê C', branchId: B })
+  const anomalies = [
+    { type: 'MISSING_MONTH_SESSIONS', classId: klass.id, count: 3 },
+    { type: 'TUITION_RECORD_DIFFERS', classId: klass.id, studentId: student.id, calculatedAmount: 800000, recordedAmount: 600000 },
+  ]
+  assert.equal(await alertClassAudit('2026-10', anomalies), 2)
+  assert.equal(await alertClassAudit('2026-10', anomalies), 0, 'sáng hôm sau vẫn còn bất thường: không báo lại')
+  assert.equal(await alertClassAudit('2026-11', anomalies.slice(0, 1)), 1, 'sang tháng mới thì báo lại')
+  const rows = await prisma.adminAlert.findMany({ where: { data: { path: ['period'], equals: '2026-10' } }, orderBy: { createdAt: 'asc' } })
+  assert.deepEqual(rows.map(r => r.branchId), [B, B])
+  assert.match(rows[0].message, /Toán 9 - CQT01 có lịch học nhưng chưa có buổi nào trong tháng 10\/2026/)
+  assert.match(rows[1].message, /Lê C .* 600\.000đ, tính lại theo buổi học được 800\.000đ/)
+})
