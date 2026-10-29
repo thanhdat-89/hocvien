@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express'
 import type { Prisma } from '@prisma/client'
 import { prisma, api, newId } from '../lib/db'
 import { s } from '../lib/params'
-import { authenticate } from '../middleware/auth'
+import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
 import { ZALO_ENABLED, sendMessage, verifyWebhook, verifyWebhookSignature } from '../services/zaloService'
 
@@ -191,9 +191,10 @@ async function getZaloRecipients(targetType: string, targetId?: string | null): 
   return [...new Set(parents.map(p => p.zalo!).filter(Boolean))]
 }
 
-// ─── Notification router (yêu cầu xác thực) ─────────────────
+// ─── Notification router (quản trị viên, nhân viên) ──────────
+// Thông báo có thể nhắn Zalo tới mọi phụ huynh của cơ sở: giáo viên không được dùng.
 export const notificationRouter = Router()
-notificationRouter.use(authenticate)
+notificationRouter.use(authenticate, requireRole('ADMIN', 'STAFF'))
 
 // POST /api/notifications — Tạo thông báo mới, tùy chọn gửi qua Zalo
 notificationRouter.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
