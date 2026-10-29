@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useMobileNavigation } from './MobileNavigation'
 import WorkspaceSwitcher from './WorkspaceSwitcher'
+import NotificationBell from './NotificationBell'
 
 interface Props {
   title?: string
@@ -10,7 +11,7 @@ interface Props {
 }
 
 export default function TopBar({ title = 'MathFlow Logic', onSearch }: Props) {
-  const { user } = useAuth()
+  const { user, canSeeFinance } = useAuth()
   const [q, setQ] = useState('')
   const { open, toggle } = useMobileNavigation()
 
@@ -43,10 +44,7 @@ export default function TopBar({ title = 'MathFlow Logic', onSearch }: Props) {
       </div>
 
       <div className="flex items-center gap-4 max-lg:gap-1 max-lg:shrink-0">
-        <button aria-label="Thông báo" className="p-2 text-slate-500 hover:bg-slate-50 transition-colors rounded-full relative max-lg:hidden">
-          <span className="material-symbols-outlined">notifications</span>
-          <span className="absolute top-2 right-2 w-2 h-2 bg-error rounded-full"></span>
-        </button>
+        {canSeeFinance && <NotificationBell />}
         <Link to="/settings" aria-label="Cài đặt" title="Cài đặt" className="p-2 text-slate-500 hover:bg-slate-50 transition-colors rounded-full max-lg:hidden">
           <span className="material-symbols-outlined" aria-hidden="true">settings</span>
         </Link>

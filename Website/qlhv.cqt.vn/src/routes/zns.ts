@@ -13,6 +13,7 @@ import { s } from '../lib/params'
 import { authenticate, requireRole } from '../middleware/auth'
 import type { AuthRequest } from '../types'
 import { tuitionRecordDoc, tuitionRecordInclude } from '../lib/docs'
+import { raiseAlert } from '../services/adminAlerts'
 import {
   sendZnsTemplate,
   normalizeVnPhone,
@@ -579,22 +580,9 @@ async function runOverdueReminderCron(): Promise<OverdueCronResult> {
         where: { type: 'overdue_reminder_cap', data: { path: ['invoiceId'], equals: rec.id } }, select: { id: true },
       })
       if (!alert) {
-        await prisma.adminAlert.create({
-          data: {
-            id: newId(),
-            type: 'overdue_reminder_cap',
-            message: `Phiếu T${rec.billingMonth}/${rec.billingYear} của ${rec.studentName ?? ''} đã gửi đủ ${REMINDER_CAP} lần nhắc Zalo nhưng chưa thanh toán.`,
-            read: false,
-            data: {
-              invoiceId:     rec.id,
-              studentId:     rec.studentId,
-              studentName:   rec.studentName ?? '',
-              billingMonth:  rec.billingMonth,
-              billingYear:   rec.billingYear,
-              reminderCount: priorCount,
-            },
-          },
-        })
+        await raiseAlert('overdue_reminder_cap',
+          `Phiếu T${rec.billingMonth}/${rec.billingYear} của ${rec.studentName ?? ''} đã gửi đủ ${REMINDER_CAP} lần nhắc Zalo nhưng chưa thanh toán.`,
+          { invoiceId: rec.id, studentId: rec.studentId, studentName: rec.studentName ?? '', billingMonth: rec.billingMonth, billingYear: rec.billingYear, reminderCount: priorCount })
       }
       result.capped++
       result.details.push({ invoiceId: rec.id, status: 'capped' })

@@ -29,6 +29,7 @@ const SKIP_PATTERNS: RegExp[] = [
   /^\/api\/materials\/upload-signature$/,
   /^\/api\/notifications\/zalo\//,
   /^\/api\/activity/,
+  /^\/api\/alerts\//,
   /^\/api\/zns\/test-send$/,
 ]
 

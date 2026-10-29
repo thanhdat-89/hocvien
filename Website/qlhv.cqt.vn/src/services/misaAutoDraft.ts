@@ -6,6 +6,7 @@ import type { Payment, TuitionRecord } from '../types/models'
 import { readInvoice, saveInvoiceCopies } from './misaInvoiceStore'
 import { InvoicePreviewError, invoiceSource, listInvoiceTemplates, validateDraftInput, InvoiceTemplate, MisaInvoiceRecord, createMisaDraft, readMisaInvoiceStatus } from './misaInvoicePreview'
 import { notifyInvoiceCreated, notifyInvoiceCreationFailed } from './telegramService'
+import { raiseAlertSafely } from './adminAlerts'
 import { invalidateReadView, invoiceBillingPeriods } from './readViews'
 import { withMisaDeadline } from './misaRequestDeadline'
 import { assertInvoicePeriod, InvoicePeriodError } from './invoiceEligibility'
@@ -15,6 +16,16 @@ export function chooseDefaultInvoiceTemplate(templates: InvoiceTemplate[]) {
   const series = process.env.MEINVOICE_DEFAULT_SERIES?.trim()
   const matches = templates.filter(t => t.templateNo === '2' && (!id || t.id === id) && (!series || t.series === series))
   return matches.length === 1 ? matches[0] : null
+}
+
+/** Chuông thông báo: hoá đơn MISA chưa tạo được hoặc không rõ đã tạo chưa (cần kiểm tra trên MISA) */
+function alertInvoiceFailed(recordIds: string[], reason: string, outcomeUnknown: boolean, refId?: string) {
+  void (async () => {
+    const record = await prisma.tuitionRecord.findFirst({ where: { id: { in: recordIds } }, select: { studentId: true, billingMonth: true, billingYear: true, student: { select: { fullName: true } } } })
+    raiseAlertSafely('misa_invoice_failed',
+      `${outcomeUnknown ? 'Không rõ đã tạo hoá đơn MISA chưa' : 'Chưa tạo được hoá đơn MISA'}${record ? ` cho ${record.student.fullName} T${record.billingMonth}/${record.billingYear}` : ''}: ${reason}`,
+      { recordIds, refId: refId ?? null, studentId: record?.studentId ?? null, outcomeUnknown })
+  })().catch(err => console.error('[alert] không ghi được cảnh báo MISA:', err))
 }
 
 /** Shared by the invoice page and tuition actions; reserve all records before contacting MISA. */
@@ -27,10 +38,12 @@ export async function createTuitionMisaInvoice(recordIds: string[], actorId: str
       notifyInvoiceCreationFailed({ recordIds, refId: invoice.refId,
         reason: invoice.lastErrorMessage || 'Chưa tạo được hóa đơn MISA.',
         outcomeUnknown: invoice.status === 'OUTCOME_UNKNOWN', sources: invoice.sources || [invoice.source] })
+      alertInvoiceFailed(recordIds, invoice.lastErrorMessage || 'Chưa tạo được hóa đơn MISA.', invoice.status === 'OUTCOME_UNKNOWN', invoice.refId)
     }
     return result
   } catch (error) {
     if (error instanceof InvoicePeriodError || options.notifications === false) throw error
+    alertInvoiceFailed(recordIds, error instanceof InvoicePreviewError ? error.message : 'Lỗi xử lý nội bộ hoặc kết nối dữ liệu khi tạo hóa đơn.', false)
     notifyInvoiceCreationFailed({ recordIds,
       reason: error instanceof InvoicePreviewError ? error.message : 'Lỗi xử lý nội bộ hoặc kết nối dữ liệu khi tạo hóa đơn.' }, async () => {
       const records = (await prisma.tuitionRecord.findMany({ where: { id: { in: recordIds.slice(0, 20) } }, include: tuitionRecordInclude })).map(tuitionRecordDoc)

@@ -30,6 +30,7 @@ import telegramRoutes from './routes/telegram'
 import userRoutes from './routes/users'
 import branchRoutes from './routes/branches'
 import schoolYearRoutes from './routes/schoolYears'
+import alertRoutes from './routes/alerts'
 
 import { errorHandler, notFound } from './middleware/errorHandler'
 import { prisma } from './lib/db'
@@ -115,6 +116,7 @@ app.use('/api/telegram',       telegramRoutes)
 app.use('/api/users',          userRoutes)
 app.use('/api/branches',       branchRoutes)
 app.use('/api/school-years',   schoolYearRoutes)
+app.use('/api/alerts',         alertRoutes)
 
 // ─── Error handlers ───────────────────────────────────────────
 app.use(notFound)

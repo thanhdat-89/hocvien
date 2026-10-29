@@ -15,6 +15,7 @@ import {
 } from '../services/sepayMatcher'
 import type { BankTransaction } from '../types/models'
 import { authenticate, requireRole } from '../middleware/auth'
+import { raiseAlertSafely } from '../services/adminAlerts'
 
 const router = Router()
 
@@ -162,6 +163,7 @@ router.post('/sepay', async (req: Request, res: Response, next: NextFunction) =>
         matchReason: 'Không parse được shortId hoặc tháng từ nội dung CK',
       }
       if ((await saveTx(record)).duplicate) { res.json({ success: true, idempotent: true }); return }
+      alertUnmatched(record)
       res.json({ success: true, status: 'unmatched' })
       return
     }
@@ -173,6 +175,7 @@ router.post('/sepay', async (req: Request, res: Response, next: NextFunction) =>
         matchReason: `Không tìm thấy HV với shortId=${parsed.candidates.join('/')}`,
       }
       if ((await saveTx(record)).duplicate) { res.json({ success: true, idempotent: true }); return }
+      alertUnmatched(record)
       res.json({ success: true, status: 'unmatched' })
       return
     }
@@ -182,6 +185,7 @@ router.post('/sepay', async (req: Request, res: Response, next: NextFunction) =>
         matchReason: `Trùng shortId ${shortId} (${students.length} HV) — admin cần xác nhận thủ công`,
       }
       if ((await saveTx(record)).duplicate) { res.json({ success: true, idempotent: true }); return }
+      alertUnmatched(record)
       res.json({ success: true, status: 'unmatched' })
       return
     }
@@ -198,6 +202,7 @@ router.post('/sepay', async (req: Request, res: Response, next: NextFunction) =>
         matchReason: reason,
       }
       if ((await saveTx(record)).duplicate) { res.json({ success: true, idempotent: true }); return }
+      alertUnmatched(record)
       await notifyAdminUnmatched({ amount: Number(body.transferAmount) || 0, reason })
       res.json({ success: true, status: 'unmatched' })
       return
@@ -210,6 +215,7 @@ router.post('/sepay', async (req: Request, res: Response, next: NextFunction) =>
         matchReason: reason,
       }
       if ((await saveTx(record)).duplicate) { res.json({ success: true, idempotent: true }); return }
+      alertUnmatched(record)
       await notifyAdminUnmatched({ amount: Number(body.transferAmount) || 0, reason })
       res.json({ success: true, status: 'unmatched' })
       return
@@ -347,6 +353,14 @@ async function sendCaseBNotice(input: {
       thoi_gian_nhan:  fmtTime,
       ma_phieu:        shortInvoiceId,
     },
+  })
+}
+
+/** Chuông thông báo: CK vào tài khoản chưa khớp được phiếu học phí nào */
+function alertUnmatched(record: BankTransaction) {
+  raiseAlertSafely('sepay_unmatched', `CK ${Number(record.transferAmount || 0).toLocaleString('vi-VN')}đ chưa khớp phiếu: ${record.matchReason || ''}`, {
+    transactionId: record.id, studentId: record.matchedStudentId ?? null, amount: Number(record.transferAmount) || 0,
+    content: record.content || '', transactionDate: record.transactionDate || '',
   })
 }
 

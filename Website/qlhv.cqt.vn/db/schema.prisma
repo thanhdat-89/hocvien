@@ -868,9 +868,12 @@ model AdminAlert {
   message   String
   /// Chi tiết theo loại cảnh báo (invoiceId, studentId, billingMonth...).
   data      Json
+  /// Cơ sở của học viên liên quan; NULL = chưa xác định được (hiện ở mọi cơ sở).
+  branchId  String?
   createdAt DateTime @default(now()) @db.Timestamptz(3)
 
   @@index([read, createdAt])
+  @@index([branchId, read, createdAt])
   @@map("admin_alerts")
 }
 
