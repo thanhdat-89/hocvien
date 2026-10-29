@@ -17,7 +17,6 @@ import Tests from './pages/Tests'
 import Reviews from './pages/Reviews'
 import Materials from './pages/Materials'
 
-import Activity from './pages/Activity'
 import Zns from './pages/Zns'
 import Holidays from './pages/Holidays'
 import Settings from './pages/Settings'
@@ -46,7 +45,7 @@ export default function App() {
             <Route path="/attendance" element={<Navigate to="/classes" replace />} />
             <Route path="/notifications" element={<RequireRole roles={['ADMIN', 'STAFF']}><Notifications /></RequireRole>} />
             <Route path="/leads" element={<RequireRole roles={['ADMIN', 'STAFF']}><Leads /></RequireRole>} />
-            <Route path="/activity" element={<RequireRole roles={['ADMIN', 'STAFF']}><Activity /></RequireRole>} />
+            <Route path="/activity" element={<Navigate to="/settings/activity" replace />} />
             <Route path="/zns" element={<RequireRole roles={['ADMIN']}><Zns /></RequireRole>} />
             <Route path="/settings" element={<Navigate to="/settings/account" replace />} />
             <Route path="/settings/:section" element={<Settings />} />

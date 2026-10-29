@@ -8,18 +8,20 @@ import { useWorkspace, type Branch, type SchoolYear } from '../hooks/useWorkspac
 import api from '../services/api'
 import { User } from '../types'
 import Teachers from './Teachers'
+import Activity from './Activity'
 import BranchChecklist from '../components/BranchChecklist'
 
 type Role = User['role']
 type Notify = (message: string, type?: ToastMessage['type']) => void
 
-const SECTIONS: { key: string; icon: string; label: string; adminOnly?: boolean }[] = [
+const SECTIONS: { key: string; icon: string; label: string; roles?: Role[] }[] = [
   { key: 'account', icon: 'account_circle', label: 'Tài khoản của tôi' },
-  { key: 'users', icon: 'manage_accounts', label: 'Người dùng', adminOnly: true },
-  { key: 'teachers', icon: 'badge', label: 'Giáo viên', adminOnly: true },
-  { key: 'branches', icon: 'apartment', label: 'Cơ sở', adminOnly: true },
-  { key: 'school-years', icon: 'calendar_month', label: 'Năm học', adminOnly: true },
-  { key: 'integrations', icon: 'hub', label: 'Kết nối & tích hợp', adminOnly: true },
+  { key: 'users', icon: 'manage_accounts', label: 'Người dùng', roles: ['ADMIN'] },
+  { key: 'teachers', icon: 'badge', label: 'Giáo viên', roles: ['ADMIN'] },
+  { key: 'branches', icon: 'apartment', label: 'Cơ sở', roles: ['ADMIN'] },
+  { key: 'school-years', icon: 'calendar_month', label: 'Năm học', roles: ['ADMIN'] },
+  { key: 'integrations', icon: 'hub', label: 'Kết nối & tích hợp', roles: ['ADMIN'] },
+  { key: 'activity', icon: 'history', label: 'Lịch sử hoạt động', roles: ['ADMIN', 'STAFF'] },
 ]
 
 const ROLE_LABEL: Record<Role, string> = { ADMIN: 'Quản trị viên', STAFF: 'Nhân viên', TEACHER: 'Giáo viên' }
@@ -29,12 +31,12 @@ const panelClass = 'bg-surface-container-lowest rounded-2xl shadow-sm border bor
 
 export default function Settings() {
   const { section = 'account' } = useParams()
-  const { isAdmin } = useAuth()
+  const { user } = useAuth()
   const [toasts, setToasts] = useState<ToastMessage[]>([])
   const notify: Notify = (message, type = 'success') => setToasts(prev => [...prev, { id: Date.now(), message, type }])
   const dismissToast = (id: number) => setToasts(prev => prev.filter(t => t.id !== id))
 
-  const visible = SECTIONS.filter(s => !s.adminOnly || isAdmin)
+  const visible = SECTIONS.filter(s => !s.roles || (user && s.roles.includes(user.role)))
   if (!visible.some(s => s.key === section)) return <Navigate to="/settings/account" replace />
 
   return (
@@ -63,6 +65,7 @@ export default function Settings() {
             {section === 'branches' && <BranchesSection notify={notify} />}
             {section === 'school-years' && <SchoolYearsSection notify={notify} />}
             {section === 'integrations' && <IntegrationsSection />}
+            {section === 'activity' && <Activity embedded />}
           </div>
         </div>
       </div>

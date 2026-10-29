@@ -12,7 +12,6 @@ const navItems: { path: string; icon: string; label: string; roles?: Role[] }[] 
   { path: '/holidays', icon: 'celebration', label: 'Lịch nghỉ lễ', roles: ['ADMIN', 'STAFF'] },
   { path: '/tuition', icon: 'payments', label: 'Học phí', roles: ['ADMIN', 'STAFF'] },
   { path: '/tuition/invoices', icon: 'receipt_long', label: 'Hóa đơn điện tử', roles: ['ADMIN', 'STAFF'] },
-  { path: '/activity', icon: 'history', label: 'Lịch sử hoạt động', roles: ['ADMIN', 'STAFF'] },
 ]
 
 export default function Sidebar({ open, onClose, compact }: { open: boolean; onClose: () => void; compact: boolean }) {

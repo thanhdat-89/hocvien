@@ -27,7 +27,7 @@ async page => {
       await p.waitForFunction(n => document.querySelectorAll('table[aria-label="Lịch sử hoạt động"] tbody tr').length === n, count)
     }
     const assert = (value, message) => { if (!value) throw Error(`${width}: ${message}`) }
-    await p.goto('http://127.0.0.1:5173/activity')
+    await p.goto('http://127.0.0.1:5173/settings/activity')
     await p.getByText('Thay đổi thử nghiệm 00', { exact: true }).waitFor()
     await waitRows(10)
     assert(await p.getByRole('button', { name: 'Trang trước', exact: true }).isDisabled(), 'first page previous disabled')

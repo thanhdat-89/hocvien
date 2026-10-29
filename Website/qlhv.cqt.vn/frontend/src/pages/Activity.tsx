@@ -61,7 +61,7 @@ const endOfDayIso   = (yyyymmdd: string) => yyyymmdd ? new Date(`${yyyymmdd}T23:
 interface ActivityPage { data: ActivityLog[]; nextCursor: string | null }
 const PAGE_SIZE = 10
 
-export default function Activity() {
+export default function Activity({ embedded = false }: { embedded?: boolean }) {
   const [logs, setLogs] = useState<ActivityLog[]>([])
   const [loading, setLoading] = useState(true)
   const [pageIndex, setPageIndex] = useState(0)
@@ -148,9 +148,9 @@ export default function Activity() {
 
   return (
     <div className="space-y-6">
-      <TopBar title="Lịch sử hoạt động" />
+      {!embedded && <TopBar title="Lịch sử hoạt động" />}
 
-      <div className="page-content bg-surface rounded-3xl p-6 md:p-8 shadow-sm">
+      <div className={embedded ? 'bg-surface rounded-3xl p-6 md:p-8 shadow-sm' : 'page-content bg-surface rounded-3xl p-6 md:p-8 shadow-sm'}>
         <p className="text-[10px] uppercase tracking-widest text-primary font-bold mb-1">Audit log</p>
         <h2 className="font-headline text-2xl font-bold text-on-surface mb-6">
           Toàn bộ thay đổi trên hệ thống
