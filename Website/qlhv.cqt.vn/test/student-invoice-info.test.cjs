@@ -38,8 +38,8 @@ test('đọc số tiền thành chữ theo mẫu hoá đơn MISA', () => {
   assert.equal(vndInWords(0), 'Không đồng.')
 })
 
-const previewBase = { student: { fullName: 'Nguyễn Phương Linh', address: null, invoiceCitizenId: '001311044597',
-  invoiceAddress: 'Số 17 ngõ 294/8/40 phố Đội Cấn', invoiceEmail: 'a@example.com' },
+const previewBase = { student: { fullName: 'Học viên thử nghiệm', address: null, invoiceCitizenId: '001200000001',
+  invoiceAddress: 'Số 1 phố Thử Nghiệm', invoiceEmail: 'a@example.com' },
   activeClassNames: ['Toán 10 - CQT01'], period: { month: 11, year: 2026 }, periods: [{ month: 11, year: 2026 }],
   invoiceDate: '2026-11-04', series: '2C26MHP', existingInvoice: null }
 
@@ -52,7 +52,7 @@ test('bản xem trước có cùng dòng hàng và tổng tiền với hoá đơ
     [['Học phí Toán 10 - CQT01', 'Tháng', 1, 1400000], ['Học phí Học riêng', 'Tháng', 1, 500000]])
   assert.deepEqual(preview.totals, { amount: 1900000, discountAmount: 50000, finalAmount: 1850000 })
   assert.equal(preview.amountInWords, 'Một triệu tám trăm năm mươi nghìn đồng chẵn.')
-  assert.equal(preview.buyer.citizenIdNumber, '001311044597')
+  assert.equal(preview.buyer.citizenIdNumber, '001200000001')
   assert.deepEqual(preview.buyerFallback, { fullName: true, address: false })
   assert.deepEqual(preview.warnings, [])
 })

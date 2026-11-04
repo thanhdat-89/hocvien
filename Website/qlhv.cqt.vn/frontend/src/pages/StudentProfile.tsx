@@ -61,7 +61,6 @@ function EditStudentModal({ student, onClose, onSaved }: { student: Student; onC
     gender: student.gender ?? '',
     school: student.school ?? '',
     gradeLevel: student.gradeLevel?.toString() ?? '',
-    address: student.address ?? '',
     status: student.status ?? 'ACTIVE',
     notes: student.notes ?? '',
   })
@@ -82,7 +81,6 @@ function EditStudentModal({ student, onClose, onSaved }: { student: Student; onC
         gender: form.gender || null,
         school: form.school || null,
         gradeLevel: form.gradeLevel || null,
-        address: form.address || null,
         status: form.status,
         notes: form.notes || null,
       })
@@ -123,11 +121,6 @@ function EditStudentModal({ student, onClose, onSaved }: { student: Student; onC
               {[1,2,3,4,5,6,7,8,9,10,11,12].map(g => <option key={g} value={g}>Lớp {g}</option>)}
             </select>
           </Field>
-          <div className="col-span-2">
-            <Field label="Địa chỉ">
-              <input value={form.address} onChange={set('address')} className="input" placeholder="123 Đường ABC, Quận 1" />
-            </Field>
-          </div>
           <Field label="Trạng thái">
             <select value={form.status} onChange={set('status')} className="input">
               <option value="ACTIVE">Đang học</option>
@@ -571,7 +564,6 @@ function InfoTab({
   enrollments,
   onRefresh,
   onEdit,
-  onStatusChange,
   canManage,
 }: {
   student: Student & { id: string }
@@ -579,7 +571,6 @@ function InfoTab({
   enrollments: ClassEnrollment[]
   onRefresh: () => void
   onEdit: () => void
-  onStatusChange: (status: 'ACTIVE' | 'INACTIVE' | 'RESERVED') => void
   canManage: boolean
 }) {
   const showAlert = useAlert()
@@ -634,180 +625,14 @@ function InfoTab({
 
   return (
     <>
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-        {/* Basic info */}
-        <div className="md:col-span-4 bg-surface-container-lowest rounded-xl p-8 shadow-sm">
-          <div className="flex items-center justify-between mb-6 border-b border-outline-variant/10 pb-4">
-            <h3 className="font-headline text-lg font-bold text-on-surface">Thông tin cơ bản</h3>
-            {canManage && (
-              <button
-                onClick={onEdit}
-                className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
-              >
-                <span className="material-symbols-outlined text-base">edit</span>Chỉnh sửa
-              </button>
-            )}
-          </div>
-          <div className="space-y-5">
-            <InfoRow label="Ngày sinh" value={fmt(student.dateOfBirth)} />
-            <InfoRow label="Giới tính" value={student.gender === 'MALE' ? 'Nam' : student.gender === 'FEMALE' ? 'Nữ' : null} />
-            <InfoRow label="Trường học" value={student.school} />
-            <InfoRow label="Địa chỉ" value={student.address} />
-            <InfoRow label="Ngày nhập học" value={fmt(student.enrollmentDate)} />
-            {student.notes && <InfoRow label="Ghi chú" value={student.notes} />}
-          </div>
-
-          {/* Status actions */}
-          {canManage && (
-            <div className="mt-6 pt-5 border-t border-outline-variant/10 flex flex-col gap-2">
-              {student.status !== 'ACTIVE' && (
-                <button
-                  onClick={() => onStatusChange('ACTIVE')}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-secondary hover:bg-secondary-container/20 transition-colors"
-                >
-                  <span className="material-symbols-outlined text-base">check_circle</span>
-                  Kích hoạt đang học
-                </button>
-              )}
-              {student.status !== 'RESERVED' && (
-                <button
-                  onClick={() => onStatusChange('RESERVED')}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-outline hover:bg-surface-container-high transition-colors"
-                >
-                  <span className="material-symbols-outlined text-base">pause_circle</span>
-                  Bảo lưu
-                </button>
-              )}
-              {student.status !== 'INACTIVE' && (
-                <button
-                  onClick={() => onStatusChange('INACTIVE')}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-error hover:bg-error-container/10 transition-colors"
-                >
-                  <span className="material-symbols-outlined text-base">cancel</span>
-                  Cho nghỉ học
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Right column */}
-        <div className="md:col-span-8 space-y-6">
-          {/* Parents */}
-          <div className="bg-surface-container-lowest rounded-xl p-8 shadow-sm">
-            <div className="flex items-center justify-between mb-6 border-b border-outline-variant/10 pb-4">
-              <h3 className="font-headline text-lg font-bold text-on-surface">Phụ huynh / Liên hệ</h3>
-              {canManage && (
-                <button
-                  onClick={() => setParentModal({ open: true, parent: null })}
-                  className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
-                >
-                  <span className="material-symbols-outlined text-base">add</span>Thêm
-                </button>
-              )}
-            </div>
-            {parents.length === 0 ? (
-              <p className="text-sm text-outline">Chưa có thông tin phụ huynh</p>
-            ) : (
-              <div className="space-y-3">
-                {parents.map(p => (
-                  <div key={p.id} className="profile-contact p-4 bg-surface-container-low rounded-xl flex items-start gap-4">
-                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm flex-shrink-0">
-                      {p.fullName?.[0]?.toUpperCase() ?? '?'}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="font-bold text-on-surface">{p.fullName}</p>
-                        {p.isPrimaryContact && (
-                          <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-bold">Liên hệ chính</span>
-                        )}
-                      </div>
-                      <p className="text-sm text-outline mt-0.5">{p.relationship}</p>
-                      <div className="flex gap-4 mt-2 flex-wrap">
-                        {p.phone && (
-                          <a href={`tel:${p.phone}`} className="text-sm text-on-surface-variant flex items-center gap-1 hover:text-primary transition-colors">
-                            <span className="material-symbols-outlined text-sm">phone</span>{p.phone}
-                          </a>
-                        )}
-                        {(() => {
-                          const zaloUrl = buildZaloUrl(p.zalo || p.phone)
-                          return zaloUrl ? (
-                            <a
-                              href={zaloUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-sm text-blue-500 flex items-center gap-1 hover:underline"
-                              title="Mở Zalo để nhắn tin"
-                            >
-                              <span className="material-symbols-outlined text-sm">chat</span>
-                              Nhắn Zalo
-                            </a>
-                          ) : null
-                        })()}
-                        {p.email && (
-                          <a href={`mailto:${p.email}`} className="text-sm text-on-surface-variant flex items-center gap-1 hover:text-primary transition-colors">
-                            <span className="material-symbols-outlined text-sm">mail</span>{p.email}
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                    {canManage && (
-                      <div className="flex gap-1 flex-shrink-0">
-                        <button onClick={() => setParentModal({ open: true, parent: p })}
-                          className="p-1.5 rounded-lg hover:bg-surface-container-highest text-outline hover:text-on-surface transition-colors">
-                          <span className="material-symbols-outlined text-base">edit</span>
-                        </button>
-                        <button onClick={() => deleteParent(p)}
-                          className="p-1.5 rounded-lg hover:bg-error-container/20 text-outline hover:text-error transition-colors">
-                          <span className="material-symbols-outlined text-base">delete</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Invoice info */}
-          <div className="bg-surface-container-lowest rounded-xl p-8 shadow-sm">
-            <div className="flex items-center justify-between mb-6 border-b border-outline-variant/10 pb-4">
-              <h3 className="font-headline text-lg font-bold text-on-surface">Thông tin hóa đơn</h3>
-              {canManage && (
-                <div className="flex items-center gap-4">
-                  <button
-                    onClick={() => setInvoicePreview(true)}
-                    className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
-                  >
-                    <span className="material-symbols-outlined text-base">receipt_long</span>Xem trước hóa đơn
-                  </button>
-                  <button
-                    onClick={() => setInvoiceModal(true)}
-                    className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
-                  >
-                    <span className="material-symbols-outlined text-base">edit</span>Chỉnh sửa
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-              <InfoRow label="Họ và tên" value={student.invoiceFullName} />
-              <InfoRow label="Số CCCD" value={student.invoiceCitizenId} />
-              <InfoRow label="Địa chỉ" value={student.invoiceAddress} />
-              <InfoRow label="Email" value={student.invoiceEmail} />
-              <InfoRow label="Số điện thoại" value={student.invoicePhone} />
-            </div>
-          </div>
-
+      <div className="space-y-6">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Enrollments */}
-          <div className="bg-surface-container-lowest rounded-xl p-8 shadow-sm">
-            <div className="flex items-center justify-between mb-6 border-b border-outline-variant/10 pb-4">
+          <div className="lg:col-span-7 bg-surface-container-lowest rounded-xl p-6 sm:p-8 shadow-sm">
+            <div className="flex items-center justify-between gap-3 flex-wrap mb-6 border-b border-outline-variant/10 pb-4">
               <h3 className="font-headline text-lg font-bold text-on-surface">Lớp học</h3>
               {canManage && (
-                <button
-                  onClick={() => setEnrollModal(true)}
-                  className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
-                >
+                <button onClick={() => setEnrollModal(true)} className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors">
                   <span className="material-symbols-outlined text-base">add</span>Đăng ký lớp
                 </button>
               )}
@@ -817,13 +642,13 @@ function InfoTab({
             ) : (
               <div className="space-y-2 mb-4">
                 {activeEnrollments.map(e => (
-                  <div key={e.id} className="flex items-center justify-between p-3 bg-surface-container-low rounded-xl">
-                    <div>
+                  <div key={e.id} className="flex items-center justify-between gap-3 p-3 bg-surface-container-low rounded-xl">
+                    <div className="min-w-0">
                       <p className="font-semibold text-on-surface text-sm">{e.className}</p>
                       <p className="text-xs text-outline">Ngày đăng ký: {fmt(e.enrollmentDate)}</p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] bg-secondary-container/30 text-secondary px-2 py-1 rounded-full font-bold">Đang học</span>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <span className="text-[10px] bg-secondary-container/30 text-secondary px-2 py-1 rounded-full font-bold whitespace-nowrap">Đang học</span>
                       {canManage && (
                         <button
                           onClick={() => dropEnrollment(e)}
@@ -845,13 +670,13 @@ function InfoTab({
                 </summary>
                 <div className="space-y-2 mt-2">
                   {droppedEnrollments.map(e => (
-                    <div key={e.id} className="flex items-center justify-between p-3 bg-surface-container-low/50 rounded-xl opacity-60 hover:opacity-80 transition-opacity">
-                      <div>
+                    <div key={e.id} className="flex items-center justify-between gap-3 p-3 bg-surface-container-low/50 rounded-xl opacity-60 hover:opacity-80 transition-opacity">
+                      <div className="min-w-0">
                         <p className="font-semibold text-on-surface text-sm line-through">{e.className}</p>
                         <p className="text-xs text-outline">Đăng ký: {fmt(e.enrollmentDate)}</p>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] bg-surface-container-high text-outline px-2 py-1 rounded-full font-bold">Đã nghỉ</span>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className="text-[10px] bg-surface-container-high text-outline px-2 py-1 rounded-full font-bold whitespace-nowrap">Đã nghỉ</span>
                         {canManage && (
                           <button
                             onClick={() => deleteEnrollment(e)}
@@ -867,6 +692,119 @@ function InfoTab({
                 </div>
               </details>
             )}
+          </div>
+
+          {/* Invoice info */}
+          <div className="lg:col-span-5 bg-surface-container-lowest rounded-xl p-6 sm:p-8 shadow-sm">
+            <div className="flex items-center justify-between gap-3 flex-wrap mb-6 border-b border-outline-variant/10 pb-4">
+              <h3 className="font-headline text-lg font-bold text-on-surface">Thông tin hóa đơn</h3>
+              {canManage && (
+                <div className="flex items-center gap-4">
+                  <button onClick={() => setInvoicePreview(true)} className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors">
+                    <span className="material-symbols-outlined text-base">receipt_long</span>Xem trước
+                  </button>
+                  <button onClick={() => setInvoiceModal(true)} className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors">
+                    <span className="material-symbols-outlined text-base">edit</span>Chỉnh sửa
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <InfoRow label="Họ và tên" value={student.invoiceFullName} />
+              <InfoRow label="Số CCCD" value={student.invoiceCitizenId} />
+              <div className="sm:col-span-2"><InfoRow label="Địa chỉ" value={student.invoiceAddress} /></div>
+              <InfoRow label="Email" value={student.invoiceEmail} />
+              <InfoRow label="Số điện thoại" value={student.invoicePhone} />
+            </div>
+          </div>
+        </div>
+
+        {/* Profile & contacts */}
+        <div className="bg-surface-container-lowest rounded-xl p-6 sm:p-8 shadow-sm">
+          <div className="flex items-center justify-between gap-3 flex-wrap mb-6 border-b border-outline-variant/10 pb-4">
+            <h3 className="font-headline text-lg font-bold text-on-surface">Hồ sơ &amp; liên hệ</h3>
+            {canManage && (
+              <button onClick={onEdit} className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors">
+                <span className="material-symbols-outlined text-base">edit</span>Chỉnh sửa
+              </button>
+            )}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+            <InfoRow label="Ngày sinh" value={fmt(student.dateOfBirth)} />
+            <InfoRow label="Giới tính" value={student.gender === 'MALE' ? 'Nam' : student.gender === 'FEMALE' ? 'Nữ' : null} />
+            <InfoRow label="Trường học" value={student.school} />
+            {student.notes && <div className="sm:col-span-3"><InfoRow label="Ghi chú" value={student.notes} /></div>}
+          </div>
+          <div className="mt-6 pt-5 border-t border-outline-variant/10">
+            <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+              <span className="text-[10px] uppercase font-bold text-outline tracking-wider">Phụ huynh</span>
+              {canManage && (
+                <button onClick={() => setParentModal({ open: true, parent: null })} className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors">
+                  <span className="material-symbols-outlined text-base">add</span>Thêm phụ huynh
+                </button>
+              )}
+            </div>
+              {parents.length === 0 ? (
+                <p className="text-sm text-outline">Chưa có thông tin phụ huynh</p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {parents.map(p => (
+                    <div key={p.id} className="profile-contact p-4 bg-surface-container-low rounded-xl flex items-start gap-4">
+                      <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm flex-shrink-0">
+                        {p.fullName?.[0]?.toUpperCase() ?? '?'}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-bold text-on-surface">{p.fullName}</p>
+                          {p.isPrimaryContact && (
+                            <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-bold">Liên hệ chính</span>
+                          )}
+                        </div>
+                        <p className="text-sm text-outline mt-0.5">{p.relationship}</p>
+                        <div className="flex gap-4 mt-2 flex-wrap">
+                          {p.phone && (
+                            <a href={`tel:${p.phone}`} className="text-sm text-on-surface-variant flex items-center gap-1 hover:text-primary transition-colors">
+                              <span className="material-symbols-outlined text-sm">phone</span>{p.phone}
+                            </a>
+                          )}
+                          {(() => {
+                            const zaloUrl = buildZaloUrl(p.zalo || p.phone)
+                            return zaloUrl ? (
+                              <a
+                                href={zaloUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-sm text-blue-500 flex items-center gap-1 hover:underline"
+                                title="Mở Zalo để nhắn tin"
+                              >
+                                <span className="material-symbols-outlined text-sm">chat</span>
+                                Nhắn Zalo
+                              </a>
+                            ) : null
+                          })()}
+                          {p.email && (
+                            <a href={`mailto:${p.email}`} className="text-sm text-on-surface-variant flex items-center gap-1 hover:text-primary transition-colors">
+                              <span className="material-symbols-outlined text-sm">mail</span>{p.email}
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                      {canManage && (
+                        <div className="flex gap-1 flex-shrink-0">
+                          <button onClick={() => setParentModal({ open: true, parent: p })}
+                            className="p-1.5 rounded-lg hover:bg-surface-container-highest text-outline hover:text-on-surface transition-colors">
+                            <span className="material-symbols-outlined text-base">edit</span>
+                          </button>
+                          <button onClick={() => deleteParent(p)}
+                            className="p-1.5 rounded-lg hover:bg-error-container/20 text-outline hover:text-error transition-colors">
+                            <span className="material-symbols-outlined text-base">delete</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
           </div>
         </div>
       </div>
@@ -2352,7 +2290,7 @@ function buildZaloUrl(phone?: string | null): string | null {
   return `https://zalo.me/${intl}`
 }
 
-function ShareLinkBox({ studentId }: { studentId: string }) {
+function ShareLinkButton({ studentId }: { studentId: string }) {
   const showAlert = useAlert()
   const [copied, setCopied] = useState(false)
   const url = buildParentUrl(studentId)
@@ -2364,25 +2302,54 @@ function ShareLinkBox({ studentId }: { studentId: string }) {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch {
-      await showAlert({ title: 'Không sao chép được', message: 'Trình duyệt không cho phép sao chép. Hãy chọn và copy thủ công.' })
+      await showAlert({ title: 'Không sao chép được', message: `Trình duyệt không cho phép sao chép. Hãy copy thủ công: ${url}` })
     }
   }
 
   return (
-    <section className="bg-primary-container/15 border border-primary/20 rounded-xl p-4 flex items-center gap-3 flex-wrap">
-      <span className="material-symbols-outlined text-primary text-2xl flex-shrink-0">share</span>
-      <div className="flex-1 min-w-[240px] max-sm:min-w-0 max-sm:basis-[calc(100%-3rem)]">
-        <p className="text-xs uppercase font-bold tracking-wider text-primary mb-1">Link chia sẻ phụ huynh</p>
-        <p className="text-sm text-on-surface font-mono break-all">{url}</p>
-      </div>
-      <button
-        onClick={copy}
-        className="px-4 py-2 rounded-lg bg-primary text-on-primary text-sm font-semibold flex items-center gap-1.5 hover:bg-primary/90 transition-colors flex-shrink-0"
-      >
-        <span className="material-symbols-outlined text-base">{copied ? 'check' : 'content_copy'}</span>
-        {copied ? 'Đã sao chép' : 'Sao chép link'}
+    <button onClick={copy} title={url} className="btn-secondary">
+      <span className="material-symbols-outlined text-base">{copied ? 'check' : 'share'}</span>
+      {copied ? 'Đã sao chép' : 'Sao chép link phụ huynh'}
+    </button>
+  )
+}
+
+type StudentStatus = 'ACTIVE' | 'INACTIVE' | 'RESERVED'
+
+function StatusMenu({ status, labels, onChange }: {
+  status: StudentStatus
+  labels: Record<string, { label: string }>
+  onChange: (status: StudentStatus) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const options: { value: StudentStatus; icon: string; text: string; cls: string }[] = [
+    { value: 'ACTIVE', icon: 'check_circle', text: 'Kích hoạt đang học', cls: 'text-secondary' },
+    { value: 'RESERVED', icon: 'pause_circle', text: 'Bảo lưu', cls: 'text-outline' },
+    { value: 'INACTIVE', icon: 'cancel', text: 'Cho nghỉ học', cls: 'text-error' },
+  ]
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen(o => !o)} className="btn-secondary" aria-expanded={open}>
+        Trạng thái: {labels[status]?.label ?? status}
+        <span className="material-symbols-outlined text-base">expand_more</span>
       </button>
-    </section>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 max-sm:left-0 max-sm:right-auto z-40 mt-2 w-56 bg-surface-container-lowest rounded-xl shadow-xl border border-outline-variant/20 p-1.5">
+            {options.filter(o => o.value !== status).map(o => (
+              <button
+                key={o.value}
+                onClick={() => { setOpen(false); onChange(o.value) }}
+                className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold hover:bg-surface-container-high transition-colors ${o.cls}`}
+              >
+                <span className="material-symbols-outlined text-base">{o.icon}</span>{o.text}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 
@@ -2438,6 +2405,18 @@ export default function StudentProfile() {
   }
   const statusInfo = statusConfig[student.status] ?? statusConfig.INACTIVE
 
+  const changeStatus = async (status: StudentStatus) => {
+    const ok = await confirm({
+      title: 'Đổi trạng thái học viên',
+      message: `Chuyển trạng thái học viên sang "${statusConfig[status].label}"?`,
+      confirmLabel: 'Xác nhận',
+      danger: status === 'INACTIVE',
+    })
+    if (!ok) return
+    await api.put(`/students/${student.id}`, { status })
+    setStudent((prev: any) => ({ ...prev, status }))
+  }
+
   return (
     <div>
       <TopBar title="Hồ sơ học viên" />
@@ -2452,48 +2431,28 @@ export default function StudentProfile() {
         </div>
 
         {/* Header */}
-        <section className="flex flex-col md:flex-row gap-8 items-start">
-          <div className="relative flex-shrink-0">
-            <div className="w-32 h-32 rounded-2xl bg-gradient-to-br from-primary to-primary-container p-1 shadow-lg shadow-primary/20">
-              <div className="w-full h-full rounded-[14px] bg-surface-container-highest flex items-center justify-center">
-                <span className="text-4xl font-black text-primary">
-                  {student.fullName.split(' ').slice(-1)[0]?.[0]?.toUpperCase() ?? '?'}
-                </span>
-              </div>
-            </div>
-            <div className={`absolute -bottom-2 -right-2 px-3 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase shadow-sm ${statusInfo.cls}`}>
-              {statusInfo.label}
+        <section className="flex flex-col sm:flex-row gap-5 sm:items-center">
+          <div className="w-16 h-16 flex-shrink-0 rounded-xl bg-gradient-to-br from-primary to-primary-container p-0.5 shadow-md shadow-primary/20">
+            <div className="w-full h-full rounded-[10px] bg-surface-container-highest flex items-center justify-center">
+              <span className="text-2xl font-black text-primary">
+                {student.fullName.split(' ').slice(-1)[0]?.[0]?.toUpperCase() ?? '?'}
+              </span>
             </div>
           </div>
-
-          <div className="flex-1 space-y-4">
-            <div>
-              <h2 className="text-4xl font-headline font-extrabold text-on-surface tracking-tight">{student.fullName}</h2>
-              <p className="text-on-surface-variant font-medium flex items-center gap-2 mt-1">
-                <span className="material-symbols-outlined text-sm">id_card</span>
-                {student.id.slice(0, 8).toUpperCase()}
-                {student.enrollmentDate && (
-                  <span className="text-outline text-xs">· Nhập học {fmt(student.enrollmentDate)}</span>
-                )}
-              </p>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-3xl font-headline font-extrabold text-on-surface tracking-tight">{student.fullName}</h2>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-sm text-on-surface-variant">
+              <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-widest uppercase ${statusInfo.cls}`}>{statusInfo.label}</span>
+              {student.gradeLevel && <span>Lớp {student.gradeLevel}</span>}
+              <span className="flex items-center gap-1"><span className="material-symbols-outlined text-sm">id_card</span>{student.id.slice(0, 8).toUpperCase()}</span>
+              {student.enrollmentDate && <span>Nhập học {fmt(student.enrollmentDate)}</span>}
             </div>
-            <div className="flex flex-wrap gap-3">
-              {student.gradeLevel && (
-                <span className="px-4 py-1.5 bg-surface-container-highest text-on-primary-container rounded-lg text-sm font-semibold flex items-center gap-2">
-                  <span className="material-symbols-outlined text-lg">school</span>Lớp {student.gradeLevel}
-                </span>
-              )}
-              {enrollments.filter(e => e.status === 'ACTIVE').map(e => (
-                <span key={e.id} className="px-4 py-1.5 bg-secondary-container/30 text-on-secondary-container rounded-lg text-sm font-semibold">
-                  {e.className}
-                </span>
-              ))}
-            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <ShareLinkButton studentId={student.id} />
+            {canManageStudents && <StatusMenu status={student.status} labels={statusConfig} onChange={changeStatus} />}
           </div>
         </section>
-
-        {/* Share link cho phụ huynh */}
-        <ShareLinkBox studentId={student.id} />
 
         {/* Tabs */}
         <div className="responsive-tabs flex gap-1 border-b border-outline-variant/20">
@@ -2522,18 +2481,6 @@ export default function StudentProfile() {
             onRefresh={load}
             canManage={canManageStudents}
             onEdit={() => setEditModal(true)}
-            onStatusChange={async (status) => {
-              const labels = { ACTIVE: 'Đang học', INACTIVE: 'Đã nghỉ', RESERVED: 'Bảo lưu' }
-              const ok = await confirm({
-                title: 'Đổi trạng thái học viên',
-                message: `Chuyển trạng thái học viên sang "${labels[status]}"?`,
-                confirmLabel: 'Xác nhận',
-                danger: status === 'INACTIVE',
-              })
-              if (!ok) return
-              await api.put(`/students/${student.id}`, { status })
-              setStudent((prev: any) => ({ ...prev, status }))
-            }}
           />
         )}
         {activeTab === 'schedule' && (
