@@ -1,4 +1,5 @@
-import { InvoicePreviewError } from './misaInvoicePreview'
+import { invoiceLines, InvoicePreviewError } from './misaInvoicePreview'
+import { vndInWords } from '../lib/vndWords'
 
 export const invoiceInfoSelect = {
   fullName: true, address: true,
@@ -41,4 +42,39 @@ export function parseInvoiceInfo(body: Record<string, unknown>) {
   if (email && !/^[^\s@;]+@[^\s@;]+\.[^\s@;]+$/.test(email)) throw new InvoicePreviewError(400, 'Email hoá đơn không hợp lệ.')
   if (phone && !/^[0-9+().\-\s]{8,30}$/.test(phone)) throw new InvoicePreviewError(400, 'Số điện thoại hoá đơn không hợp lệ.')
   return out
+}
+
+interface PreviewRecord { className: string; baseAmount: number; discountAmount: number; finalAmount: number }
+
+/** Bản xem trước hoá đơn: cùng người mua và dòng hàng với hoá đơn thật; tháng chưa có phiếu thì dòng mẫu theo lớp đang học. */
+export function buildInvoicePreview(input: {
+  student: InvoiceInfoSource; records: PreviewRecord[]; activeClassNames: string[]
+  period: { month: number; year: number } | null; periods: { month: number; year: number }[]
+  invoiceDate: string; series: string | null; existingInvoice: { invoiceNumber: string | null; status: string } | null
+}) {
+  const { student, records, period } = input
+  const buyer = buyerFromStudent(student)
+  const lines = records.length
+    ? invoiceLines(records)
+    : input.activeClassNames.map(className => ({ description: `Học phí ${className}`, unitName: 'Tháng', quantity: 1,
+      unitPrice: null, amount: null, discountAmount: 0, finalAmount: null }))
+  const sum = (field: 'amount' | 'discountAmount' | 'finalAmount') => records.length
+    ? invoiceLines(records).reduce((total, line) => total + line[field], 0) : null
+  const warnings: string[] = []
+  if (!records.length) warnings.push(period
+    ? `Chưa có phiếu học phí tháng ${period.month}/${period.year}; số tiền chỉ là mẫu.`
+    : 'Học viên chưa có phiếu học phí nào; số tiền chỉ là mẫu.')
+  if (input.existingInvoice) warnings.push(`Tháng này đã có hoá đơn${input.existingInvoice.invoiceNumber ? ` số ${input.existingInvoice.invoiceNumber}` : ''} trên MISA.`)
+  if (!buyer.citizenIdNumber) warnings.push('Chưa có số CCCD.')
+  if (!buyer.address) warnings.push('Chưa có địa chỉ.')
+  if (!buyer.email) warnings.push('Chưa có email: MISA sẽ không gửi được hoá đơn cho người mua.')
+  const finalAmount = sum('finalAmount')
+  return {
+    invoiceDate: input.invoiceDate, series: input.series, buyer,
+    buyerFallback: { fullName: !student.invoiceFullName, address: !student.invoiceAddress && !!student.address },
+    period, periods: input.periods, lines,
+    totals: { amount: sum('amount'), discountAmount: sum('discountAmount'), finalAmount },
+    amountInWords: finalAmount === null ? null : vndInWords(finalAmount),
+    existingInvoice: input.existingInvoice, warnings,
+  }
 }

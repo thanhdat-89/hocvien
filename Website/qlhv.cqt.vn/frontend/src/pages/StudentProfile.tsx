@@ -7,6 +7,7 @@ import { Student, ClassEnrollment, TuitionRecord, Parent, Class, StudentPromotio
 import { useAuth } from '../hooks/useAuth'
 import { gradeOfClass } from '../lib/classGrade'
 import { buildParentUrl } from '../lib/parentUrl'
+import InvoicePreviewModal from '../components/InvoicePreviewModal'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -585,6 +586,7 @@ function InfoTab({
   const [parentModal, setParentModal] = useState<{ open: boolean; parent: (Parent & { id: string }) | null }>({ open: false, parent: null })
   const [enrollModal, setEnrollModal] = useState(false)
   const [invoiceModal, setInvoiceModal] = useState(false)
+  const [invoicePreview, setInvoicePreview] = useState(false)
   const [confirm, setConfirm] = useState<{ message: string; onConfirm: () => void } | null>(null)
 
   const deleteEnrollment = (e: ClassEnrollment) => {
@@ -772,12 +774,20 @@ function InfoTab({
             <div className="flex items-center justify-between mb-6 border-b border-outline-variant/10 pb-4">
               <h3 className="font-headline text-lg font-bold text-on-surface">Thông tin hóa đơn</h3>
               {canManage && (
-                <button
-                  onClick={() => setInvoiceModal(true)}
-                  className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
-                >
-                  <span className="material-symbols-outlined text-base">edit</span>Chỉnh sửa
-                </button>
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={() => setInvoicePreview(true)}
+                    className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-base">receipt_long</span>Xem trước hóa đơn
+                  </button>
+                  <button
+                    onClick={() => setInvoiceModal(true)}
+                    className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-base">edit</span>Chỉnh sửa
+                  </button>
+                </div>
               )}
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -862,6 +872,7 @@ function InfoTab({
       </div>
 
       {/* Modals */}
+      {invoicePreview && <InvoicePreviewModal studentId={student.id} onClose={() => setInvoicePreview(false)} />}
       {invoiceModal && (
         <InvoiceInfoModal
           student={student}

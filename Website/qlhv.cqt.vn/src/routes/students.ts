@@ -20,6 +20,7 @@ import { AuthRequest } from '../types'
 import { currentSchoolYearId, defaultBranchId } from '../lib/branchContext'
 import type { ClassEnrollment } from '../types/models'
 import { parseInvoiceInfo } from '../services/studentInvoiceInfo'
+import { getStudentInvoicePreview } from '../services/studentInvoicePreview'
 
 const router = Router()
 router.use(authenticate)
@@ -205,6 +206,17 @@ router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) =
       tuitionRecords: tuitionRecords.map(tuitionRecordDoc),
       promotions: promotions.map(studentPromotionDoc),
     })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// GET /api/students/:id/invoice-preview?month=&year= — Xem trước hoá đơn (không gọi MISA)
+router.get('/:id/invoice-preview', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const month = Number(req.query.month), year = Number(req.query.year)
+    const period = Number.isInteger(month) && month >= 1 && month <= 12 && Number.isInteger(year) && year >= 2000 && year <= 2100
+    res.json(await getStudentInvoicePreview(s(req.params.id), period ? month : undefined, period ? year : undefined))
   } catch (err) {
     next(err)
   }

@@ -230,6 +230,14 @@ export async function readMisaInvoiceStatus(refId: string, request: typeof fetch
   } as const
 }
 
+/** Dòng hàng trên hoá đơn — dùng chung cho hoá đơn thật và bản xem trước. */
+export function invoiceLines(sources: Pick<InvoiceSource, 'className' | 'baseAmount' | 'discountAmount' | 'finalAmount'>[]) {
+  return sources.map(item => ({
+    description: `Học phí ${item.className}`, unitName: 'Tháng', quantity: 1, unitPrice: item.baseAmount,
+    amount: item.baseAmount, discountAmount: item.discountAmount, finalAmount: item.finalAmount,
+  }))
+}
+
 export async function createMisaDraft(input: { refId: string; source: InvoiceSource; sources?: InvoiceSource[]; template: InvoiceTemplate; buyer: InvoiceBuyer; invoiceDate: string }, request: typeof fetch = fetch) {
   const { source: s, buyer: b, template: t } = input
   const sources = input.sources?.length ? input.sources : [s]
@@ -238,13 +246,13 @@ export async function createMisaDraft(input: { refId: string; source: InvoiceSou
   const baseAmount = total('baseAmount'), discountAmount = total('discountAmount'), finalAmount = total('finalAmount')
   if (![baseAmount, discountAmount, finalAmount].every(Number.isSafeInteger)) throw new InvoicePreviewError(400, 'Tổng tiền hóa đơn vượt quá giới hạn an toàn.')
   const { fields, token, organizationUnitId, databaseId, companyId, userId } = await legacyToken(request)
-  const details = sources.map((item, index) => ({
-    RefDetailID: randomUUID(), RefID: input.refId, Description: `Học phí ${item.className}`,
-    UnitName: 'Tháng', Quantity: 1, UnitPrice: item.baseAmount, AmountOC: item.baseAmount, Amount: item.baseAmount,
-    DiscountRate: item.baseAmount ? item.discountAmount / item.baseAmount * 100 : 0,
-    DiscountAmountOC: item.discountAmount, DiscountAmount: item.discountAmount, VATRate: 0, VATAmountOC: 0, VATAmount: 0,
-    AmountWithoutVATOC: item.finalAmount, AmountWithoutVAT: item.finalAmount,
-    IsPromotion: false, SortOrder: index + 1, SortOrderView: index + 1, CustomField1Detail: String(item.discountAmount),
+  const details = invoiceLines(sources).map((line, index) => ({
+    RefDetailID: randomUUID(), RefID: input.refId, Description: line.description,
+    UnitName: line.unitName, Quantity: line.quantity, UnitPrice: line.unitPrice, AmountOC: line.amount, Amount: line.amount,
+    DiscountRate: line.amount ? line.discountAmount / line.amount * 100 : 0,
+    DiscountAmountOC: line.discountAmount, DiscountAmount: line.discountAmount, VATRate: 0, VATAmountOC: 0, VATAmount: 0,
+    AmountWithoutVATOC: line.finalAmount, AmountWithoutVAT: line.finalAmount,
+    IsPromotion: false, SortOrder: index + 1, SortOrderView: index + 1, CustomField1Detail: String(line.discountAmount),
   }))
   const payload = [{
     EntityState: 1, MISAEntityState: 1, RefID: input.refId,
