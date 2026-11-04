@@ -44,6 +44,11 @@ function buildZaloUrl(phone?: string | null): string | null {
   return `https://zalo.me/${intl}`
 }
 
+/** Bỏ dấu tiếng Việt và chữ hoa để tìm "an khanh" ra "An Khánh". */
+function foldVietnamese(text: string) {
+  return text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/\s+/g, ' ').trim()
+}
+
 export default function Tuition() {
   const thisYear = new Date().getFullYear()
   const [searchParams] = useSearchParams()
@@ -58,6 +63,7 @@ export default function Tuition() {
   const [classFilter, setClassFilter] = useState<string | null>(null)
   const [gradeFilter, setGradeFilter] = useState<number | null>(null)
   const [unpaidOnly, setUnpaidOnly] = useState(false)
+  const [search, setSearch] = useState('')
 
   const loadData = (force = false) => {
     const request = ++latestRequest.current
@@ -102,7 +108,9 @@ export default function Tuition() {
     return na - nb || a.name.localeCompare(b.name)
   })
 
+  const query = foldVietnamese(search)
   const filtered = rows.filter(r => {
+    if (query && !foldVietnamese(r.studentName).includes(query)) return false
     if (gradeFilter != null && r.gradeLevel !== gradeFilter) return false
     if (classFilter && r.classId !== classFilter) return false
     if (unpaidOnly && (r.tuitionRecord ? r.tuitionRecord.remainingAmount : r.finalAmount) <= 0) return false
@@ -511,7 +519,20 @@ export default function Tuition() {
               <h3 id="tuition-table-title" className="text-base font-semibold text-on-surface">Danh sách học phí</h3>
               <p className="mt-1 text-xs text-slate-500">Kỳ học phí {String(month).padStart(2, '0')}/{year}</p>
             </div>
-            <p className="text-xs text-slate-500"><span className="font-semibold text-slate-700">{uniqueStudents}</span> học viên <span className="mx-2 text-slate-300">·</span><span className="font-semibold text-slate-700">{filtered.length}</span> khoản học phí</p>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 max-sm:w-full">
+              <label className="relative max-sm:w-full">
+                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-lg text-slate-400">search</span>
+                <input
+                  type="search"
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Tìm theo tên học viên"
+                  aria-label="Tìm học phí theo tên học viên"
+                  className="w-64 max-sm:w-full rounded-lg border border-slate-200 py-2 pl-10 pr-3 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+              </label>
+              <p className="text-xs text-slate-500"><span className="font-semibold text-slate-700">{uniqueStudents}</span> học viên <span className="mx-2 text-slate-300">·</span><span className="font-semibold text-slate-700">{filtered.length}</span> khoản học phí</p>
+            </div>
           </div>
           {loading ? (
             <div role="status" className="py-16 text-center text-slate-500">
@@ -668,7 +689,9 @@ export default function Tuition() {
                   <tbody><tr>
                       <td colSpan={8} className="py-16 text-center text-outline">
                         <span className="material-symbols-outlined text-5xl block mb-3 opacity-30">payments</span>
-                        {classFilter || gradeFilter != null || unpaidOnly
+                        {query
+                          ? `Không tìm thấy học viên "${search.trim()}"`
+                          : classFilter || gradeFilter != null || unpaidOnly
                           ? `Không có dữ liệu cho bộ lọc đang chọn`
                           : `Không có dữ liệu học phí tháng ${month}/${year}`}
                       </td>
