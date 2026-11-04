@@ -627,8 +627,32 @@ function InfoTab({
     <>
       <div className="space-y-6">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Invoice info */}
+          <div className="lg:col-span-6 bg-surface-container-lowest rounded-xl p-6 sm:p-8 shadow-sm">
+            <div className="flex items-center justify-between gap-3 flex-wrap mb-6 border-b border-outline-variant/10 pb-4">
+              <h3 className="font-headline text-lg font-bold text-on-surface">Thông tin hóa đơn</h3>
+              {canManage && (
+                <div className="flex items-center gap-4">
+                  <button onClick={() => setInvoicePreview(true)} className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors">
+                    <span className="material-symbols-outlined text-base">receipt_long</span>Xem trước
+                  </button>
+                  <button onClick={() => setInvoiceModal(true)} className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors">
+                    <span className="material-symbols-outlined text-base">edit</span>Chỉnh sửa
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <InfoRow label="Họ và tên" value={student.invoiceFullName} />
+              <InfoRow label="Số CCCD" value={student.invoiceCitizenId} />
+              <div className="sm:col-span-2"><InfoRow label="Địa chỉ" value={student.invoiceAddress} /></div>
+              <InfoRow label="Email" value={student.invoiceEmail} />
+              <InfoRow label="Số điện thoại" value={student.invoicePhone} />
+            </div>
+          </div>
+
           {/* Enrollments */}
-          <div className="lg:col-span-7 bg-surface-container-lowest rounded-xl p-6 sm:p-8 shadow-sm">
+          <div className="lg:col-span-6 bg-surface-container-lowest rounded-xl p-6 sm:p-8 shadow-sm">
             <div className="flex items-center justify-between gap-3 flex-wrap mb-6 border-b border-outline-variant/10 pb-4">
               <h3 className="font-headline text-lg font-bold text-on-surface">Lớp học</h3>
               {canManage && (
@@ -692,30 +716,6 @@ function InfoTab({
                 </div>
               </details>
             )}
-          </div>
-
-          {/* Invoice info */}
-          <div className="lg:col-span-5 bg-surface-container-lowest rounded-xl p-6 sm:p-8 shadow-sm">
-            <div className="flex items-center justify-between gap-3 flex-wrap mb-6 border-b border-outline-variant/10 pb-4">
-              <h3 className="font-headline text-lg font-bold text-on-surface">Thông tin hóa đơn</h3>
-              {canManage && (
-                <div className="flex items-center gap-4">
-                  <button onClick={() => setInvoicePreview(true)} className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors">
-                    <span className="material-symbols-outlined text-base">receipt_long</span>Xem trước
-                  </button>
-                  <button onClick={() => setInvoiceModal(true)} className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors">
-                    <span className="material-symbols-outlined text-base">edit</span>Chỉnh sửa
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-              <InfoRow label="Họ và tên" value={student.invoiceFullName} />
-              <InfoRow label="Số CCCD" value={student.invoiceCitizenId} />
-              <div className="sm:col-span-2"><InfoRow label="Địa chỉ" value={student.invoiceAddress} /></div>
-              <InfoRow label="Email" value={student.invoiceEmail} />
-              <InfoRow label="Số điện thoại" value={student.invoicePhone} />
-            </div>
           </div>
         </div>
 
