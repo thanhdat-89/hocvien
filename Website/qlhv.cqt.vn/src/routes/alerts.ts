@@ -7,13 +7,14 @@ import { AuthRequest } from '../types'
 // Chuông thông báo: cảnh báo cần xử lý của cơ sở đang làm việc (lọc theo cơ sở ở lib/db)
 const router = Router()
 router.use(authenticate, requireRole('ADMIN', 'STAFF'))
+const activeAlert = { type: { not: 'sepay_unmatched' } }
 
 // GET /api/alerts — 30 cảnh báo mới nhất và số chưa đọc
 router.get('/', async (_req, res: Response, next: NextFunction) => {
   try {
     const [items, unread] = await Promise.all([
-      prisma.adminAlert.findMany({ orderBy: { createdAt: 'desc' }, take: 30 }),
-      prisma.adminAlert.count({ where: { read: false } }),
+      prisma.adminAlert.findMany({ where: activeAlert, orderBy: { createdAt: 'desc' }, take: 30 }),
+      prisma.adminAlert.count({ where: { ...activeAlert, read: false, resolvedAt: null } }),
     ])
     res.setHeader('Cache-Control', 'no-store')
     res.json({ items: items.map(api), unread })
@@ -23,7 +24,7 @@ router.get('/', async (_req, res: Response, next: NextFunction) => {
 // POST /api/alerts/read-all — đánh dấu đã đọc mọi cảnh báo của cơ sở
 router.post('/read-all', async (_req, res: Response, next: NextFunction) => {
   try {
-    const { count } = await prisma.adminAlert.updateMany({ where: { read: false }, data: { read: true } })
+    const { count } = await prisma.adminAlert.updateMany({ where: { ...activeAlert, read: false }, data: { read: true } })
     res.json({ count })
   } catch (err) { next(err) }
 })

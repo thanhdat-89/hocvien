@@ -50,9 +50,11 @@ const invoiceDate = (invoice: InvoiceRow) => {
   })
 }
 
-export default function EInvoicePreparation({ rows, counts, total, loading, error, month, year, retry, loadMore, loadingMore }: {
+export default function EInvoicePreparation({ rows, counts, total, loading, error, month, year, retry, loadMore, loadingMore, onRecreate }: {
   rows: InvoiceRow[]; counts: Record<string, number>; total: number; loading: boolean; error: string | null
   month: number; year: number; retry: () => void; loadMore?: () => void; loadingMore: boolean
+  /** Chỉ quản trị viên: mở hộp thoại tạo lại hoá đơn cho phiếu tạo thất bại / đã xoá trên MISA */
+  onRecreate?: (row: InvoiceRow) => void
 }) {
   const [refreshingStatusId, setRefreshingStatusId] = useState<string | null>(null)
   const [message, setMessage] = useState('')
@@ -124,7 +126,7 @@ export default function EInvoicePreparation({ rows, counts, total, loading, erro
       <span className="material-symbols-outlined text-primary">info</span>
       <div>
         <h3 className="font-bold text-on-surface">Theo dõi hóa đơn đã tạo</h3>
-        <p className="text-sm text-outline mt-1">Trang này chỉ hiển thị trạng thái các hóa đơn được tạo tự động từ trang Học phí. Việc tạo hóa đơn mới thực hiện khi tạo phiếu học phí.</p>
+        <p className="text-sm text-outline mt-1">Trang này hiển thị trạng thái các hóa đơn được tạo tự động từ trang Học phí. Hóa đơn tạo thất bại có thể bấm Tạo lại; phiếu học phí vẫn giữ nguyên.</p>
         {message && <p role="alert" className="text-sm text-red-700 mt-3">{message}</p>}
       </div>
     </div>
@@ -160,6 +162,7 @@ export default function EInvoicePreparation({ rows, counts, total, loading, erro
             const status = statusStyles[row.status] || { label: labels[row.status] || row.status, color: 'bg-slate-100 text-slate-600', icon: 'info' }
             const number = displayedInvoiceNumber(row.invoiceNumber)
             const canRefresh = row.refId && ['CREATING', 'OUTCOME_UNKNOWN', 'DRAFT_CREATED', 'ISSUED', 'SENT_TO_TAX'].includes(row.status)
+            const canRecreate = !!onRecreate && ['FAILED', 'REMOVED_FROM_MISA'].includes(row.status)
             return <tr key={row.id} className="hover:bg-slate-50/70 transition-colors">
               <td className="px-5 py-5 align-middle whitespace-nowrap tabular-nums text-slate-600">{invoiceDate(row)}</td>
               <td className="px-5 py-5 align-middle">
@@ -183,8 +186,11 @@ export default function EInvoicePreparation({ rows, counts, total, loading, erro
                   {canRefresh && <button type="button" title="Cập nhật trạng thái hóa đơn" aria-label={`Cập nhật trạng thái hóa đơn của ${row.studentName} (${row.className})`} disabled={refreshingStatusId !== null || syncProgress !== null} onClick={() => refreshInvoiceStatus(row.id)} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-blue-100 bg-blue-50/60 px-2.5 py-2 text-xs font-semibold text-primary hover:bg-blue-100 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary whitespace-nowrap">
                     <span aria-hidden="true" className={`material-symbols-outlined text-[16px] ${refreshingStatusId === row.id ? 'animate-spin motion-reduce:animate-none' : ''}`}>sync</span>{refreshingStatusId === row.id ? 'Đang tải' : 'Cập nhật'}
                   </button>}
+                  {canRecreate && <button type="button" aria-label={`Tạo lại hóa đơn của ${row.studentName} (${row.className})`} disabled={refreshingStatusId !== null || syncProgress !== null} onClick={() => onRecreate!(row)} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-rose-100 bg-rose-50/60 px-2.5 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary whitespace-nowrap">
+                    <span aria-hidden="true" className="material-symbols-outlined text-[16px]">replay</span>Tạo lại
+                  </button>}
                   {row.invoiceUrl && <a href={row.invoiceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-slate-600 hover:text-primary whitespace-nowrap">Xem MISA<span aria-hidden="true" className="material-symbols-outlined text-[15px]">open_in_new</span></a>}
-                  {!canRefresh && !row.invoiceUrl && <span className="text-slate-300">—</span>}
+                  {!canRefresh && !canRecreate && !row.invoiceUrl && <span className="text-slate-300">—</span>}
                 </div>
               </td>
             </tr>

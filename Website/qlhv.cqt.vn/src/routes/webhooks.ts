@@ -3,19 +3,9 @@
 // =============================================================
 
 import { Router, Request, Response, NextFunction } from 'express'
-import { prisma, newId, toDay } from '../lib/db'
-import { refreshTuitionStatus, getPaymentStatus } from '../services/tuitionCalculator'
-import { tryCreateAutomaticMisaDraft } from '../services/misaAutoDraft'
-import { sendMessage as sendZaloMessage } from '../services/zaloService'
-import { sendZnsAndLog, findActiveTemplate, resolveRecipient } from './zns'
-import {
-  parseTransferNote,
-  findStudentByCandidates,
-  findTuitionRecords,
-} from '../services/sepayMatcher'
+import { prisma } from '../lib/db'
 import type { BankTransaction } from '../types/models'
 import { authenticate, requireRole } from '../middleware/auth'
-import { raiseAlertSafely } from '../services/adminAlerts'
 
 const router = Router()
 
@@ -71,8 +61,7 @@ router.get('/sepay/status', authenticate, requireRole('ADMIN'), (_req: Request, 
   res.json({
     webhookKeySet: Boolean(process.env.SEPAY_WEBHOOK_KEY),
     ipCheck: process.env.SEPAY_SKIP_IP_CHECK !== 'true',
-    notifyParents: process.env.SEPAY_NOTIFY_PARENTS === 'true',
-    notifyAdminZalo: Boolean(process.env.SEPAY_NOTIFY_ADMIN_ZALO),
+    mode: 'journal_only',
   })
 })
 
@@ -103,30 +92,19 @@ router.post('/sepay', async (req: Request, res: Response, next: NextFunction) =>
       return
     }
 
-    // Ghi sổ giao dịch (và khoản thu nếu khớp) trong một transaction. sepayId là unique: một lần gửi lại đồng thời
-    // vi phạm unique → rollback cả khoản thu → trả idempotent như trên.
-    const saveTx = async (record: BankTransaction, payment?: { tuitionRecordId: string; studentId: string; amount: number; paymentDate: string; notes: string }) => {
+    // Giai đoạn thử nghiệm: chỉ lưu giao dịch SePay, không ghi học phí hay tạo hóa đơn.
+    const saveTx = async (record: BankTransaction) => {
       try {
-        return await prisma.$transaction(async tx => {
-          let paymentId: string | undefined
-          if (payment) {
-            paymentId = newId()
-            await tx.payment.create({
-              data: { id: paymentId, ...payment, paymentDate: toDay(payment.paymentDate)!, method: 'BANK_TRANSFER' },
-            })
-            await refreshTuitionStatus(payment.tuitionRecordId, tx)
-          }
-          await tx.bankTransaction.create({
-            data: {
-              ...record, sepayId: BigInt(record.sepayId), accumulated: BigInt(record.accumulated),
-              transactionDate: new Date(String(record.transactionDate).replace(' ', 'T') + 'Z'),
-              receivedAt: new Date(record.receivedAt), matchedPaymentId: paymentId ?? record.matchedPaymentId,
-            },
-          })
-          return { paymentId, duplicate: false }
+        await prisma.bankTransaction.create({
+          data: {
+            ...record, sepayId: BigInt(record.sepayId), accumulated: BigInt(record.accumulated),
+            transactionDate: new Date(String(record.transactionDate).replace(' ', 'T') + 'Z'),
+            receivedAt: new Date(record.receivedAt),
+          },
         })
+        return { duplicate: false }
       } catch (err: any) {
-        if (err?.code === 'P2002') return { paymentId: undefined, duplicate: true }
+        if (err?.code === 'P2002') return { duplicate: true }
         throw err
       }
     }
@@ -145,233 +123,13 @@ router.post('/sepay', async (req: Request, res: Response, next: NextFunction) =>
       receivedAt: new Date().toISOString(),
     }
 
-    // Bỏ qua tiền chuyển ra.
-    if (body.transferType === 'out') {
-      const record: BankTransaction = {
-        id: docId, ...baseRecord, status: 'ignored_outbound',
-      }
-      if ((await saveTx(record)).duplicate) { res.json({ success: true, idempotent: true }); return }
-      res.json({ success: true, status: 'ignored_outbound' })
-      return
-    }
-
-    // Parse note để tìm shortId + month.
-    const parsed = parseTransferNote(body.content)
-    if (!parsed) {
-      const record: BankTransaction = {
-        id: docId, ...baseRecord, status: 'unmatched',
-        matchReason: 'Không parse được shortId hoặc tháng từ nội dung CK',
-      }
-      if ((await saveTx(record)).duplicate) { res.json({ success: true, idempotent: true }); return }
-      alertUnmatched(record)
-      res.json({ success: true, status: 'unmatched' })
-      return
-    }
-
-    const { shortId, students } = await findStudentByCandidates(parsed.candidates)
-    if (students.length === 0) {
-      const record: BankTransaction = {
-        id: docId, ...baseRecord, status: 'unmatched',
-        matchReason: `Không tìm thấy HV với shortId=${parsed.candidates.join('/')}`,
-      }
-      if ((await saveTx(record)).duplicate) { res.json({ success: true, idempotent: true }); return }
-      alertUnmatched(record)
-      res.json({ success: true, status: 'unmatched' })
-      return
-    }
-    if (students.length > 1) {
-      const record: BankTransaction = {
-        id: docId, ...baseRecord, status: 'unmatched',
-        matchReason: `Trùng shortId ${shortId} (${students.length} HV) — admin cần xác nhận thủ công`,
-      }
-      if ((await saveTx(record)).duplicate) { res.json({ success: true, idempotent: true }); return }
-      alertUnmatched(record)
-      res.json({ success: true, status: 'unmatched' })
-      return
-    }
-
-    const student = students[0]
-    const txYear = Number((body.transactionDate || '').slice(0, 4)) || new Date().getFullYear()
-    const records = await findTuitionRecords(student.id, parsed.month, txYear)
-
-    if (records.length === 0) {
-      const reason = `HV "${student.fullName}" (${student.id}) chưa có phiếu HP T${parsed.month}/${txYear} — admin vào trang Học phí bấm "Tạo phiếu" cho HV này, sau đó CK sẽ tự khớp lại.`
-      const record: BankTransaction = {
-        id: docId, ...baseRecord, status: 'unmatched',
-        matchedStudentId: student.id,
-        matchReason: reason,
-      }
-      if ((await saveTx(record)).duplicate) { res.json({ success: true, idempotent: true }); return }
-      alertUnmatched(record)
-      await notifyAdminUnmatched({ amount: Number(body.transferAmount) || 0, reason })
-      res.json({ success: true, status: 'unmatched' })
-      return
-    }
-    if (records.length > 1) {
-      const reason = `HV "${student.fullName}" (${student.id}) có ${records.length} phiếu HP T${parsed.month}/${txYear} — admin cần phân bổ tay.`
-      const record: BankTransaction = {
-        id: docId, ...baseRecord, status: 'unmatched',
-        matchedStudentId: student.id,
-        matchReason: reason,
-      }
-      if ((await saveTx(record)).duplicate) { res.json({ success: true, idempotent: true }); return }
-      alertUnmatched(record)
-      await notifyAdminUnmatched({ amount: Number(body.transferAmount) || 0, reason })
-      res.json({ success: true, status: 'unmatched' })
-      return
-    }
-
-    // ✅ Match đúng 1 phiếu — tạo Payment + refresh trạng thái phiếu.
-    const target = records[0]
-    const amount = Number(body.transferAmount) || 0
-    const now = new Date().toISOString()
-
-    const record: BankTransaction = {
-      id: docId, ...baseRecord, status: 'matched',
-      matchedStudentId: student.id,
-      matchedTuitionRecordId: target.id,
-      matchReason: `Auto-confirm ${amount.toLocaleString('vi-VN')}đ cho phiếu T${parsed.month}/${txYear}`,
-    }
-    const saved = await saveTx(record, {
-      tuitionRecordId: target.id,
-      studentId: student.id,
-      amount,
-      paymentDate: (body.transactionDate || now).slice(0, 10),
-      notes: `Auto SePay #${body.referenceCode || body.id}`,
-    })
-    if (saved.duplicate) { res.json({ success: true, idempotent: true }); return }
-    const paymentRef = { id: saved.paymentId! }
-
-    const invoiceDraft = await tryCreateAutomaticMisaDraft(target.id, 'sepay-webhook')
-
-    await notifyAfterMatch({
-      studentName: student.fullName,
-      parentZalo: (await prisma.parent.findFirst({
-        where: { studentId: student.id }, orderBy: [{ isPrimaryContact: 'desc' }, { createdAt: 'asc' }], select: { zalo: true },
-      }))?.zalo || '',
-      amount,
-      month: parsed.month,
-      tuitionRecordId: target.id,
-    })
-
-    // Case B — gửi ZNS xác nhận đã nhận thanh toán cho phụ huynh.
-    // Wrapped trong try/catch để lỗi ZNS không phá response webhook.
-    sendCaseBNotice({
-      studentId:    student.id,
-      studentName:  student.fullName,
-      record:       target,
-      amount,
-      txDate:       body.transactionDate || now,
-    }).catch(err => console.error('[ZNS] Case B failed:', err))
-
-    res.json({ success: true, status: 'matched', paymentId: paymentRef.id, invoiceDraft })
+    const status = body.transferType === 'out' ? 'ignored_outbound' : 'pending_review'
+    const record: BankTransaction = { id: docId, ...baseRecord, status }
+    if ((await saveTx(record)).duplicate) { res.json({ success: true, idempotent: true }); return }
+    res.json({ success: true, status })
   } catch (err) {
     next(err)
   }
 })
-
-/**
- * Gửi tin nhắn Zalo OA sau khi auto-confirm.
- * Test mode: SEPAY_NOTIFY_PARENTS != 'true' → không gửi cho phụ huynh, chỉ log.
- * Luôn gửi cho admin nếu SEPAY_NOTIFY_ADMIN_ZALO được set (Zalo user_id quản trị viên).
- */
-async function notifyAfterMatch(params: {
-  studentName: string
-  parentZalo: string
-  amount: number
-  month: number
-  tuitionRecordId: string
-}): Promise<void> {
-  const { studentName, parentZalo, amount, month, tuitionRecordId } = params
-  const status = await getPaymentStatus(tuitionRecordId).catch(() => null)
-  const remaining = status?.remaining ?? 0
-  const remainText = remaining > 0
-    ? `\nCòn nợ: ${remaining.toLocaleString('vi-VN')}đ`
-    : `\n✓ Đã thanh toán đủ học phí tháng ${month}.`
-
-  const parentMsg =
-    `Trung tâm đã nhận ${amount.toLocaleString('vi-VN')}đ học phí tháng ${month} của ${studentName}.${remainText}`
-  const adminMsg = `[SePay] +${amount.toLocaleString('vi-VN')}đ — ${studentName} T${month}.${remainText}`
-
-  if (process.env.SEPAY_NOTIFY_PARENTS === 'true' && parentZalo) {
-    await sendZaloMessage(parentZalo, parentMsg)
-  } else {
-    console.log('[SePay] Test mode — bỏ qua gửi Zalo cho phụ huynh:', parentMsg)
-  }
-
-  const adminZalo = process.env.SEPAY_NOTIFY_ADMIN_ZALO
-  if (adminZalo) {
-    await sendZaloMessage(adminZalo, adminMsg)
-  }
-}
-
-/**
- * Case B — gửi ZNS xác nhận đã nhận thanh toán cho phụ huynh chính.
- * Skip gracefully khi:
- *   - Chưa cấu hình ZNS env vars
- *   - Chưa có template active cho use case B
- *   - Học viên không có SĐT phụ huynh
- */
-async function sendCaseBNotice(input: {
-  studentId:   string
-  studentName: string
-  record:      { id: string; billingMonth: number; billingYear: number }
-  amount:      number
-  txDate:      string
-}): Promise<void> {
-  const template = await findActiveTemplate('B')
-  if (!template) {
-    console.log('[ZNS] Case B skip: chưa có template active cho use case B')
-    return
-  }
-
-  const recipient = await resolveRecipient(input.studentId)
-  if (!recipient.phone) {
-    console.warn(`[ZNS] Case B skip: HV ${input.studentId} không có SĐT phụ huynh`)
-    return
-  }
-
-  // Format thời gian nhận: "DD/MM/YYYY HH:mm" (ICT input giả định)
-  const d = new Date(input.txDate)
-  const fmtTime = isNaN(d.getTime())
-    ? input.txDate
-    : `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()} ` +
-      `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-
-  const shortInvoiceId = input.record.id.slice(-8).toUpperCase()
-
-  await sendZnsAndLog({
-    studentId:    input.studentId,
-    parentPhone:  recipient.phone,
-    templateId:   template.id,
-    useCase:      'B',
-    invoiceId:    input.record.id,
-    params: {
-      ten_hoc_vien:    input.studentName,
-      thang_nam:       `${input.record.billingMonth}/${input.record.billingYear}`,
-      so_tien_da_nhan: input.amount,
-      thoi_gian_nhan:  fmtTime,
-      ma_phieu:        shortInvoiceId,
-    },
-  })
-}
-
-/** Chuông thông báo: CK vào tài khoản chưa khớp được phiếu học phí nào */
-function alertUnmatched(record: BankTransaction) {
-  raiseAlertSafely('sepay_unmatched', `CK ${Number(record.transferAmount || 0).toLocaleString('vi-VN')}đ chưa khớp phiếu: ${record.matchReason || ''}`, {
-    transactionId: record.id, studentId: record.matchedStudentId ?? null, amount: Number(record.transferAmount) || 0,
-    content: record.content || '', transactionDate: record.transactionDate || '',
-  })
-}
-
-async function notifyAdminUnmatched(params: { amount: number; reason: string }): Promise<void> {
-  const adminZalo = process.env.SEPAY_NOTIFY_ADMIN_ZALO
-  const msg = `[SePay] CK ${params.amount.toLocaleString('vi-VN')}đ chưa khớp được:\n${params.reason}`
-  if (adminZalo) {
-    await sendZaloMessage(adminZalo, msg)
-  } else {
-    console.log('[SePay] Unmatched (no admin notify configured):', msg)
-  }
-}
 
 export default router

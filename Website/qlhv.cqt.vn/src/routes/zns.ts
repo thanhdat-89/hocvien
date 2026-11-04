@@ -18,6 +18,7 @@ import {
   sendZnsTemplate,
   normalizeVnPhone,
   ZNS_ENABLED,
+  ZNS_TUITION_PAUSED,
   type ZnsParams,
 } from '../services/zaloService'
 
@@ -32,6 +33,11 @@ router.get('/cron/remind-overdue', async (req: Request, res: Response, next: Nex
     const expected = process.env.CRON_SECRET
     if (!expected || req.headers.authorization !== `Bearer ${expected}`) {
       res.status(401).json({ message: 'Unauthorized' })
+      return
+    }
+
+    if (ZNS_TUITION_PAUSED) {
+      res.json({ skipped: true, reason: 'ZNS học phí đang tạm dừng' })
       return
     }
 
@@ -323,6 +329,10 @@ export async function findActiveTemplate(useCase: UseCase): Promise<{ id: string
 // ADMIN/STAFF gửi thông báo Zalo cho 1 phiếu học phí cụ thể.
 router.post('/tuition-notice', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    if (ZNS_TUITION_PAUSED) {
+      res.status(503).json({ message: 'Chức năng gửi thông báo Zalo đang tạm dừng' })
+      return
+    }
     const { tuitionRecordId, useCase = 'A' } = req.body as { tuitionRecordId?: string; useCase?: UseCase }
 
     if (!tuitionRecordId) {
@@ -438,6 +448,7 @@ router.post('/tuition-notice', requireRole('ADMIN', 'STAFF'), async (req: AuthRe
 router.get('/status', requireRole('ADMIN', 'STAFF'), (_req: AuthRequest, res: Response) => {
   res.json({
     enabled: ZNS_ENABLED,
+    tuitionPaused: ZNS_TUITION_PAUSED,
     appIdSet: Boolean(process.env.ZNS_APP_ID),
     accessTokenSet: Boolean(process.env.ZNS_ACCESS_TOKEN),
     refreshTokenSet: Boolean(process.env.ZNS_REFRESH_TOKEN),

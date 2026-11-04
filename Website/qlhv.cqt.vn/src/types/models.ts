@@ -267,7 +267,7 @@ export interface Payment {
   createdAt: string
 }
 
-export type BankTxStatus = 'matched' | 'unmatched' | 'duplicate' | 'ignored_outbound'
+export type BankTxStatus = 'matched' | 'unmatched' | 'duplicate' | 'ignored_outbound' | 'pending_review'
 
 export interface BankTransaction {
   id: string                     // = SePay transaction id (string form)

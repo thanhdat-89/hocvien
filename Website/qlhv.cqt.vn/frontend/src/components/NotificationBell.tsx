@@ -4,7 +4,7 @@ import api from '../services/api'
 
 // Chuông thông báo: cảnh báo cần xử lý của cơ sở đang làm việc (/api/alerts), cho quản trị viên và nhân viên.
 
-interface Alert { id: string; type: string; message: string; read: boolean; data: Record<string, any>; createdAt: string }
+interface Alert { id: string; type: string; message: string; read: boolean; resolvedAt: string | null; data: Record<string, any>; createdAt: string }
 
 const TYPE: Record<string, { icon: string; label: string; tone: string }> = {
   sepay_unmatched: { icon: 'account_balance', label: 'Chuyển khoản chưa khớp', tone: 'text-amber-700 bg-amber-100' },
@@ -17,7 +17,14 @@ const POLL_MS = 60_000
 
 /** Trang cần mở để xử lý cảnh báo */
 function targetOf(alert: Alert) {
-  if (alert.type === 'misa_invoice_failed') return '/tuition/invoices'
+  if (alert.type === 'misa_invoice_failed') {
+    // Mở thẳng hộp thoại tạo lại hoá đơn của phiếu (cảnh báo cũ không có kỳ thì giữ kỳ hiện tại)
+    const recordId = alert.data?.recordIds?.length === 1 ? alert.data.recordIds[0] : null
+    if (!recordId) return '/tuition/invoices'
+    const params = new URLSearchParams({ recordId })
+    if (alert.data.billingMonth && alert.data.billingYear) { params.set('month', String(alert.data.billingMonth)); params.set('year', String(alert.data.billingYear)) }
+    return `/tuition/invoices?${params}`
+  }
   if (alert.type === 'backup_failed') return '/settings/integrations'
   if (alert.data?.studentId) return `/students/${alert.data.studentId}`
   return alert.type === 'class_audit' ? '/classes' : '/tuition'
@@ -100,12 +107,14 @@ export default function NotificationBell() {
               return (
                 <li key={alert.id}>
                   <button type="button" onClick={() => openAlert(alert)}
-                    className={`flex w-full gap-3 px-4 py-3 text-left hover:bg-surface-container-low ${alert.read ? 'opacity-60' : ''}`}>
+                    className={`flex w-full gap-3 px-4 py-3 text-left hover:bg-surface-container-low ${alert.read || alert.resolvedAt ? 'opacity-60' : ''}`}>
                     <span className={`material-symbols-outlined flex h-8 w-8 shrink-0 self-start items-center justify-center rounded-lg text-lg ${kind.tone}`} aria-hidden="true">{kind.icon}</span>
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-2 text-xs text-outline">
                         <b className="font-semibold text-on-surface-variant">{kind.label}</b>· {timeAgo(alert.createdAt)}
-                        {!alert.read && <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-primary" aria-label="Chưa đọc" />}
+                        {alert.resolvedAt
+                          ? <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"><span className="material-symbols-outlined text-sm" aria-hidden="true">check_circle</span>Đã xử lý</span>
+                          : !alert.read && <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-primary" aria-label="Chưa đọc" />}
                       </span>
                       <span className="mt-0.5 block text-sm text-on-surface break-words">{alert.message}</span>
                     </span>

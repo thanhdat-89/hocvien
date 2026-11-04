@@ -8,32 +8,28 @@ const alerts = require('../dist/routes/alerts').default
 
 beforeEach(reset)
 
-const waitFor = async (check) => { for (let i = 0; i < 50 && !(await check()); i++) await new Promise(r => setTimeout(r, 20)) }
 const inBranch = (branchId, fn) => runInScope({ branchIds: [branchId], schoolYearId: null }, fn)
 
-test('CK SePay chưa khớp phiếu thành cảnh báo; có học viên thì gắn cơ sở của học viên', async () => {
+test('SePay thử nghiệm chỉ lưu giao dịch, không tạo cảnh báo cần xử lý', async () => {
   process.env.SEPAY_WEBHOOK_KEY = 'test-key'
   process.env.SEPAY_SKIP_IP_CHECK = 'true'
-  const { branchId } = await context()
+  await context()
   const student = await seed.student()
   const handler = routeHandler(require('../dist/routes/webhooks').default, '/sepay', 'post')
   const send = (id, content) => handler({
     body: { id, gateway: 'VPBank', transactionDate: '2026-10-15 10:20:30', accountNumber: '1', content, transferType: 'in', transferAmount: 500000, accumulated: 1, referenceCode: 'FT', description: '' },
     header: name => ({ authorization: 'Apikey test-key' })[name.toLowerCase()], ip: '127.0.0.1',
   })
-  assert.equal((await send(1001, 'chuyen tien an trua')).body.status, 'unmatched')
-  assert.equal((await send(1002, `HP T10 ${studentShortId(student.id)}`)).body.status, 'unmatched', 'chưa có phiếu tháng 10')
-  await waitFor(async () => (await prisma.adminAlert.count()) === 2)
-  const rows = await prisma.adminAlert.findMany({ orderBy: { createdAt: 'asc' } })
-  assert.deepEqual(rows.map(r => [r.type, r.branchId]), [['sepay_unmatched', null], ['sepay_unmatched', branchId]])
-  assert.match(rows[1].message, /500\.000đ chưa khớp phiếu/)
+  assert.equal((await send(1001, 'chuyen tien an trua')).body.status, 'pending_review')
+  assert.equal((await send(1002, `HP T10 ${studentShortId(student.id)}`)).body.status, 'pending_review')
+  assert.equal(await prisma.adminAlert.count(), 0)
   // Webhook gửi lại cùng giao dịch: không tạo cảnh báo trùng
   await send(1001, 'chuyen tien an trua')
-  await new Promise(r => setTimeout(r, 100))
-  assert.equal(await prisma.adminAlert.count(), 2)
+  assert.equal(await prisma.adminAlert.count(), 0)
+  assert.equal(await prisma.bankTransaction.count(), 2)
 })
 
-test('chuông: mỗi cơ sở thấy cảnh báo của mình và cảnh báo chưa rõ cơ sở; đọc hết chỉ trong cơ sở; giáo viên không dùng được', async () => {
+test('chuông chỉ hiện cảnh báo hoạt động, lọc SePay thử nghiệm; giữ phạm vi cơ sở', async () => {
   const { branchId: A } = await context()
   const B = (await prisma.branch.create({ data: { id: newId(), name: 'Cơ sở B' } })).id
   const a = await seed.student(), b = await seed.student({ branchId: B })
@@ -44,11 +40,11 @@ test('chuông: mỗi cơ sở thấy cảnh báo của mình và cảnh báo ch�
   const list = () => routeHandler(alerts, '/', 'get')({ user })
 
   const seenA = await inBranch(A, list)
-  assert.deepEqual([seenA.body.items.map(i => i.message).sort(), seenA.body.unread], [['A', 'chung'], 2])
+  assert.deepEqual([seenA.body.items.map(i => i.message).sort(), seenA.body.unread], [['A'], 1])
   await inBranch(A, () => routeHandler(alerts, '/read-all', 'post')({ user }))
   assert.equal((await inBranch(A, list)).body.unread, 0)
   const seenB = await inBranch(B, list)
-  assert.deepEqual([seenB.body.items.map(i => i.message).sort(), seenB.body.unread], [['B', 'chung'], 1], 'đọc ở A không đụng cảnh báo riêng của B')
+  assert.deepEqual([seenB.body.items.map(i => i.message).sort(), seenB.body.unread], [['B'], 1], 'đọc ở A không đụng cảnh báo riêng của B')
   const onlyB = seenB.body.items.find(i => i.message === 'B')
   await assert.rejects(inBranch(A, () => routeHandler(alerts, '/:id/read', 'post')({ user, params: { id: onlyB.id } })), err => err.code === 'P2025')
 
@@ -74,4 +70,17 @@ test('bất thường của lần kiểm tra lớp thành cảnh báo theo cơ s
   assert.deepEqual(rows.map(r => r.branchId), [B, B])
   assert.match(rows[0].message, /Toán 9 - CQT01 có lịch học nhưng chưa có buổi nào trong tháng 10\/2026/)
   assert.match(rows[1].message, /Lê C .* 600\.000đ, tính lại theo buổi học được 800\.000đ/)
+})
+
+test('hoá đơn tạo xong thì cảnh báo hoá đơn được đánh dấu đã xử lý, kể cả khi đã đọc; không đụng phiếu khác', async () => {
+  const { resolveInvoiceAlerts } = require('../dist/services/adminAlerts')
+  const s = await seed.student()
+  await raiseAlert('misa_invoice_failed', 'lỗi 1', { studentId: s.id, recordIds: ['r1'] })
+  await raiseAlert('misa_invoice_failed', 'lỗi 2', { studentId: s.id, recordIds: ['r2'] })
+  await prisma.adminAlert.updateMany({ where: { message: 'lỗi 1' }, data: { read: true } })
+  assert.equal(await resolveInvoiceAlerts(['r1']), 1)
+  assert.equal(await resolveInvoiceAlerts(['r1']), 0, 'đã xử lý thì không đóng lại')
+  const rows = Object.fromEntries((await prisma.adminAlert.findMany({ where: { type: 'misa_invoice_failed', message: { startsWith: 'lỗi' } } })).map(a => [a.message, a]))
+  assert.ok(rows['lỗi 1'].resolvedAt && rows['lỗi 1'].read)
+  assert.equal(rows['lỗi 2'].resolvedAt, null)
 })

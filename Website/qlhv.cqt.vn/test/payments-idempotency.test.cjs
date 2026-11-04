@@ -28,7 +28,7 @@ test('confirming "paid in full" several times at once records the remaining amou
   assert.deepEqual(await getPaymentStatus(fee.id), { finalAmount: 1200000, totalPaid: 0, remaining: 1200000, status: 'PENDING' })
 })
 
-test('SePay webhook delivered twice concurrently records one payment and one bank transaction', async () => {
+test('SePay webhook only journals a transaction even when a tuition record matches', async () => {
   process.env.SEPAY_WEBHOOK_KEY = 'test-key'
   process.env.SEPAY_SKIP_IP_CHECK = 'true'
   const router = require('../dist/routes/webhooks').default
@@ -42,21 +42,28 @@ test('SePay webhook delivered twice concurrently records one payment and one ban
 
   const responses = await Promise.all([handler(req()), handler(req())])
   const statuses = responses.map(r => r.body.status ?? (r.body.idempotent ? 'idempotent' : '?')).sort()
-  assert.deepEqual(statuses, ['idempotent', 'matched'])
-  assert.equal(await prisma.payment.count({ where: { tuitionRecordId: fee.id } }), 1)
+  assert.deepEqual(statuses, ['idempotent', 'pending_review'])
+  assert.equal(await prisma.payment.count({ where: { tuitionRecordId: fee.id } }), 0)
   const tx = await prisma.bankTransaction.findUnique({ where: { sepayId: 987654n } })
-  assert.equal(tx.status, 'matched')
-  assert.equal(tx.matchedTuitionRecordId, fee.id)
+  assert.equal(tx.status, 'pending_review')
+  assert.equal(tx.matchedTuitionRecordId, null)
+  assert.equal(tx.matchedPaymentId, null)
   assert.equal(tx.transactionDate.toISOString(), '2026-09-15T10:20:30.000Z', 'Giữ nguyên giờ địa phương SePay gửi')
-  assert.equal((await prisma.tuitionRecord.findUnique({ where: { id: fee.id } })).status, 'PAID')
+  assert.equal((await prisma.tuitionRecord.findUnique({ where: { id: fee.id } })).status, 'PENDING')
+  assert.equal(await prisma.misaInvoice.count(), 0)
 
   // Gửi lại lần nữa sau đó: vẫn idempotent, không thêm khoản thu.
   assert.equal((await handler(req())).body.idempotent, true)
-  assert.equal(await prisma.payment.count(), 1)
+  assert.equal(await prisma.payment.count(), 0)
 
   // Không khớp được học viên: chỉ ghi sổ, không có khoản thu.
   const unknown = await handler({ ...req(), body: { ...body, id: 111, content: 'CHUYEN KHOAN T9 ZZZZZ' } })
-  assert.equal(unknown.body.status, 'unmatched')
-  assert.equal(await prisma.payment.count(), 1)
+  assert.equal(unknown.body.status, 'pending_review')
+  assert.equal(await prisma.payment.count(), 0)
   assert.equal(await prisma.bankTransaction.count(), 2)
+
+  const outbound = await handler({ ...req(), body: { ...body, id: 112, transferType: 'out' } })
+  assert.equal(outbound.body.status, 'ignored_outbound')
+  assert.equal(await prisma.bankTransaction.count(), 3)
+  assert.equal(await prisma.payment.count(), 0)
 })

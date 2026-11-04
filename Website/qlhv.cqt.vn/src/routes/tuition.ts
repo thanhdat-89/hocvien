@@ -1,7 +1,7 @@
 import { getCachedTuitionSummary } from '../services/tuitionReadView'
 import { misaConnectionStatus, checkMisaConnection } from '../services/misaConnection'
 import misaDrafts from './misaDrafts'
-import { tryCreateAutomaticMisaDraft } from '../services/misaAutoDraft'
+import { retryMisaDraftForExistingRecord, tryCreateAutomaticMisaDraft } from '../services/misaAutoDraft'
 import { activityContext } from '../middleware/activityContext'
 import { getTuitionWorkflowResult } from '../services/tuitionWorkflowResult'
 import { validPeriod } from '../services/readViews'
@@ -315,9 +315,10 @@ router.post('/toggle-paid', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req
     }
 
     const finalStatus = await getPaymentStatus(record.id)
-    let invoiceDraft = recordExistedBefore
-      ? { enabled: true, status: 'SKIPPED_EXISTING_RECORD', message: 'Phiếu đã tồn tại; chỉ cập nhật thanh toán, không tạo lại hóa đơn nháp MISA.' }
-      : await tryCreateAutomaticMisaDraft(record.id, req.user!.userId)
+    // Phiếu đã có: tick "đã đóng" là dịp tạo lại hoá đơn nếu lần trước chưa tạo được.
+    let invoiceDraft = !recordExistedBefore ? await tryCreateAutomaticMisaDraft(record.id, req.user!.userId)
+      : paid ? await retryMisaDraftForExistingRecord(record.id, req.user!.userId)
+      : { enabled: true, status: 'SKIPPED_EXISTING_RECORD', message: 'Phiếu đã tồn tại; chỉ cập nhật thanh toán, không tạo lại hóa đơn nháp MISA.' }
     if (!recordExistedBefore && ['FAILED', 'OUTCOME_UNKNOWN'].includes(invoiceDraft.status)) {
       invoiceDraft = { ...invoiceDraft, message: `Phiếu mới đã được tạo. ${invoiceDraft.message || 'Chưa hoàn tất xử lý hóa đơn MISA.'}` }
     }
@@ -350,8 +351,8 @@ router.post('/calculate', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: 
         }
       }
 
-      const invoiceDraft = isNew
-        ? await tryCreateAutomaticMisaDraft(tuitionRecord.id, req.user!.userId)
+      const invoiceDraft = isNew ? await tryCreateAutomaticMisaDraft(tuitionRecord.id, req.user!.userId)
+        : paid === true ? await retryMisaDraftForExistingRecord(tuitionRecord.id, req.user!.userId)
         : { enabled: true, status: 'SKIPPED_EXISTING_RECORD', message: 'Phiếu đã tồn tại; không tạo lại hóa đơn nháp MISA.' }
       res.json({ ...tuitionRecord, invoiceDraft, isNew })
     } else {

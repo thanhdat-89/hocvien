@@ -852,7 +852,7 @@ function IntegrationsSection() {
   const [telegram, setTelegram] = useState<{ state: string; missing?: string[]; botUsername?: string; busy?: boolean } | null>(null)
   const [telegramSend, setTelegramSend] = useState<{ label: string; tone: Tone } | null>(null)
   const [zns, setZns] = useState<{ enabled: boolean; appIdSet: boolean; accessTokenSet: boolean; refreshTokenSet: boolean; webhookSecretSet: boolean } | null>(null)
-  const [sepay, setSepay] = useState<{ webhookKeySet: boolean; ipCheck: boolean; notifyParents: boolean; notifyAdminZalo: boolean } | null>(null)
+  const [sepay, setSepay] = useState<{ webhookKeySet: boolean; ipCheck: boolean; mode: string } | null>(null)
 
   const checkTelegram = () => {
     setTelegram(prev => ({ state: prev?.state ?? '', ...prev, busy: true }))
@@ -934,14 +934,13 @@ function IntegrationsSection() {
         </div>
       </IntegrationCard>
 
-      <IntegrationCard icon="account_balance" title="SePay" description="Nhận biến động số dư và tự khớp thanh toán học phí."
+      <IntegrationCard icon="account_balance" title="SePay (thử nghiệm)" description="Chỉ lưu nhật ký giao dịch; không tự ghi học phí hoặc tạo hóa đơn."
         status={!sepay ? <Badge tone="idle">Đang tải...</Badge>
           : sepay.webhookKeySet ? <Badge tone="ok">Đã cấu hình</Badge> : <Badge tone="error">Thiếu webhook key</Badge>}>
         {sepay && (
           <ul className="text-sm text-on-surface-variant space-y-1">
             <li>Kiểm tra IP SePay: <b>{sepay.ipCheck ? 'Bật' : 'Tắt'}</b></li>
-            <li>Báo phụ huynh khi nhận tiền: <b>{sepay.notifyParents ? 'Bật' : 'Tắt (chỉ ghi log)'}</b></li>
-            <li>Báo Zalo cho quản trị viên: <b>{sepay.notifyAdminZalo ? 'Bật' : 'Tắt'}</b></li>
+            <li>Chế độ: <b>Chỉ ghi nhật ký, không đối soát tự động</b></li>
           </ul>
         )}
       </IntegrationCard>

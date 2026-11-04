@@ -645,7 +645,7 @@ model BankTransaction {
   description            String
   transactionDate        DateTime @db.Timestamp(0) // giờ địa phương do SePay gửi
   receivedAt             DateTime @db.Timestamptz(3)
-  status                 String // matched | unmatched | duplicate | ignored_outbound
+  status                 String // pending_review | ignored_outbound (legacy: matched | unmatched | duplicate)
   matchedStudentId       String?
   matchedTuitionRecordId String?
   matchedPaymentId       String?
@@ -870,6 +870,8 @@ model AdminAlert {
   data      Json
   /// Cơ sở của học viên liên quan; NULL = chưa xác định được (hiện ở mọi cơ sở).
   branchId  String?
+  /// Lúc việc cần xử lý đã được xử lý xong (khác với `read` = đã xem); NULL = còn cần xử lý.
+  resolvedAt DateTime? @db.Timestamptz(3)
   createdAt DateTime @default(now()) @db.Timestamptz(3)
 
   @@index([read, createdAt])

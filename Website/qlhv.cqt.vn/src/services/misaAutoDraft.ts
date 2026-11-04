@@ -6,7 +6,7 @@ import type { Payment, TuitionRecord } from '../types/models'
 import { readInvoice, saveInvoiceCopies } from './misaInvoiceStore'
 import { InvoicePreviewError, invoiceSource, listInvoiceTemplates, validateDraftInput, InvoiceTemplate, MisaInvoiceRecord, createMisaDraft, readMisaInvoiceStatus } from './misaInvoicePreview'
 import { notifyInvoiceCreated, notifyInvoiceCreationFailed } from './telegramService'
-import { raiseAlertSafely } from './adminAlerts'
+import { raiseAlertSafely, resolveInvoiceAlertsSafely } from './adminAlerts'
 import { invalidateReadView, invoiceBillingPeriods } from './readViews'
 import { withMisaDeadline } from './misaRequestDeadline'
 import { assertInvoicePeriod, InvoicePeriodError } from './invoiceEligibility'
@@ -18,13 +18,16 @@ export function chooseDefaultInvoiceTemplate(templates: InvoiceTemplate[]) {
   return matches.length === 1 ? matches[0] : null
 }
 
+const INVOICE_CREATED: string[] = ['DRAFT_CREATED', 'ISSUED', 'SENT_TO_TAX']
+
 /** Chuông thông báo: hoá đơn MISA chưa tạo được hoặc không rõ đã tạo chưa (cần kiểm tra trên MISA) */
 function alertInvoiceFailed(recordIds: string[], reason: string, outcomeUnknown: boolean, refId?: string) {
   void (async () => {
     const record = await prisma.tuitionRecord.findFirst({ where: { id: { in: recordIds } }, select: { studentId: true, billingMonth: true, billingYear: true, student: { select: { fullName: true } } } })
     raiseAlertSafely('misa_invoice_failed',
       `${outcomeUnknown ? 'Không rõ đã tạo hoá đơn MISA chưa' : 'Chưa tạo được hoá đơn MISA'}${record ? ` cho ${record.student.fullName} T${record.billingMonth}/${record.billingYear}` : ''}: ${reason}`,
-      { recordIds, refId: refId ?? null, studentId: record?.studentId ?? null, outcomeUnknown })
+      { recordIds, refId: refId ?? null, studentId: record?.studentId ?? null, outcomeUnknown,
+        billingMonth: record?.billingMonth ?? null, billingYear: record?.billingYear ?? null })
   })().catch(err => console.error('[alert] không ghi được cảnh báo MISA:', err))
 }
 
@@ -33,6 +36,7 @@ export async function createTuitionMisaInvoice(recordIds: string[], actorId: str
   options: { notifications?: boolean; positiveAmountOnly?: boolean } = {}) {
   try {
     const result = await createTuitionMisaInvoiceInternal(recordIds, actorId, body, withMisaDeadline(request), options)
+    if (INVOICE_CREATED.includes(result.invoice.status)) resolveInvoiceAlertsSafely(recordIds)
     if (options.notifications !== false && !result.alreadyExists && ['FAILED', 'OUTCOME_UNKNOWN'].includes(result.invoice.status)) {
       const invoice = result.invoice as MisaInvoiceRecord
       notifyInvoiceCreationFailed({ recordIds, refId: invoice.refId,
@@ -79,17 +83,25 @@ async function createTuitionMisaInvoiceInternal(recordIds: string[], actorId: st
     throw new InvoicePreviewError(409, 'Phiếu có yêu cầu MISA từ luồng cũ chưa được đối chiếu. Cần kiểm tra RefID cũ trước khi tạo lại để tránh trùng hóa đơn.')
   }
   const invoiceDate = suppliedInput?.invoiceDate ?? new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date())
-  const templates = await listInvoiceTemplates(Number(invoiceDate.slice(0, 4)), request)
-  const template = body ? templates.find(t => t.id === body.templateId && t.templateNo === '2') : chooseDefaultInvoiceTemplate(templates)
-  if (!template) throw new InvoicePreviewError(409, 'Chưa xác định được mẫu MISA mặc định. Chọn mẫu trong Hóa đơn điện tử hoặc cấu hình mẫu mặc định.')
   const firstFee = fees[0]
   if (!firstFee) throw new InvoicePreviewError(404, 'Không tìm thấy phiếu học phí.')
   // Học viên không có trường idCard/studentEmail/studentPhone trong schema — giữ chuỗi rỗng như dữ liệu Firestore.
   const student = await prisma.student.findUnique({ where: { id: firstFee.studentId }, select: { fullName: true, address: true } })
-  const input = suppliedInput ?? validateDraftInput( { invoiceDate, templateId: template.id, revision: 0, buyer: {
-    fullName: student?.fullName || firstFee.studentName, legalName: '', citizenIdNumber: '',
-    address: student?.address || '', email: '', phone: '',
-  } })
+  const buyer = suppliedInput?.buyer ?? { fullName: student?.fullName || firstFee.studentName, legalName: '', citizenIdNumber: '',
+    address: student?.address || '', email: '', phone: '' }
+  let template: InvoiceTemplate | null | undefined
+  try {
+    const templates = await listInvoiceTemplates(Number(invoiceDate.slice(0, 4)), request)
+    template = body ? templates.find(t => t.id === body.templateId && t.templateNo === '2') : chooseDefaultInvoiceTemplate(templates)
+    if (!template) throw new InvoicePreviewError(409, 'Chưa xác định được mẫu MISA mặc định. Chọn mẫu trong Hóa đơn điện tử hoặc cấu hình mẫu mặc định.')
+  } catch (error) {
+    // Chưa gửi gì lên MISA: lưu FAILED để phiếu hiện ở trang Hoá đơn và tạo lại được.
+    if (!(error instanceof InvoicePreviewError) || recordIds.length !== 1) throw error
+    const failed = await saveLookupFailure(recordIds[0], loadFee, { actorId, invoiceDate, buyer, message: error.message })
+    if (!failed) throw error
+    return failed
+  }
+  const input = suppliedInput ?? validateDraftInput({ invoiceDate, templateId: template.id, revision: 0, buyer })
   const reserved = await prisma.$transaction(async tx => {
     // Khoá các phiếu (theo thứ tự id) trước khi đọc hoá đơn: hai yêu cầu cùng phiếu không thể cùng giữ chỗ RefID.
     await tx.$queryRaw`SELECT id FROM tuition_records WHERE id IN (${Prisma.join([...recordIds].sort())}) ORDER BY id FOR UPDATE`
@@ -154,6 +166,44 @@ async function createTuitionMisaInvoiceInternal(recordIds: string[], actorId: st
     await invalidateReadView('invoices')
     return { invoice, alreadyExists: false }
   }
+}
+
+/**
+ * Lỗi trước khi giữ chỗ RefID (xác thực, lấy mẫu): ghi hoá đơn FAILED không RefID cho phiếu.
+ * Không đè hoá đơn đang có (trừ FAILED cũ); trả null khi không ghi được để giữ lỗi gốc.
+ */
+async function saveLookupFailure(recordId: string, loadFee: (id: string, tx: Tx) => Promise<(TuitionRecord & { id: string }) | null>,
+  failure: { actorId: string; invoiceDate: string; buyer: unknown; message: string }) {
+  const saved = await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM tuition_records WHERE id = ${recordId} FOR UPDATE`
+    const [fee, existing] = await Promise.all([loadFee(recordId, tx), readInvoice(recordId, tx)])
+    if (!fee || (existing && existing.status !== 'FAILED')) return null
+    const payments = (await tx.payment.findMany({ where: { tuitionRecordId: recordId }, include: paymentInclude })).map(paymentDoc) as Payment[]
+    let source
+    try { source = invoiceSource(fee, payments) } catch { return null }
+    const at = new Date().toISOString()
+    const invoice = { id: recordId, recordIds: [recordId], refId: '', status: 'FAILED' as const, source, sources: [source],
+      template: existing?.template ?? {}, buyer: failure.buyer, invoiceDate: failure.invoiceDate, revision: 0,
+      lastErrorMessage: failure.message, createdAt: existing?.createdAt ?? at, updatedAt: at, createdBy: failure.actorId }
+    const stored = { ...invoice, billingPeriods: invoiceBillingPeriods(invoice) }
+    await saveInvoiceCopies([recordId], stored, tx)
+    return stored
+  })
+  if (!saved) return null
+  await invalidateReadView('invoices')
+  return { invoice: saved as unknown as MisaInvoiceRecord, alreadyExists: false }
+}
+
+/**
+ * Phiếu đã có (tick lại "đã đóng", tính lại): chỉ thử tạo hoá đơn khi phiếu chưa có hoá đơn hoặc lần trước thất bại.
+ * Đang chờ đối chiếu (CREATING/OUTCOME_UNKNOWN) hay đã xoá trên MISA thì giữ nguyên để tránh trùng.
+ */
+export async function retryMisaDraftForExistingRecord(recordId: string, actorId: string) {
+  const invoice = await readInvoice(recordId)
+  if (invoice && invoice.status !== 'FAILED') {
+    return { enabled: true, status: 'SKIPPED_EXISTING_RECORD', message: 'Phiếu đã tồn tại; không tạo lại hóa đơn nháp MISA.' }
+  }
+  return tryCreateAutomaticMisaDraft(recordId, actorId)
 }
 
 export async function tryCreateAutomaticMisaDraft(recordId: string, actorId: string) {

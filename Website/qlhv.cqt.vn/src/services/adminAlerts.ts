@@ -57,6 +57,18 @@ export async function alertClassAudit(period: string, anomalies: Anomaly[]) {
   return created
 }
 
+/** Hoá đơn đã tạo được cho các phiếu → đánh dấu đã xử lý các cảnh báo "chưa tạo được hoá đơn" của chúng */
+export async function resolveInvoiceAlerts(recordIds: string[]) {
+  if (!recordIds.length) return 0
+  const { count } = await prisma.adminAlert.updateMany({ where: { type: 'misa_invoice_failed', resolvedAt: null,
+    OR: recordIds.map(id => ({ data: { path: ['recordIds'], array_contains: [id] } })) }, data: { read: true, resolvedAt: new Date() } })
+  return count
+}
+
+export function resolveInvoiceAlertsSafely(recordIds: string[]) {
+  resolveInvoiceAlerts(recordIds).catch(err => console.error('[alert] không đóng được cảnh báo hoá đơn:', err))
+}
+
 /** Cảnh báo là phụ: lỗi ghi cảnh báo không được làm hỏng luồng chính (webhook, tạo hoá đơn) */
 export function raiseAlertSafely(type: AlertType, message: string, data: Record<string, unknown>) {
   raiseAlert(type, message, data).catch(err => console.error('[alert] không ghi được cảnh báo:', err))

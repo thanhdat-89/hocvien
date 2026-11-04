@@ -101,7 +101,9 @@ test('tuition invoice validates templates once and reserves before sending to MI
     assert.equal(failedLookup.status, 'FAILED')
     assert.equal(failures.length, 1)
     assert.match(failures[0].failure.reason, /lấy mẫu hóa đơn/)
-    assert.equal((await failures[0].loadSources())[0].studentName, 'Student')
+    assert.equal(failures[0].failure.sources[0].studentName, 'Student')
+    // Lỗi trước khi gửi MISA vẫn lưu FAILED (không RefID) để phiếu hiện ở trang Hoá đơn và tạo lại được.
+    assert.deepEqual([(await readInvoice('fee-1')).status, (await readInvoice('fee-1')).refId], ['FAILED', ''])
 
     service.listInvoiceTemplates = async () => [template]
     service.createMisaDraft = async () => { throw new service.InvoicePreviewError(502, 'MISA từ chối: sai thông tin người mua.') }

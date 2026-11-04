@@ -226,6 +226,9 @@ export const ZNS_ENABLED = Boolean(
   process.env.ZNS_APP_ID && process.env.ZNS_ACCESS_TOKEN
 )
 
+// Tạm dừng gửi ZNS học phí (nút gửi + nhắc nợ). Đặt ZNS_TUITION_RESUME=1 để bật lại.
+export const ZNS_TUITION_PAUSED = process.env.ZNS_TUITION_RESUME !== '1'
+
 let _znsTokenExpiresAt = 0
 
 export async function refreshZnsAccessToken(): Promise<boolean> {

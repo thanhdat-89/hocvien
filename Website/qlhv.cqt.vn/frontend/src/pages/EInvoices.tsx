@@ -2,11 +2,16 @@ import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import TopBar from '../components/TopBar'
 import EInvoicePreparation, { InvoiceRow } from '../components/EInvoicePreparation'
+import InvoiceDraftDialog from '../components/InvoiceDraftDialog'
 import api from '../services/api'
+import { useAuth } from '../hooks/useAuth'
 
 export default function EInvoices() {
   const thisYear = new Date().getFullYear()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const { isAdmin } = useAuth()
+  // Phiếu cần tạo lại hoá đơn: từ nút Tạo lại hoặc link ?recordId= của chuông thông báo
+  const [recreateId, setRecreateId] = useState<string | null>(null)
   const requestedMonth = Number(searchParams.get('month'))
   const requestedYear = Number(searchParams.get('year'))
   const [month, setMonth] = useState(requestedMonth >= 1 && requestedMonth <= 12 ? requestedMonth : new Date().getMonth() + 1)
@@ -40,6 +45,15 @@ export default function EInvoices() {
   }
 
   useEffect(() => {
+    const recordId = searchParams.get('recordId')
+    if (!recordId) return
+    if (requestedMonth >= 1 && requestedMonth <= 12) setMonth(requestedMonth)
+    if (requestedYear >= 2026 && requestedYear <= 2100) setYear(requestedYear)
+    if (isAdmin) setRecreateId(recordId)
+    setSearchParams({}, { replace: true })
+  }, [searchParams, isAdmin])
+
+  useEffect(() => {
     setRows([]); setNextCursor(null)
     void loadData()
     return () => { latestRequest.current++ }
@@ -65,8 +79,9 @@ export default function EInvoices() {
             </select>
           </div>
         </div>
-        <EInvoicePreparation rows={rows} counts={counts} total={total} loading={loading} error={error} month={month} year={year} retry={() => { void loadData(undefined, true) }} loadMore={nextCursor ? () => { void loadData(nextCursor) } : undefined} loadingMore={loadingMore} />
+        <EInvoicePreparation rows={rows} counts={counts} total={total} loading={loading} error={error} month={month} year={year} retry={() => { void loadData(undefined, true) }} loadMore={nextCursor ? () => { void loadData(nextCursor) } : undefined} loadingMore={loadingMore} onRecreate={isAdmin ? row => setRecreateId(row.id) : undefined} />
       </div>
+      {recreateId && <InvoiceDraftDialog recordId={recreateId} onClose={() => setRecreateId(null)} onCreated={() => { void loadData(undefined, true) }} />}
     </div>
   )
 }

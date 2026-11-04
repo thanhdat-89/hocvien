@@ -1503,7 +1503,7 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
                             >
                               {busy ? '...' : 'Tính lại'}
                             </button>
-                            <button
+                            {SHOW_ZNS_TUITION_BUTTON && <button
                               onClick={() => sendZnsNotice(r.tuitionRecord!.id)}
                               disabled={sendingZnsId === r.tuitionRecord.id}
                               className="p-1 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded transition-all disabled:opacity-40"
@@ -1512,7 +1512,7 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
                               <span className="material-symbols-outlined text-[18px]">
                                 {sendingZnsId === r.tuitionRecord.id ? 'hourglass_top' : 'campaign'}
                               </span>
-                            </button>
+                            </button>}
                             {r.tuitionRecord.remainingAmount > 0 && (
                               <button
                                 onClick={() => setPayingRow(r)}
@@ -2240,6 +2240,9 @@ function MoreMenu({ student, onUpdated }: { student: Student & { id: string }; o
 }
 
 // ─── Share Link Box ──────────────────────────────────────────────────────────
+
+// Tạm ẩn nút gửi ZNS học phí; đổi thành true khi bật lại (cùng ZNS_TUITION_RESUME=1 ở server).
+const SHOW_ZNS_TUITION_BUTTON = false
 
 function buildZaloUrl(phone?: string | null): string | null {
   if (!phone) return null

@@ -7,17 +7,13 @@ export function readViewInvalidation(req: Request, res: Response, next: NextFunc
   const studentOrClass = mutation && /^\/api\/(students|classes|branches|school-years)(\/|$)/.test(req.path)
   const financial = mutation && /^\/api\/(tuition|schedules|sessions|holidays|parents)(\/|$)/.test(req.path)
     && !/^\/api\/tuition\/misa(\/|$)/.test(req.path)
-  const sepay = mutation && req.path === '/api/webhooks/sepay'
   const cron = req.method === 'GET' && req.path === '/api/schedules/cron/generate-monthly'
-  if (!studentOrClass && !financial && !sepay && !cron) {
+  if (!studentOrClass && !financial && !cron) {
     next(); return
   }
   const originalJson = res.json
   res.json = function(payload: any) {
     if (res.statusCode < 200 || res.statusCode >= 300) return originalJson.call(res, payload)
-    if (sepay && (payload?.idempotent === true || ['unmatched', 'ignored_outbound'].includes(payload?.status))) {
-      return originalJson.call(res, payload)
-    }
     const kinds: ViewKind[] = studentOrClass
       ? ['privateMissing', 'studentsIndex', 'tuition', 'dashboard'] : ['tuition', 'dashboard']
     // Revision nằm trong bộ nhớ tiến trình nên đổi ngay, trước khi trả kết quả.

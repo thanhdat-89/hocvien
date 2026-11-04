@@ -33,6 +33,9 @@ interface ScheduleRow {
   tuitionRecord: TuitionRecordSummary | null
 }
 
+// Tạm ẩn nút gửi ZNS học phí; đổi thành true khi bật lại (cùng ZNS_TUITION_RESUME=1 ở server).
+const SHOW_ZNS_TUITION_BUTTON = false
+
 function buildZaloUrl(phone?: string | null): string | null {
   if (!phone) return null
   const digits = phone.replace(/\D/g, '')
@@ -551,7 +554,7 @@ export default function Tuition() {
                             {r.tuitionRecord ? (
                               <div className="inline-flex items-center gap-1 whitespace-nowrap">
                                 <span className="px-2 py-1 rounded-md bg-emerald-50 text-emerald-700 text-xs font-semibold whitespace-nowrap">Đã tạo</span>
-                                <button
+                                {SHOW_ZNS_TUITION_BUTTON && <button
                                   onClick={() => sendZnsNotice(r.tuitionRecord!.id, r.studentName)}
                                   disabled={sendingZnsId === r.tuitionRecord.id}
                                   className="p-1 text-primary hover:bg-blue-50 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary transition-colors disabled:opacity-40"
@@ -561,7 +564,7 @@ export default function Tuition() {
                                   <span className="material-symbols-outlined text-[18px]">
                                     {sendingZnsId === r.tuitionRecord.id ? 'hourglass_top' : 'campaign'}
                                   </span>
-                                </button>
+                                </button>}
                               </div>
                             ) : (
                               <button

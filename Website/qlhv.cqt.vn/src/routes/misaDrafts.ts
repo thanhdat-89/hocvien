@@ -11,6 +11,7 @@ import { getInvoiceList, invalidateReadView, invoiceBillingPeriods, validPeriod 
 import { invoicePeriodEligible, INVOICE_START_MESSAGE } from '../services/invoiceEligibility'
 import { monthlyInvoiceReconciler } from '../services/monthlyInvoiceReconciliation'
 import { invoiceDoc, readInvoice, saveInvoiceCopies } from '../services/misaInvoiceStore'
+import { resolveInvoiceAlertsSafely } from '../services/adminAlerts'
 
 const router = Router()
 router.use(requireRole('ADMIN'))
@@ -145,6 +146,7 @@ router.post('/invoices/:recordId/refresh-status', async (req, res, next) => {
     if (['CREATING', 'OUTCOME_UNKNOWN'].includes(current.status) && updated.status === 'DRAFT_CREATED') {
       notifyInvoiceCreated(updated)
     }
+    if (['DRAFT_CREATED', 'ISSUED', 'SENT_TO_TAX'].includes(updated.status)) resolveInvoiceAlertsSafely(ids)
     res.json({ invoice: updated })
   } catch (error) { next(error) }
 })
