@@ -69,3 +69,17 @@ test('tháng chưa có phiếu: dòng mẫu theo lớp đang học, không có s
   assert.ok(preview.warnings.some(w => w.includes('00001336')))
   assert.ok(preview.warnings.some(w => w.includes('CCCD')))
 })
+
+test('chưa có phiếu nhưng có học phí tạm tính: điền số tiền tạm tính và ghi rõ', () => {
+  const preview = buildInvoicePreview({ ...previewBase, records: [],
+    estimates: [{ className: 'Toán 10 - CQT01', baseAmount: 1400000, discountAmount: 140000, finalAmount: 1260000 }] })
+  assert.equal(preview.amountSource, 'estimate')
+  assert.deepEqual(preview.lines.map(l => [l.description, l.unitPrice]), [['Học phí Toán 10 - CQT01', 1400000]])
+  assert.deepEqual(preview.totals, { amount: 1400000, discountAmount: 140000, finalAmount: 1260000 })
+  assert.equal(preview.amountInWords, 'Một triệu hai trăm sáu mươi nghìn đồng chẵn.')
+  assert.ok(preview.warnings[0].includes('tạm tính theo trang Học phí'))
+  const withRecord = buildInvoicePreview({ ...previewBase, estimates: [{ className: 'x', baseAmount: 1, discountAmount: 0, finalAmount: 1 }],
+    records: [{ className: 'Toán 10 - CQT01', baseAmount: 1400000, discountAmount: 0, finalAmount: 1400000 }] })
+  assert.equal(withRecord.amountSource, 'record')
+  assert.equal(withRecord.totals.finalAmount, 1400000)
+})

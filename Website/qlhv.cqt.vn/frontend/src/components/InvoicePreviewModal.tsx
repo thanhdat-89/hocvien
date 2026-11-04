@@ -22,6 +22,7 @@ interface Preview {
   buyer: { fullName: string; citizenIdNumber: string; address: string; email: string; phone: string }
   buyerFallback: { fullName: boolean; address: boolean }
   period: { month: number; year: number } | null; periods: { month: number; year: number }[]
+  amountSource: 'record' | 'estimate' | 'sample'
   lines: PreviewLine[]
   totals: { amount: number | null; discountAmount: number | null; finalAmount: number | null }
   amountInWords: string | null
@@ -178,6 +179,9 @@ export default function InvoicePreviewModal({ studentId, onClose }: { studentId:
         <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
           <h3 className="text-xl font-headline font-bold text-on-surface">Xem trước hóa đơn</h3>
           <div className="flex items-center gap-2">
+            {preview?.amountSource === 'estimate' && (
+              <span className="px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-bold">Tạm tính</span>
+            )}
             {periods.length > 0 && (
               <select value={current} onChange={e => setPeriod(e.target.value)} className="input !w-auto">
                 {periods.map(p => <option key={`${p.month}/${p.year}`} value={`${p.month}/${p.year}`}>Tháng {p.month}/{p.year}</option>)}
