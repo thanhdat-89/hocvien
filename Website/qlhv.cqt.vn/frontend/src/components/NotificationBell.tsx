@@ -114,7 +114,9 @@ export default function NotificationBell() {
                         <b className="font-semibold text-on-surface-variant">{kind.label}</b>· {timeAgo(alert.createdAt)}
                         {alert.resolvedAt
                           ? <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"><span className="material-symbols-outlined text-sm" aria-hidden="true">check_circle</span>Đã xử lý</span>
-                          : !alert.read && <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-primary" aria-label="Chưa đọc" />}
+                          : alert.type === 'misa_invoice_failed'
+                            ? <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700"><span className="material-symbols-outlined text-sm" aria-hidden="true">pending_actions</span>Chưa xử lý</span>
+                            : !alert.read && <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-primary" aria-label="Chưa đọc" />}
                       </span>
                       <span className="mt-0.5 block text-sm text-on-surface break-words">{alert.message}</span>
                     </span>
