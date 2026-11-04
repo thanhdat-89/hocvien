@@ -254,6 +254,12 @@ model Student {
   status         StudentStatus @default(ACTIVE)
   avatarUrl      String?
   notes          String?
+  /// Thông tin người mua trên hoá đơn điện tử (cá nhân); trống thì lùi về tên/địa chỉ học viên.
+  invoiceFullName  String?
+  invoiceCitizenId String?
+  invoiceAddress   String?
+  invoiceEmail     String?
+  invoicePhone     String?
   /// Mỗi học viên thuộc đúng một cơ sở; hồ sơ giữ qua các năm học.
   branchId       String
   createdAt      DateTime      @default(now()) @db.Timestamptz(3)

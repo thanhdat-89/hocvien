@@ -14,6 +14,11 @@ export interface Student {
   school?: string | null
   gradeLevel?: number | null
   address?: string | null
+  invoiceFullName?: string | null
+  invoiceCitizenId?: string | null
+  invoiceAddress?: string | null
+  invoiceEmail?: string | null
+  invoicePhone?: string | null
   enrollmentDate: string
   status: 'ACTIVE' | 'INACTIVE' | 'RESERVED'
   notes?: string | null

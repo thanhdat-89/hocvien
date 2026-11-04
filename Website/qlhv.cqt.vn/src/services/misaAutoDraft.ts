@@ -10,6 +10,7 @@ import { raiseAlertSafely, resolveInvoiceAlertsSafely } from './adminAlerts'
 import { invalidateReadView, invoiceBillingPeriods } from './readViews'
 import { withMisaDeadline } from './misaRequestDeadline'
 import { assertInvoicePeriod, InvoicePeriodError } from './invoiceEligibility'
+import { buyerFromStudent, invoiceInfoSelect } from './studentInvoiceInfo'
 
 export function chooseDefaultInvoiceTemplate(templates: InvoiceTemplate[]) {
   const id = process.env.MEINVOICE_DEFAULT_TEMPLATE_ID?.trim()
@@ -85,10 +86,8 @@ async function createTuitionMisaInvoiceInternal(recordIds: string[], actorId: st
   const invoiceDate = suppliedInput?.invoiceDate ?? new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date())
   const firstFee = fees[0]
   if (!firstFee) throw new InvoicePreviewError(404, 'Không tìm thấy phiếu học phí.')
-  // Học viên không có trường idCard/studentEmail/studentPhone trong schema — giữ chuỗi rỗng như dữ liệu Firestore.
-  const student = await prisma.student.findUnique({ where: { id: firstFee.studentId }, select: { fullName: true, address: true } })
-  const buyer = suppliedInput?.buyer ?? { fullName: student?.fullName || firstFee.studentName, legalName: '', citizenIdNumber: '',
-    address: student?.address || '', email: '', phone: '' }
+  const student = await prisma.student.findUnique({ where: { id: firstFee.studentId }, select: invoiceInfoSelect })
+  const buyer = suppliedInput?.buyer ?? buyerFromStudent(student, firstFee.studentName)
   let template: InvoiceTemplate | null | undefined
   try {
     const templates = await listInvoiceTemplates(Number(invoiceDate.slice(0, 4)), request)

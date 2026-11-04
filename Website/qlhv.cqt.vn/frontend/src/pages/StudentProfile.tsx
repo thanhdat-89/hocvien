@@ -151,6 +151,65 @@ function EditStudentModal({ student, onClose, onSaved }: { student: Student; onC
   )
 }
 
+// ─── Invoice Info Modal ──────────────────────────────────────────────────────
+
+function InvoiceInfoModal({ student, onClose, onSaved }: { student: Student; onClose: () => void; onSaved: () => void }) {
+  const [form, setForm] = useState({
+    invoiceFullName: student.invoiceFullName ?? '',
+    invoiceCitizenId: student.invoiceCitizenId ?? '',
+    invoiceAddress: student.invoiceAddress ?? '',
+    invoiceEmail: student.invoiceEmail ?? '',
+    invoicePhone: student.invoicePhone ?? '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm(f => ({ ...f, [k]: e.target.value }))
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaving(true); setError('')
+    try {
+      await api.put(`/students/${student.id}`, form)
+      onSaved()
+    } catch (err: any) {
+      setError(err.response?.data?.message ?? 'Có lỗi xảy ra')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title="Thông tin hóa đơn" onClose={onClose}>
+      {error && <div className="mb-4 p-3 bg-error-container/10 text-error rounded-xl text-sm">{error}</div>}
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <Field label="Họ và tên">
+          <input value={form.invoiceFullName} onChange={set('invoiceFullName')} className="input" placeholder={student.fullName} />
+        </Field>
+        <Field label="Số CCCD">
+          <input value={form.invoiceCitizenId} onChange={set('invoiceCitizenId')} inputMode="numeric" maxLength={12} className="input" placeholder="9 hoặc 12 chữ số" />
+        </Field>
+        <Field label="Địa chỉ">
+          <input value={form.invoiceAddress} onChange={set('invoiceAddress')} className="input" placeholder={student.address ?? '123 Đường ABC, Quận 1'} />
+        </Field>
+        <Field label="Email">
+          <input value={form.invoiceEmail} onChange={set('invoiceEmail')} type="email" className="input" placeholder="email@example.com" />
+        </Field>
+        <Field label="Số điện thoại">
+          <input value={form.invoicePhone} onChange={set('invoicePhone')} type="tel" className="input" placeholder="0901234567" />
+        </Field>
+        <p className="text-xs text-outline">Để trống thì hóa đơn dùng tên và địa chỉ trong thông tin cơ bản của học viên.</p>
+        <div className="flex gap-3 pt-2">
+          <button type="button" onClick={onClose} className="flex-1 btn-secondary justify-center">Huỷ</button>
+          <button type="submit" disabled={saving} className="flex-1 btn-primary justify-center disabled:opacity-60">
+            {saving ? 'Đang lưu...' : 'Cập nhật'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 // ─── Parent Modal ────────────────────────────────────────────────────────────
 
 function ParentModal({ studentId, parent, onClose, onSaved }: {
@@ -525,6 +584,7 @@ function InfoTab({
   const showAlert = useAlert()
   const [parentModal, setParentModal] = useState<{ open: boolean; parent: (Parent & { id: string }) | null }>({ open: false, parent: null })
   const [enrollModal, setEnrollModal] = useState(false)
+  const [invoiceModal, setInvoiceModal] = useState(false)
   const [confirm, setConfirm] = useState<{ message: string; onConfirm: () => void } | null>(null)
 
   const deleteEnrollment = (e: ClassEnrollment) => {
@@ -707,6 +767,28 @@ function InfoTab({
             )}
           </div>
 
+          {/* Invoice info */}
+          <div className="bg-surface-container-lowest rounded-xl p-8 shadow-sm">
+            <div className="flex items-center justify-between mb-6 border-b border-outline-variant/10 pb-4">
+              <h3 className="font-headline text-lg font-bold text-on-surface">Thông tin hóa đơn</h3>
+              {canManage && (
+                <button
+                  onClick={() => setInvoiceModal(true)}
+                  className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
+                >
+                  <span className="material-symbols-outlined text-base">edit</span>Chỉnh sửa
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <InfoRow label="Họ và tên" value={student.invoiceFullName} />
+              <InfoRow label="Số CCCD" value={student.invoiceCitizenId} />
+              <InfoRow label="Địa chỉ" value={student.invoiceAddress} />
+              <InfoRow label="Email" value={student.invoiceEmail} />
+              <InfoRow label="Số điện thoại" value={student.invoicePhone} />
+            </div>
+          </div>
+
           {/* Enrollments */}
           <div className="bg-surface-container-lowest rounded-xl p-8 shadow-sm">
             <div className="flex items-center justify-between mb-6 border-b border-outline-variant/10 pb-4">
@@ -780,6 +862,13 @@ function InfoTab({
       </div>
 
       {/* Modals */}
+      {invoiceModal && (
+        <InvoiceInfoModal
+          student={student}
+          onClose={() => setInvoiceModal(false)}
+          onSaved={() => { setInvoiceModal(false); onRefresh() }}
+        />
+      )}
       {parentModal.open && (
         <ParentModal
           studentId={student.id}

@@ -19,6 +19,7 @@ import { getStudentPage } from '../services/studentReadView'
 import { AuthRequest } from '../types'
 import { currentSchoolYearId, defaultBranchId } from '../lib/branchContext'
 import type { ClassEnrollment } from '../types/models'
+import { parseInvoiceInfo } from '../services/studentInvoiceInfo'
 
 const router = Router()
 router.use(authenticate)
@@ -251,12 +252,13 @@ router.put('/:id', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: 
   try {
     const { fullName, dateOfBirth, gender, school, gradeLevel, address, status, notes, parentName, phone, parentId } = req.body
     const studentId = s(req.params.id)
+    const invoiceInfo = parseInvoiceInfo(req.body)
 
     const updated = await prisma.$transaction(async tx => {
       const student = await tx.student.update({
         where: { id: studentId },
         data: {
-          fullName, gender, school, address, status, notes,
+          fullName, gender, school, address, status, notes, ...invoiceInfo,
           dateOfBirth: dateOfBirth === undefined ? undefined : toDay(dateOfBirth),
           gradeLevel: gradeLevel === undefined ? undefined : gradeLevel ? Number(gradeLevel) : null,
         },

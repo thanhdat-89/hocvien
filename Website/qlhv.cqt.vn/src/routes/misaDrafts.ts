@@ -12,6 +12,7 @@ import { invoicePeriodEligible, INVOICE_START_MESSAGE } from '../services/invoic
 import { monthlyInvoiceReconciler } from '../services/monthlyInvoiceReconciliation'
 import { invoiceDoc, readInvoice, saveInvoiceCopies } from '../services/misaInvoiceStore'
 import { resolveInvoiceAlertsSafely } from '../services/adminAlerts'
+import { buyerFromStudent, invoiceInfoSelect } from '../services/studentInvoiceInfo'
 
 const router = Router()
 router.use(requireRole('ADMIN'))
@@ -50,10 +51,10 @@ async function loadRecordBundle(id: string) {
   return { record: record ? tuitionRecordDoc(record) as TuitionRecord : null, payments: payments.map(paymentDoc) as Payment[], invoice }
 }
 
-/** Người mua gợi ý: học viên không có CCCD/email/SĐT riêng trong dữ liệu — để trống như trước. */
+/** Người mua gợi ý: lấy từ "Thông tin hoá đơn" của học viên, thiếu thì lùi về tên/địa chỉ học viên. */
 async function suggestedBuyer(studentId: string, fallbackName: string) {
-  const student = await prisma.student.findUnique({ where: { id: studentId }, select: { fullName: true, address: true } })
-  return { fullName: student?.fullName || fallbackName, legalName: '', citizenIdNumber: '', address: student?.address || '', email: '', phone: '' }
+  const student = await prisma.student.findUnique({ where: { id: studentId }, select: invoiceInfoSelect })
+  return buyerFromStudent(student, fallbackName)
 }
 
 router.get('/templates', async (req, res, next) => {
