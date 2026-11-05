@@ -113,7 +113,7 @@ function InvoiceSheet({ preview }: { preview: Preview }) {
             <tr key={i}>
               <td style={{ ...S.td, textAlign: 'center' }}>{i + 1}</td>
               <td style={S.td}>{line.description}</td>
-              <td style={S.td}>{line.unitName}</td>
+              <td style={{ ...S.td, textAlign: 'center' }}>{line.unitName}</td>
               <td style={{ ...S.td, ...S.num }}>{line.quantity.toLocaleString('vi-VN', { minimumFractionDigits: 2 })}</td>
               <td style={{ ...S.td, ...S.num }}>{money(line.unitPrice)}</td>
               <td style={{ ...S.td, ...S.num }}>{money(line.amount)}</td>
