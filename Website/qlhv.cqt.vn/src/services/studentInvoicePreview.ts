@@ -17,13 +17,12 @@ export async function getStudentInvoicePreview(studentId: string, month?: number
     }).then(rows => rows.map(r => ({ month: r.billingMonth, year: r.billingYear }))),
     computeTuitionSummary(studentId),
   ])
-  const periods = [...new Map([...recordPeriods, ...summary].map(p => [p.year * 100 + p.month, { month: p.month, year: p.year }])).entries()]
-    .sort(([a], [b]) => b - a).map(([, p]) => p)
-  // Mặc định: tháng gần nhất có phiếu; chưa có phiếu nào thì tháng hiện tại (hoặc tháng tạm tính gần nhất đã qua).
+  // Mặc định: tháng hiện tại (kỳ sẽ xuất hoá đơn); chưa có phiếu thì dùng học phí tạm tính hoặc dòng mẫu.
   const [nowYear, nowMonth] = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date()).split('-').map(Number)
-  const now = nowYear * 100 + nowMonth
-  const period = month && year ? { month, year }
-    : recordPeriods[0] ?? periods.find(p => p.year * 100 + p.month <= now) ?? periods[periods.length - 1] ?? null
+  const current = { month: nowMonth, year: nowYear }
+  const periods = [...new Map([current, ...recordPeriods, ...summary].map(p => [p.year * 100 + p.month, { month: p.month, year: p.year }])).entries()]
+    .sort(([a], [b]) => b - a).map(([, p]) => p)
+  const period = month && year ? { month, year } : current
   // Làm tròn như khi tạo phiếu thật (tuitionCalculator).
   const estimates = period ? summary.filter(r => r.month === period.month && r.year === period.year).map(r => {
     const baseAmount = Math.round(r.baseAmount), discountAmount = Math.round(r.discountAmount)
