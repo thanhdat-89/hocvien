@@ -231,9 +231,16 @@ export async function readMisaInvoiceStatus(refId: string, request: typeof fetch
 }
 
 /** Dòng hàng trên hoá đơn — dùng chung cho hoá đơn thật và bản xem trước. */
-export function invoiceLines(sources: Pick<InvoiceSource, 'className' | 'baseAmount' | 'discountAmount' | 'finalAmount'>[]) {
+/** Ví dụ: "Học phí Toán 10 - CQT01 của Học viên Nguyễn Phương Linh, tháng 11/2026"; thiếu tên/kỳ thì bỏ phần đó. */
+export function invoiceLineDescription(className: string, studentName?: string, month?: number, year?: number) {
+  return `Học phí ${className}${studentName ? ` của Học viên ${studentName}` : ''}${month && year ? `, tháng ${month}/${year}` : ''}`
+}
+
+type LineSource = Pick<InvoiceSource, 'className' | 'baseAmount' | 'discountAmount' | 'finalAmount'>
+  & Partial<Pick<InvoiceSource, 'studentName' | 'month' | 'year'>>
+export function invoiceLines(sources: LineSource[]) {
   return sources.map(item => ({
-    description: `Học phí ${item.className}`, unitName: 'Tháng', quantity: 1, unitPrice: item.baseAmount,
+    description: invoiceLineDescription(item.className, item.studentName, item.month, item.year), unitName: 'Tháng', quantity: 1, unitPrice: item.baseAmount,
     amount: item.baseAmount, discountAmount: item.discountAmount, finalAmount: item.finalAmount,
   }))
 }

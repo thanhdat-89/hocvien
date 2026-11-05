@@ -1,4 +1,4 @@
-import { invoiceLines, InvoicePreviewError } from './misaInvoicePreview'
+import { invoiceLineDescription, invoiceLines, InvoicePreviewError } from './misaInvoicePreview'
 import { vndInWords } from '../lib/vndWords'
 
 export const invoiceInfoSelect = {
@@ -56,10 +56,14 @@ export function buildInvoicePreview(input: {
   const buyer = buyerFromStudent(student)
   // Chưa có phiếu: dùng học phí tạm tính của trang Học phí, không có cả hai thì dòng mẫu theo lớp đang học.
   const amountSource = input.records.length ? 'record' : input.estimates?.length ? 'estimate' : 'sample'
-  const records = amountSource === 'record' ? input.records : amountSource === 'estimate' ? input.estimates! : []
+  // Tên học viên (không phải tên người mua) và kỳ học phí đi vào nội dung dòng hàng, như hoá đơn thật.
+  const lineContext = { studentName: student.fullName || undefined, month: period?.month, year: period?.year }
+  const records = (amountSource === 'record' ? input.records : amountSource === 'estimate' ? input.estimates! : [])
+    .map(record => ({ ...record, ...lineContext }))
   const lines = records.length
     ? invoiceLines(records)
-    : input.activeClassNames.map(className => ({ description: `Học phí ${className}`, unitName: 'Tháng', quantity: 1,
+    : input.activeClassNames.map(className => ({
+      description: invoiceLineDescription(className, lineContext.studentName, lineContext.month, lineContext.year), unitName: 'Tháng', quantity: 1,
       unitPrice: null, amount: null, discountAmount: 0, finalAmount: null }))
   const sum = (field: 'amount' | 'discountAmount' | 'finalAmount') => records.length
     ? invoiceLines(records).reduce((total, line) => total + line[field], 0) : null
