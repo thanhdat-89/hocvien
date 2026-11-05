@@ -40,7 +40,7 @@ test('tạo nháp gửi đúng endpoint, header ngữ cảnh và PublishStatus=0
     assert.equal(body.InvoiceType, 10)
     assert.equal(body.AccountObjectTaxCode, '001234567890') // MST người mua = CCCD (mẫu 2C26MHP mới)
     assert.equal(body.CitizenIDNumber, '001234567890')
-    assert.equal(body.InvoiceDetails[0].Description, 'Học phí Toán 9 của Học viên Học viên thử, tháng 10/2026')
+    assert.equal(body.InvoiceDetails[0].Description, 'Học phí Toán 9 của học viên Học viên thử, tháng 10/2026')
     assert.equal(call.init.headers.OrganizationUnitID, 'org-1')
     assert.equal(body.OrganizationUnitID, 'org-1')
     assert.equal(body.CompanyID, 123)

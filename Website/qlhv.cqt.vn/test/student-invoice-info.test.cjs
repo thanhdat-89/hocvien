@@ -49,7 +49,7 @@ test('bản xem trước có cùng dòng hàng và tổng tiền với hoá đơ
     { className: 'Học riêng', baseAmount: 500000, discountAmount: 50000, finalAmount: 450000 },
   ] })
   assert.deepEqual(preview.lines.map(l => [l.description, l.unitName, l.quantity, l.unitPrice]),
-    [['Học phí Toán 10 - CQT01 của Học viên Học viên thử nghiệm, tháng 11/2026', 'Tháng', 1, 1400000], ['Học phí Học riêng của Học viên Học viên thử nghiệm, tháng 11/2026', 'Tháng', 1, 500000]])
+    [['Học phí Toán 10 - CQT01 của học viên Học viên thử nghiệm, tháng 11/2026', 'Tháng', 1, 1400000], ['Học phí Học riêng của học viên Học viên thử nghiệm, tháng 11/2026', 'Tháng', 1, 500000]])
   assert.deepEqual(preview.totals, { amount: 1900000, discountAmount: 50000, finalAmount: 1850000 })
   assert.equal(preview.amountInWords, 'Một triệu tám trăm năm mươi nghìn đồng chẵn.')
   assert.equal(preview.buyer.citizenIdNumber, '001200000001')
@@ -60,7 +60,7 @@ test('bản xem trước có cùng dòng hàng và tổng tiền với hoá đơ
 test('tháng chưa có phiếu: dòng mẫu theo lớp đang học, không có số tiền, có cảnh báo', () => {
   const preview = buildInvoicePreview({ ...previewBase, records: [], student: { fullName: 'A', address: 'Hà Nội' },
     existingInvoice: { invoiceNumber: '00001336', status: 'ISSUED' } })
-  assert.equal(preview.lines[0].description, 'Học phí Toán 10 - CQT01 của Học viên A, tháng 11/2026')
+  assert.equal(preview.lines[0].description, 'Học phí Toán 10 - CQT01 của học viên A, tháng 11/2026')
   assert.equal(preview.lines[0].unitPrice, null)
   assert.equal(preview.totals.finalAmount, null)
   assert.equal(preview.amountInWords, null)
@@ -74,7 +74,7 @@ test('chưa có phiếu nhưng có học phí tạm tính: điền số tiền t
   const preview = buildInvoicePreview({ ...previewBase, records: [],
     estimates: [{ className: 'Toán 10 - CQT01', baseAmount: 1400000, discountAmount: 140000, finalAmount: 1260000 }] })
   assert.equal(preview.amountSource, 'estimate')
-  assert.deepEqual(preview.lines.map(l => [l.description, l.unitPrice]), [['Học phí Toán 10 - CQT01 của Học viên Học viên thử nghiệm, tháng 11/2026', 1400000]])
+  assert.deepEqual(preview.lines.map(l => [l.description, l.unitPrice]), [['Học phí Toán 10 - CQT01 của học viên Học viên thử nghiệm, tháng 11/2026', 1400000]])
   assert.deepEqual(preview.totals, { amount: 1400000, discountAmount: 140000, finalAmount: 1260000 })
   assert.equal(preview.amountInWords, 'Một triệu hai trăm sáu mươi nghìn đồng chẵn.')
   assert.ok(preview.warnings[0].includes('tạm tính theo trang Học phí'))

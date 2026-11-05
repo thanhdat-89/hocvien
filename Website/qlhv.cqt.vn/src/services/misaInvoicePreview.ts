@@ -231,9 +231,9 @@ export async function readMisaInvoiceStatus(refId: string, request: typeof fetch
 }
 
 /** Dòng hàng trên hoá đơn — dùng chung cho hoá đơn thật và bản xem trước. */
-/** Ví dụ: "Học phí Toán 10 - CQT01 của Học viên Nguyễn Phương Linh, tháng 11/2026"; thiếu tên/kỳ thì bỏ phần đó. */
+/** Ví dụ: "Học phí Toán 10 - CQT01 của học viên Nguyễn Phương Linh, tháng 11/2026"; thiếu tên/kỳ thì bỏ phần đó. */
 export function invoiceLineDescription(className: string, studentName?: string, month?: number, year?: number) {
-  return `Học phí ${className}${studentName ? ` của Học viên ${studentName}` : ''}${month && year ? `, tháng ${month}/${year}` : ''}`
+  return `Học phí ${className}${studentName ? ` của học viên ${studentName}` : ''}${month && year ? `, tháng ${month}/${year}` : ''}`
 }
 
 type LineSource = Pick<InvoiceSource, 'className' | 'baseAmount' | 'discountAmount' | 'finalAmount'>
