@@ -177,8 +177,8 @@ function InvoiceInfoModal({ student, onClose, onSaved }: { student: Student; onC
     <Modal title="Thông tin hóa đơn" onClose={onClose}>
       {error && <div className="mb-4 p-3 bg-error-container/10 text-error rounded-xl text-sm">{error}</div>}
       <form onSubmit={handleSubmit} className="space-y-4">
-        <Field label="Họ và tên">
-          <input value={form.invoiceFullName} onChange={set('invoiceFullName')} className="input" placeholder={student.fullName} />
+        <Field label="Họ và tên phụ huynh">
+          <input value={form.invoiceFullName} onChange={set('invoiceFullName')} className="input" placeholder={`Để trống: dùng tên học viên (${student.fullName})`} />
         </Field>
         <Field label="Số CCCD">
           <input value={form.invoiceCitizenId} onChange={set('invoiceCitizenId')} inputMode="numeric" maxLength={12} className="input" placeholder="9 hoặc 12 chữ số" />
@@ -643,7 +643,7 @@ function InfoTab({
               )}
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-              <InfoRow label="Họ và tên" value={student.invoiceFullName} />
+              <InfoRow label="Họ và tên phụ huynh" value={student.invoiceFullName || (student.fullName ? `— (chưa nhập, hoá đơn dùng tên học viên)` : null)} />
               <InfoRow label="Số CCCD" value={student.invoiceCitizenId} />
               <div className="sm:col-span-2"><InfoRow label="Địa chỉ" value={student.invoiceAddress} /></div>
               <InfoRow label="Email" value={student.invoiceEmail} />

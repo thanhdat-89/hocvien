@@ -128,7 +128,6 @@ router.post('/bulk', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthR
               school: s.school || null,
               gradeLevel: s.gradeLevel ? Number(s.gradeLevel) : null,
               address: s.address || null,
-              invoiceFullName: s.fullName.trim(),
               invoiceAddress: s.address?.trim() || null,
               notes: s.notes || null,
               enrollmentDate,
@@ -241,7 +240,6 @@ router.post('/', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthReque
           school: school || null,
           gradeLevel: gradeLevel ? Number(gradeLevel) : null,
           address: address || null,
-          invoiceFullName: String(fullName ?? '').trim() || null,
           invoiceAddress: address?.trim() || null,
           enrollmentDate: toDay(today())!,
           branchId,
@@ -271,15 +269,7 @@ router.put('/:id', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: 
     const invoiceInfo = parseInvoiceInfo(req.body)
 
     const updated = await prisma.$transaction(async tx => {
-      // Tên hoá đơn theo tên học viên khi chưa sửa riêng, hoặc khi bị xoá trống.
-      if (fullName !== undefined || invoiceInfo.invoiceFullName === null) {
-        const current = await tx.student.findUnique({ where: { id: studentId }, select: { fullName: true, invoiceFullName: true } })
-        const name = String(fullName ?? current?.fullName ?? '').trim() || null
-        if (invoiceInfo.invoiceFullName === null) invoiceInfo.invoiceFullName = name
-        else if (invoiceInfo.invoiceFullName === undefined && (!current?.invoiceFullName || current.invoiceFullName === current.fullName.trim())) {
-          invoiceInfo.invoiceFullName = name
-        }
-      }
+      // Tên hoá đơn là tên phụ huynh, nhập riêng; để trống thì khi xuất hoá đơn dùng tên học viên (buyerFromStudent).
       const student = await tx.student.update({
         where: { id: studentId },
         data: {
