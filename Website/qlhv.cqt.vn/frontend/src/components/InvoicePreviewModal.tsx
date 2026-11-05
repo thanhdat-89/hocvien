@@ -88,15 +88,19 @@ function InvoiceSheet({ preview }: { preview: Preview }) {
         </div>
       </div>
       <hr style={S.hr} />
-      <div>Họ và tên học viên: <Value text={buyer.fullName} fallback={fb.fullName} /></div>
-      <div>Địa chỉ: <Value text={buyer.address} fallback={fb.address} /></div>
-      <div style={{ display: 'flex' }}>
-        <div style={{ flex: 1 }}>Điện thoại: {buyer.phone}</div>
-        <div style={{ flex: 1 }}>CCCD: <Value text={buyer.citizenIdNumber} /></div>
-      </div>
-      <div style={{ display: 'flex' }}>
-        <div style={{ flex: 1 }}>Hình thức thanh toán: TM/CK</div>
-        <div style={{ flex: 1 }}>Số tài khoản:</div>
+      <div style={{ display: 'flex', gap: 16 }}>
+        <div style={{ flex: 1 }}>
+          <div>Họ và tên người mua: <Value text={buyer.fullName} fallback={fb.fullName} /></div>
+          <div>Căn cước công dân: <Value text={buyer.citizenIdNumber} /></div>
+          {/* Cá nhân: MST người mua = số CCCD (khớp dữ liệu gửi MISA). */}
+          <div>Mã số thuế: <Value text={buyer.citizenIdNumber} /></div>
+          <div>Địa chỉ: <Value text={buyer.address} fallback={fb.address} /></div>
+          <div>Hình thức thanh toán: TM/CK</div>
+        </div>
+        <div style={{ textAlign: 'center', fontSize: 12, alignSelf: 'flex-end' }}>
+          <div style={{ width: 84, height: 84, border: '1px dashed #999', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#888', margin: '0 auto' }}>QR</div>
+          <div>Quét để thanh toán</div>
+        </div>
       </div>
       <table style={S.table}>
         <thead>

@@ -260,7 +260,8 @@ export async function createMisaDraft(input: { refId: string; source: InvoiceSou
     // Legacy v2 Web API uses InvoiceType=10 for the cash-register (MTT) invoice.
     SourceType: 0, InvTemplateNo: t.templateNo, InvoiceType: 10, InvSeries: t.series,
     InvDate: `${input.invoiceDate}T00:00:00+07:00`, InvNo: '', PublishStatus: 0,
-    InvoiceTemplateID: t.id, AccountObjectName: b.legalName || b.fullName, AccountObjectTaxCode: '', CitizenIDNumber: b.citizenIdNumber,
+    InvoiceTemplateID: t.id, AccountObjectName: b.legalName || b.fullName, // Mẫu 2C26MHP mới có ô MST người mua; cá nhân dùng số CCCD làm MST.
+    AccountObjectTaxCode: b.citizenIdNumber || '', CitizenIDNumber: b.citizenIdNumber,
     AccountObjectAddress: b.address, ContactName: b.fullName, ReceiverEmail: b.email, ReceiverMobile: b.phone,
     SendInvoiceStatus: 0, SendNumber: 0, IsInvoiceReceipted: false, PaymentMethod: 'TM/CK',
     CurrencyCode: 'VND', CurrencyID: 'VND', ExchangeRate: 1,

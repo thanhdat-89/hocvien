@@ -9,7 +9,7 @@ const source = {
 }
 const template = { id: 'template-1', name: 'Mẫu bán hàng', series: '2C26MHP', templateNo: '2', isInvoiceSummary: false }
 const input = { refId: 'stable-ref-1', source, template, buyer: {
-  fullName: 'Phụ huynh thử nghiệm', legalName: '', citizenIdNumber: '', address: '', email: '', phone: '',
+  fullName: 'Phụ huynh thử nghiệm', legalName: '', citizenIdNumber: '001234567890', address: '', email: '', phone: '',
 }, invoiceDate: '2026-10-13' }
 
 function setupEnv() {
@@ -38,6 +38,8 @@ test('tạo nháp gửi đúng endpoint, header ngữ cảnh và PublishStatus=0
     assert.equal(body.RefID, 'stable-ref-1')
     assert.equal(body.PublishStatus, 0)
     assert.equal(body.InvoiceType, 10)
+    assert.equal(body.AccountObjectTaxCode, '001234567890') // MST người mua = CCCD (mẫu 2C26MHP mới)
+    assert.equal(body.CitizenIDNumber, '001234567890')
     assert.equal(call.init.headers.OrganizationUnitID, 'org-1')
     assert.equal(body.OrganizationUnitID, 'org-1')
     assert.equal(body.CompanyID, 123)
