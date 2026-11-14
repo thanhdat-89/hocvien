@@ -76,39 +76,38 @@ export async function calculateTuitionForStudent(
     return calculatePrivateTuition(studentId, month, year, fromDate, toDate)
   }
 
-  // Enrollment để lấy customTuitionRate
-  // Firestore .limit(1) trả tài liệu đầu tiên theo ID — giữ cùng lựa chọn khi học viên nghỉ rồi ghi danh lại.
-  const enrollmentRow = await prisma.classEnrollment.findFirst({ where: { classId, studentId }, include: enrollmentInclude, orderBy: { id: 'asc' } })
-  if (!enrollmentRow) throw new Error(`Học viên ${studentId} không đăng ký lớp ${classId}`)
-  const enrollment: ClassEnrollment = enrollmentDoc(enrollmentRow)
+  // Học viên có thể nghỉ rồi ghi danh lại cùng lớp (một ghi danh DROPPED + một ACTIVE). Tính như trang Học phí
+  // (buildTuitionScheduleSummary): một buổi được tính nếu có bất kỳ ghi danh nào bao phủ, ưu tiên ghi danh ACTIVE
+  // rồi ghi danh mới nhất. Trước đây chỉ lấy ghi danh có id nhỏ nhất — nếu đó là ghi danh đã nghỉ thì mọi buổi
+  // sau ngày nghỉ bị loại và phiếu ra 0 đồng.
+  const enrollments: ClassEnrollment[] = (await prisma.classEnrollment.findMany({ where: { classId, studentId }, include: enrollmentInclude }))
+    .map(enrollmentDoc)
+    .sort((a: any, b: any) => Number(b.status === 'ACTIVE') - Number(a.status === 'ACTIVE')
+      || String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
+      || String(a.id).localeCompare(String(b.id)))
+  if (!enrollments.length) throw new Error(`Học viên ${studentId} không đăng ký lớp ${classId}`)
 
-  // Đơn giá: ưu tiên customTuitionRate → class.tuitionRate → subject.tuitionRatePerSession
+  // Đơn giá mỗi buổi: customTuitionRate của ghi danh bao phủ buổi đó → class.tuitionRate → subject.tuitionRatePerSession
   const classRow = await prisma.class.findUnique({ where: { id: classId }, include: { ...classInclude, subject: true } })
   const classData = classRow ? classDoc(classRow) : {}
-  let ratePerSession = enrollment.customTuitionRate ?? 0
-  if (!ratePerSession) {
-    if (classRateForMonth(classData, month, year)) {
-      ratePerSession = classRateForMonth(classData, month, year)
-    } else if (classRow?.subject) {
-      ratePerSession = Number(classRow.subject.tuitionRatePerSession || 0)
-    }
-  }
+  const classRate = classRateForMonth(classData, month, year) || Number(classRow?.subject?.tuitionRatePerSession || 0)
 
   // Sessions không CANCELLED trong tháng (theo lịch dự kiến)
   const sessions = (await prisma.session.findMany({
     where: { classId, sessionDate: { gte: toDay(fromDate)!, lte: toDay(toDate)! } },
     include: sessionInclude,
   })).map(sessionDoc)
-  const validSessions = sessions.filter((data: any) => {
-    if (data.status === 'CANCELLED') return false
-    if (enrollment.enrollmentDate && data.sessionDate < enrollment.enrollmentDate) return false
-    if (enrollment.status === 'DROPPED' && enrollment.dropDate && data.sessionDate > enrollment.dropDate) return false
-    return true
+  const sessionRates = sessions.flatMap((data: any) => {
+    if (data.status === 'CANCELLED') return []
+    const covering = enrollments.find(e => (!e.enrollmentDate || data.sessionDate >= e.enrollmentDate)
+      && (e.status !== 'DROPPED' || !e.dropDate || data.sessionDate <= e.dropDate))
+    return covering ? [Number(covering.customTuitionRate) || classRate] : []
   })
-  const totalSessions = validSessions.length
+  const totalSessions = sessionRates.length
   const chargedSessions = totalSessions
 
-  const baseAmount = chargedSessions * ratePerSession
+  const baseAmount = sessionRates.reduce((sum, rate) => sum + rate, 0)
+  const ratePerSession = totalSessions ? baseAmount / totalSessions : classRate
 
   // Khuyến mãi đang hiệu lực
   const activePromos = await activePromotions(studentId, classId, fromDate, toDate)

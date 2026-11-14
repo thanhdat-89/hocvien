@@ -28,6 +28,7 @@ export function invoiceWorkflowLabel(result: InvoiceWorkflowResult) {
     OUTCOME_UNKNOWN: 'Phiếu đã lưu. Kết quả MISA chưa rõ; cần đối chiếu RefID trước khi gửi lại.',
     NEEDS_REVIEW: 'Phiếu đã lưu. Cần kiểm tra dữ liệu hoặc cấu hình MISA.',
     FAILED: 'Phiếu học phí đã lưu. Chưa tạo được hóa đơn trên MISA.',
+    SKIPPED_ZERO_AMOUNT: 'Phiếu học phí đã lưu.',
     SKIPPED_EXISTING_RECORD: 'Phiếu đã tồn tại và đã được xử lý trước đó. Chỉ cập nhật dữ liệu phiếu, không tạo lại hóa đơn nháp MISA.',
   }
   return [labels[workflow.status || ''] || `Phiếu đã lưu. Trạng thái hóa đơn: ${workflow.status || 'chưa xác định'}.`, workflow.message].filter(Boolean).join(' ')
@@ -43,6 +44,7 @@ function resultPresentation(result: InvoiceWorkflowResult): { tone: ResultTone; 
   if (['DRAFT_CREATED', 'MISA_DRAFT_CREATED'].includes(status)) return { tone: 'success', label: 'Đã tạo hóa đơn chưa phát hành', icon: 'check_circle' }
   if (['ISSUED', 'SENT_TO_TAX'].includes(status)) return { tone: 'success', label: status === 'ISSUED' ? 'Hóa đơn đã phát hành' : 'Hóa đơn đã gửi CQT', icon: 'check_circle' }
   if (['FAILED', 'SYNC_FAILED'].includes(status)) return { tone: 'error', label: 'Tạo hóa đơn thất bại', icon: 'error' }
+  if (status === 'SKIPPED_ZERO_AMOUNT') return { tone: 'review', label: 'Phiếu 0 đồng, không tạo hóa đơn', icon: 'info' }
   if (['CREATING', 'CREATING_MISA', 'PENDING_MISA'].includes(status)) return { tone: 'pending', label: 'Đang chờ kết quả MISA', icon: 'schedule' }
   return { tone: 'review', label: 'Cần kiểm tra trạng thái', icon: 'info' }
 }

@@ -123,6 +123,9 @@ async function createTuitionMisaInvoiceInternal(recordIds: string[], actorId: st
       return invoiceSource(s.fee, s.payments)
     })
     if (sources.some(s => s.studentId !== sources[0].studentId)) throw new InvoicePreviewError(400, 'Chỉ gộp các phiếu của cùng một học viên.')
+    if (sources.reduce((sum, item) => sum + item.finalAmount, 0) <= 0) {
+      throw new InvoicePreviewError(409, 'Tổng học phí sau giảm trừ bằng 0 đồng; không tạo hóa đơn MISA. Kiểm tra lại số buổi và đơn giá của phiếu.')
+    }
     const at = new Date().toISOString()
     const invoice: MisaInvoiceRecord = { id: recordIds[0], recordIds, refId: randomUUID(), status: 'CREATING',
       source: sources[0], sources, template, buyer: input.buyer, invoiceDate: input.invoiceDate, revision: 0, createdAt: at, updatedAt: at, createdBy: actorId }
@@ -207,6 +210,11 @@ export async function retryMisaDraftForExistingRecord(recordId: string, actorId:
 
 export async function tryCreateAutomaticMisaDraft(recordId: string, actorId: string) {
   try {
+    // Phiếu 0 đồng (miễn toàn bộ hoặc tính sai số buổi): không lập hóa đơn, để người dùng kiểm tra phiếu.
+    const fee = await prisma.tuitionRecord.findUnique({ where: { id: recordId }, select: { finalAmount: true } })
+    if (fee && fee.finalAmount <= 0) {
+      return { enabled: true, status: 'SKIPPED_ZERO_AMOUNT', message: 'Học phí sau giảm trừ bằng 0 đồng nên không tạo hóa đơn MISA. Kiểm tra lại số buổi và đơn giá của phiếu.' }
+    }
     const result = await createTuitionMisaInvoice([recordId], actorId)
     const invoice = result.invoice as MisaInvoiceRecord
     return { enabled: true, status: invoice.status, alreadyExists: result.alreadyExists, invoice,
