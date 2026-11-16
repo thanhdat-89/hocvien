@@ -11,3 +11,5 @@ frontend/dist/
 
 /generated/prisma
 .vercel
+
+.DS_Store
