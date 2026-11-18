@@ -50,7 +50,7 @@ const run=async (page) => {
     check(!await p.getByText('Có lỗi xảy ra', { exact: true }).count(), `${width} ${label}: runtime boundary`)
     const overflow = await p.evaluate(() => ({ scroll: document.documentElement.scrollWidth, width: document.documentElement.clientWidth }))
     check(overflow.scroll <= overflow.width + 1, `${width} ${label}: document overflow ${JSON.stringify(overflow)}`)
-    if (overflow.scroll > overflow.width + 1 && ['info', 'reviews'].includes(label)) {
+    if (overflow.scroll > overflow.width + 1 && ['info', 'learning'].includes(label)) {
       failures.push(await p.evaluate(() => ({ label: 'overflow details', profileClass: document.querySelector('.page-content')?.className, wrap: getComputedStyle(document.querySelector('.page-content')).overflowWrap, offenders: [...document.querySelectorAll('.page-content *')].filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.right > document.documentElement.clientWidth + 1 }).slice(-8).map(e => ({ tag: e.tagName, class: e.className, text: e.textContent.slice(0, 45), x: e.getBoundingClientRect().x, width: e.getBoundingClientRect().width, wrap: getComputedStyle(e).overflowWrap })) })))
     }
     if (width === 1440) await p.screenshot({ path: `/private/tmp/qlhv-detail-${phase}-${label}.png`, fullPage: true })
@@ -60,7 +60,7 @@ const run=async (page) => {
     for (const width of [320, 360, 390, 430, 768, 820, 1440]) {
       console.log('Checking viewport',width); await p.setViewportSize({ width, height: 900 })
       await p.goto(`${process.env.TEST_BASE || base}/students/${student.id}`); await settle()
-      for (const [index, label] of ['info', 'schedule', 'private', 'tuition', 'reviews', 'scores'].entries()) {
+      for (const [index, label] of ['info', 'schedule', 'private', 'tuition', 'learning'].entries()) {
         await p.locator('.responsive-tabs > button').nth(index).click(); await settle(); if(label==='tuition') await p.locator('.profile-tuition-table tbody tr').nth(2).waitFor(); await p.waitForTimeout(150); await inspect(label)
         if(width === 390) await p.screenshot({ path:`/private/tmp/qlhv-profile-mobile-${label}.png`, fullPage:true })
         if(['schedule','private'].includes(label) && width<768) {

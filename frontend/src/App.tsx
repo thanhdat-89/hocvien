@@ -13,8 +13,7 @@ import EInvoices from './pages/EInvoices'
 import Notifications from './pages/Notifications'
 import Leads from './pages/Leads'
 import PrivateSchedule from './pages/PrivateSchedule'
-import Tests from './pages/Tests'
-import Reviews from './pages/Reviews'
+import MovedToTheodoi from './pages/MovedToTheodoi'
 import Materials from './pages/Materials'
 
 import Zns from './pages/Zns'
@@ -36,8 +35,9 @@ export default function App() {
             <Route path="/students/:id" element={<StudentProfile />} />
             <Route path="/classes" element={<Classes />} />
             <Route path="/private-schedule" element={<PrivateSchedule />} />
-            <Route path="/exams" element={<Tests />} />
-            <Route path="/reviews" element={<Reviews />} />
+            {/* Điểm kiểm tra, nhận xét: đã chuyển sang theodoi.cqt.vn */}
+            <Route path="/exams" element={<MovedToTheodoi />} />
+            <Route path="/reviews" element={<MovedToTheodoi />} />
             <Route path="/materials" element={<Materials />} />
 
             <Route path="/tuition" element={<RequireRole roles={['ADMIN', 'STAFF']}><Tuition /></RequireRole>} />

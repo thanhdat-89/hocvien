@@ -49,7 +49,7 @@ async (page) => {
     check(!await p.getByText('Có lỗi xảy ra', { exact: true }).count(), `${width} ${label}: runtime boundary`)
     const overflow = await p.evaluate(() => ({ scroll: document.documentElement.scrollWidth, width: document.documentElement.clientWidth }))
     check(overflow.scroll <= overflow.width + 1, `${width} ${label}: document overflow ${JSON.stringify(overflow)}`)
-    if (overflow.scroll > overflow.width + 1 && ['info', 'reviews'].includes(label)) {
+    if (overflow.scroll > overflow.width + 1 && ['info', 'learning'].includes(label)) {
       failures.push(await p.evaluate(() => ({ label: 'overflow details', profileClass: document.querySelector('.page-content')?.className, wrap: getComputedStyle(document.querySelector('.page-content')).overflowWrap, offenders: [...document.querySelectorAll('.page-content *')].filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.right > document.documentElement.clientWidth + 1 }).slice(-8).map(e => ({ tag: e.tagName, class: e.className, text: e.textContent.slice(0, 45), x: e.getBoundingClientRect().x, width: e.getBoundingClientRect().width, wrap: getComputedStyle(e).overflowWrap })) })))
     }
     if (width === 1440) await p.screenshot({ path: `/private/tmp/qlhv-detail-${phase}-${label}.png`, fullPage: true })
@@ -58,7 +58,7 @@ async (page) => {
     for (const width of [320, 390, 820, 1440]) {
       await p.setViewportSize({ width, height: 900 })
       await p.goto(`${base}/students/${student.id}`); await settle()
-      for (const [index, label] of ['info', 'schedule', 'private', 'tuition', 'reviews', 'scores'].entries()) {
+      for (const [index, label] of ['info', 'schedule', 'private', 'tuition', 'learning'].entries()) {
         await p.locator('.responsive-tabs > button').nth(index).click(); await settle(); await inspect(label)
       }
       await p.locator('.responsive-tabs > button').nth(2).click(); await settle()

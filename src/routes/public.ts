@@ -1,12 +1,11 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { prisma, api } from '../lib/db'
 import {
-  classDoc, classInclude, enrollmentDoc, enrollmentInclude, monthlyScoreDoc, monthlyScoreInclude, paymentDoc, paymentInclude,
+  classDoc, classInclude, enrollmentDoc, enrollmentInclude, paymentDoc, paymentInclude,
   privateSessionDoc, privateSessionInclude, scheduleDoc, scheduleInclude, tuitionRecordDoc, tuitionRecordInclude,
 } from '../lib/docs'
 import { s } from '../lib/params'
 import { computeTuitionSummary, loadStudentPromotions } from '../lib/tuition'
-import { currentClassNames } from '../lib/classDisplayNames'
 import { listMaterialsForStudent } from './materials'
 import { studentShortId } from '../services/sepayMatcher'
 import type { Student, ClassEnrollment, Class, Schedule, TuitionRecord, Payment, PrivateSession } from '../types/models'
@@ -71,14 +70,6 @@ interface PublicTuition {
     method?: string
     notes?: string
   }>
-}
-
-interface PublicReview {
-  id: string
-  month: string
-  content: string
-  teacherName?: string
-  updatedAt: string
 }
 
 // In-memory response cache when parents refresh repeatedly.
@@ -212,32 +203,7 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
         }
       })
 
-    // ─── Nhận xét theo tháng ───────────────────────────────────
-    const [reviewRows, scoreRows] = await Promise.all([
-      prisma.studentReview.findMany({ where: { studentId }, orderBy: { month: 'desc' } }),
-      prisma.monthlyScore.findMany({ where: { studentId }, include: monthlyScoreInclude }),
-    ])
-    const reviews: PublicReview[] = reviewRows.map(r => ({
-      id: r.month, // API cũ dùng tháng làm id nhận xét
-      month: r.month,
-      content: r.content,
-      teacherName: r.teacherName ?? undefined,
-      updatedAt: r.updatedAt.toISOString(),
-    }))
-    const scoreDocs = scoreRows.map(monthlyScoreDoc)
-    const scoreNames = await currentClassNames(scoreDocs.map((m: any) => String(m.classId || '')))
-    const monthlyScores = scoreDocs
-      .sort((a, b) => (b.year - a.year) || (b.month - a.month) || (scoreNames.get(a.classId) ?? a.className ?? '').localeCompare(scoreNames.get(b.classId) ?? b.className ?? '', 'vi'))
-      .map(m => ({
-        id: m.id,
-        classId: m.classId,
-        className: scoreNames.get(m.classId) || m.className,
-        year: m.year,
-        month: m.month,
-        expectedCount: m.expectedCount,
-        scores: m.scores ?? [],
-        notes: m.notes,
-      }))
+    // Nhận xét tháng và điểm kiểm tra đã chuyển sang theodoi.cqt.vn (trang phụ huynh lấy trực tiếp từ đó)
 
     const [tuitionSummary, promotions, privateSessionsRaw] = await Promise.all([
       computeTuitionSummary(studentId),
@@ -267,8 +233,6 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
       tuition,
       tuitionSummary,
       promotions,
-      reviews,
-      monthlyScores,
       materials,
     }
     publicCache.set(studentId, { at: Date.now(), payload })

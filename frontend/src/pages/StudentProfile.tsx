@@ -8,6 +8,7 @@ import { useAuth } from '../hooks/useAuth'
 import { gradeOfClass } from '../lib/classGrade'
 import { buildParentUrl } from '../lib/parentUrl'
 import InvoicePreviewModal from '../components/InvoicePreviewModal'
+import { TheodoiNotice } from './MovedToTheodoi'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -850,266 +851,6 @@ interface StudentReview {
   updatedAt?: string
 }
 
-function ReviewsTab({ studentId }: { studentId: string }) {
-  const now = new Date()
-  const confirm = useConfirm()
-  const alert = useAlert()
-  const [month, setMonth] = useState(now.getMonth() + 1)
-  const [year, setYear] = useState(now.getFullYear())
-  const [list, setList] = useState<StudentReview[]>([])
-  const [content, setContent] = useState('')
-  const [teacherName, setTeacherName] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [saving, setSaving] = useState(false)
-
-  const monthKey = `${year}-${String(month).padStart(2, '0')}`
-  const existing = list.find(r => r.month === monthKey)
-
-  const load = () => {
-    setLoading(true)
-    api.get(`/reviews/${studentId}`)
-      .then(r => setList(r.data ?? []))
-      .catch(() => setList([]))
-      .finally(() => setLoading(false))
-  }
-
-  useEffect(() => { load() }, [studentId])
-
-  useEffect(() => {
-    if (existing) {
-      setContent(existing.content)
-      setTeacherName(existing.teacherName ?? '')
-    } else {
-      setContent('')
-      setTeacherName('')
-    }
-  }, [monthKey, existing?.id])
-
-  const handleSave = async () => {
-    if (!content.trim()) {
-      await alert({ title: 'Thiếu nội dung', message: 'Vui lòng nhập nội dung nhận xét.' })
-      return
-    }
-    setSaving(true)
-    try {
-      await api.put(`/reviews/${studentId}/${monthKey}`, {
-        content: content.trim(),
-        teacherName: teacherName.trim() || undefined,
-      })
-      load()
-    } catch {
-      await alert({ title: 'Lỗi', message: 'Không lưu được nhận xét. Thử lại sau.' })
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleDelete = async () => {
-    if (!existing) return
-    const ok = await confirm({
-      title: 'Xoá nhận xét',
-      message: `Xoá nhận xét tháng ${month}/${year}?`,
-      confirmLabel: 'Xoá',
-      danger: true,
-    })
-    if (!ok) return
-    try {
-      await api.delete(`/reviews/${studentId}/${monthKey}`)
-      load()
-    } catch {
-      await alert({ title: 'Lỗi', message: 'Không xoá được nhận xét.' })
-    }
-  }
-
-  const months = Array.from({ length: 12 }, (_, i) => i + 1)
-  const years = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1]
-
-  return (
-    <div className="space-y-6">
-      {/* Editor */}
-      <div className="bg-surface-container-lowest rounded-xl p-6 shadow-sm space-y-4">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="responsive-toolbar flex items-center gap-2">
-            <select value={month} onChange={e => setMonth(Number(e.target.value))} className="input py-2 w-32">
-              {months.map(m => <option key={m} value={m}>Tháng {m}</option>)}
-            </select>
-            <select value={year} onChange={e => setYear(Number(e.target.value))} className="input py-2 w-28">
-              {years.map(y => <option key={y} value={y}>{y}</option>)}
-            </select>
-            {existing && (
-              <span className="px-2 py-1 rounded-md bg-secondary-container/30 text-secondary text-xs font-bold uppercase">
-                Đã có nhận xét
-              </span>
-            )}
-          </div>
-          {existing && (
-            <button
-              onClick={handleDelete}
-              className="px-3 py-1.5 text-sm font-semibold text-error hover:bg-error-container/20 rounded-lg flex items-center gap-1.5 transition-colors"
-            >
-              <span className="material-symbols-outlined text-base">delete</span>Xoá
-            </button>
-          )}
-        </div>
-
-        <div className="space-y-3">
-          <input
-            type="text"
-            value={teacherName}
-            onChange={e => setTeacherName(e.target.value)}
-            placeholder="Tên giáo viên (không bắt buộc)"
-            className="input w-full"
-          />
-          <textarea
-            value={content}
-            onChange={e => setContent(e.target.value)}
-            placeholder="Nhập nhận xét về quá trình học tập của học viên trong tháng..."
-            rows={6}
-            className="input w-full resize-y"
-          />
-          <div className="flex justify-end">
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="btn-primary disabled:opacity-50"
-            >
-              <span className="material-symbols-outlined text-lg">save</span>
-              {saving ? 'Đang lưu...' : (existing ? 'Cập nhật' : 'Lưu nhận xét')}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* History list */}
-      <div>
-        <h3 className="font-headline text-lg font-bold text-on-surface mb-3">Lịch sử nhận xét</h3>
-        {loading ? (
-          <div className="flex justify-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-          </div>
-        ) : list.length === 0 ? (
-          <div className="bg-surface-container-lowest rounded-xl p-8 text-center shadow-sm">
-            <span className="material-symbols-outlined text-4xl text-outline/40 block mb-2">rate_review</span>
-            <p className="text-sm text-outline">Chưa có nhận xét nào</p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {list.map(r => {
-              const [yy, mm] = r.month.split('-')
-              const isCurrent = r.month === monthKey
-              return (
-                <div
-                  key={r.id}
-                  className={`bg-surface-container-lowest rounded-xl p-4 shadow-sm border-2 transition-colors cursor-pointer hover:border-primary/40 ${isCurrent ? 'border-primary' : 'border-transparent'}`}
-                  onClick={() => { setMonth(Number(mm)); setYear(Number(yy)) }}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-bold text-on-surface">Tháng {Number(mm)}/{yy}</span>
-                    {r.teacherName && (
-                      <span className="text-xs text-outline">— {r.teacherName}</span>
-                    )}
-                  </div>
-                  <p className="text-sm text-on-surface-variant whitespace-pre-wrap">{r.content}</p>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ─── Tab: Test Scores (theo tháng) ───────────────────────────────────────────
-
-interface MonthlyScoresDoc {
-  id: string
-  studentId: string
-  studentName: string
-  classId: string
-  className: string
-  year: number
-  month: number
-  expectedCount: number
-  scores: (number | null)[]
-  notes?: string
-  updatedAt: string
-}
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function ScoresTab({ studentId, enrollments: _enrollments }: { studentId: string; enrollments: ClassEnrollment[] }) {
-  const [list, setList] = useState<MonthlyScoresDoc[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    setLoading(true)
-    api.get(`/monthly-scores/student/${studentId}`)
-      .then(r => setList(r.data ?? []))
-      .catch(() => setList([]))
-      .finally(() => setLoading(false))
-  }, [studentId])
-
-  const scoreColor = (s: number | null) => {
-    if (s == null) return ''
-    if (s >= 8) return 'text-emerald-600'
-    if (s >= 6.5) return 'text-primary'
-    if (s >= 5) return 'text-amber-600'
-    return 'text-error'
-  }
-
-  return (
-    <div className="space-y-4">
-      <h3 className="font-headline text-lg font-bold text-on-surface">Điểm kiểm tra</h3>
-      {loading ? (
-        <div className="flex justify-center py-8">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-        </div>
-      ) : list.length === 0 ? (
-        <div className="bg-surface-container-lowest rounded-xl p-10 text-center shadow-sm">
-          <span className="material-symbols-outlined text-5xl text-outline/40 block mb-2">grade</span>
-          <p className="text-sm text-outline">Chưa có điểm kiểm tra nào</p>
-          <p className="text-xs text-outline/70 mt-1">Vào trang "Điểm kiểm tra" để chấm điểm theo tháng</p>
-        </div>
-      ) : list.map(m => {
-        const valid = m.scores.filter((x): x is number => x != null)
-        const avg = valid.length > 0 ? valid.reduce((a, b) => a + b, 0) / valid.length : null
-        return (
-          <div key={m.id} className="bg-surface-container-lowest rounded-xl p-4 shadow-sm">
-            <div className="flex items-baseline justify-between gap-3 mb-3 flex-wrap">
-              <div>
-                <h4 className="font-bold text-on-surface text-sm">Tháng {m.month}/{m.year}</h4>
-                <p className="text-xs text-outline">{m.className}</p>
-              </div>
-              {avg != null && (
-                <div className="text-right">
-                  <p className="text-[10px] text-outline uppercase tracking-wider">TB</p>
-                  <p className={`text-xl font-extrabold ${scoreColor(avg)}`}>{avg.toFixed(1)}</p>
-                </div>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {m.scores.map((s, i) => (
-                <span key={i}
-                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-bold border border-outline-variant/20 ${
-                    s == null ? 'text-outline/50' : scoreColor(s)
-                  } bg-surface-container-low/50`}>
-                  <span className="text-[10px] opacity-60">KT{i + 1}</span>
-                  <span>{s == null ? '—' : s}</span>
-                </span>
-              ))}
-            </div>
-            {m.notes && (
-              <p className="text-xs text-on-surface-variant bg-surface-container-low/40 rounded-lg p-2 mt-3 leading-relaxed whitespace-pre-wrap">
-                <span className="material-symbols-outlined align-text-bottom text-outline mr-1" style={{ fontSize: 14 }}>edit_note</span>
-                {m.notes}
-              </p>
-            )}
-          </div>
-        )
-      })}
-    </div>
-  )
-}
 
 
 // ─── Tab: Tuition ────────────────────────────────────────────────────────────
@@ -2362,7 +2103,7 @@ export default function StudentProfile() {
   const [student, setStudent] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const { canSeeFinance, canManageStudents } = useAuth()
-  const [activeTab, setActiveTab] = useState<'info' | 'schedule' | 'private' | 'tuition' | 'reviews' | 'scores'>('info')
+  const [activeTab, setActiveTab] = useState<'info' | 'schedule' | 'private' | 'tuition' | 'learning'>('info')
   const [editModal, setEditModal] = useState(false)
 
   const load = () => {
@@ -2456,9 +2197,9 @@ export default function StudentProfile() {
 
         {/* Tabs */}
         <div className="responsive-tabs flex gap-1 border-b border-outline-variant/20">
-          {(['info', 'schedule', 'private', 'tuition', 'reviews', 'scores'] as const).filter(t => t !== 'tuition' || canSeeFinance).map(tab => {
-            const icons  = { info: 'person', schedule: 'calendar_month', private: 'person_apron', tuition: 'payments', reviews: 'rate_review', scores: 'grade' }
-            const labels = { info: 'Thông tin', schedule: 'Lịch học', private: 'Học riêng', tuition: 'Học phí', reviews: 'Nhận xét', scores: 'Điểm KT' }
+          {(['info', 'schedule', 'private', 'tuition', 'learning'] as const).filter(t => t !== 'tuition' || canSeeFinance).map(tab => {
+            const icons  = { info: 'person', schedule: 'calendar_month', private: 'person_apron', tuition: 'payments', learning: 'school' }
+            const labels = { info: 'Thông tin', schedule: 'Lịch học', private: 'Học riêng', tuition: 'Học phí', learning: 'Học tập' }
             return (
               <button
                 key={tab}
@@ -2492,11 +2233,8 @@ export default function StudentProfile() {
 {activeTab === 'tuition' && (
           <TuitionTab studentId={id!} enrollments={enrollments} />
         )}
-        {activeTab === 'reviews' && (
-          <ReviewsTab studentId={id!} />
-        )}
-        {activeTab === 'scores' && (
-          <ScoresTab studentId={id!} enrollments={enrollments} />
+        {activeTab === 'learning' && (
+          <TheodoiNotice studentId={id!} />
         )}
       </div>
 
