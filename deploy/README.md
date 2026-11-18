@@ -7,6 +7,7 @@
 | Cổng nội bộ | `127.0.0.1:3600`, nginx `api.qlhv.cqt.vn` |
 | Frontend | vẫn ở Vercel (`qlhv.cqt.vn`), gọi `https://api.qlhv.cqt.vn` như cũ |
 | Sao lưu | `qlhv-backup.timer` mỗi đêm 02:30 → `/var/backups/qlhv` |
+| Sao lưu trước migrate | `deploy.sh` dump DB vào `/home/qlhv/backups/pre-migrate` trước `prisma migrate deploy` (giữ 10 bản; lỗi thì dừng deploy) |
 
 | File | Vai trò |
 |---|---|
