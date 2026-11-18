@@ -869,6 +869,98 @@ interface TuitionRow {
   } | null
 }
 
+// Lịch sử học phí theo tháng (không tính tháng tương lai).
+// Đã đóng đủ phiếu → "Đã đóng"; tháng hiện tại chưa đóng đủ, hoặc tháng chưa có phiếu → "Chưa nộp học phí", số tiền ghi (Dự kiến).
+type HistoryStatus = 'PAID' | 'ESTIMATE' | 'PARTIAL' | 'UNPAID'
+const HISTORY_STATUS: Record<HistoryStatus, { label: string; cls: string }> = {
+  PAID:     { label: 'Đã đóng',         cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  ESTIMATE: { label: 'Chưa nộp học phí', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+  PARTIAL:  { label: 'Đóng một phần',   cls: 'bg-orange-50 text-orange-700 border-orange-200' },
+  UNPAID:   { label: 'Chưa đóng',       cls: 'bg-rose-50 text-rose-700 border-rose-200' },
+}
+
+function buildTuitionHistory(rows: TuitionRow[]) {
+  const now = new Date()
+  const curKey = now.getFullYear() * 12 + now.getMonth()
+  const months = new Map<string, { month: number; year: number; amount: number; paid: number; remaining: number; billed: boolean; unbilled: boolean }>()
+  for (const r of rows) {
+    if (r.year * 12 + (r.month - 1) > curKey) continue
+    const k = `${r.year}-${r.month}`
+    const e = months.get(k) ?? { month: r.month, year: r.year, amount: 0, paid: 0, remaining: 0, billed: false, unbilled: false }
+    if (r.tuitionRecord) {
+      e.billed = true
+      e.amount += r.tuitionRecord.finalAmount
+      e.paid += r.tuitionRecord.paidAmount
+      e.remaining += r.tuitionRecord.remainingAmount
+    } else {
+      e.unbilled = true
+      e.amount += r.finalAmount
+    }
+    months.set(k, e)
+  }
+  return [...months.values()]
+    .filter(e => e.amount > 0 || e.billed)
+    .map(e => {
+      const isCurrent = e.year * 12 + (e.month - 1) >= curKey
+      let status: HistoryStatus
+      if (e.billed && !e.unbilled && e.remaining === 0) status = 'PAID'
+      else if (isCurrent || e.unbilled) status = 'ESTIMATE'
+      else status = e.paid > 0 ? 'PARTIAL' : 'UNPAID'
+      return { ...e, status }
+    })
+    .sort((a, b) => (b.year - a.year) || (b.month - a.month))
+}
+
+function TuitionHistory({ rows, totalRemaining, selected, onSelect }: {
+  rows: TuitionRow[]
+  totalRemaining: number
+  selected: { month: number; year: number }
+  onSelect: (month: number, year: number) => void
+}) {
+  const list = buildTuitionHistory(rows)
+  if (list.length === 0) return null
+  return (
+    <div className="bg-surface-container-lowest rounded-xl p-5 shadow-sm">
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <h3 className="font-headline text-base font-bold text-on-surface">Lịch sử học phí</h3>
+        {totalRemaining > 0 && (
+          <span className="text-sm text-rose-600">
+            Tổng còn nợ: <span className="font-extrabold">{fmtMoney(totalRemaining)}</span>
+          </span>
+        )}
+      </div>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-[10px] uppercase tracking-wider text-outline border-b border-outline-variant/30">
+            <th className="text-left font-bold py-2 pr-2">Tháng</th>
+            <th className="text-right font-bold py-2 px-2">Số tiền</th>
+            <th className="text-right font-bold py-2 pl-2">Tình trạng</th>
+          </tr>
+        </thead>
+        <tbody>
+          {list.map(e => {
+            const st = HISTORY_STATUS[e.status]
+            const isSel = e.month === selected.month && e.year === selected.year
+            return (
+              <tr key={`${e.year}-${e.month}`} onClick={() => onSelect(e.month, e.year)}
+                  className={`cursor-pointer border-b border-outline-variant/15 last:border-0 hover:bg-surface-container-low ${isSel ? 'bg-primary/5' : ''}`}>
+                <td className="py-2.5 pr-2 font-semibold text-on-surface whitespace-nowrap">Tháng {e.month}/{e.year}</td>
+                <td className="py-2.5 px-2 text-right font-bold text-on-surface whitespace-nowrap">
+                  {fmtMoney(e.amount)}{e.status === 'ESTIMATE' && <span className="font-normal text-outline"> (Dự kiến)</span>}
+                  {e.status === 'PARTIAL' && <p className="text-[11px] font-normal text-rose-600 mt-0.5">Còn {fmtMoney(e.remaining)}</p>}
+                </td>
+                <td className="py-2.5 pl-2 text-right">
+                  <span className={`inline-block text-xs font-semibold px-2.5 py-0.5 rounded-full border whitespace-nowrap ${st.cls}`}>{st.label}</span>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 interface PromoModalProps {
   studentId: string
   enrollments: ClassEnrollment[]
@@ -1101,9 +1193,7 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
   const totalDiscount = filteredRows.reduce((s, r) => s + r.discountAmount, 0)
 
   // Tổng hợp trạng thái học phí trên TẤT CẢ tháng (không lọc theo tháng đang xem)
-  const billedRows = rows.filter(r => r.tuitionRecord !== null)
-  const totalRemainingAll = billedRows.reduce((s, r) => s + (r.tuitionRecord?.remainingAmount ?? 0), 0)
-  const hasOutstanding = totalRemainingAll > 0
+  const totalRemainingAll = rows.reduce((s, r) => s + (r.tuitionRecord?.remainingAmount ?? 0), 0)
   const activeEnrollments = enrollments.filter(e => e.status === 'ACTIVE')
   const availableYears = [...new Set(rows.map(r => r.year))].sort((a, b) => b - a)
 
@@ -1115,32 +1205,12 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
 
   return (
     <div className="space-y-4">
-      {billedRows.length > 0 && (
-        <div className={`rounded-xl p-5 shadow-sm border ${hasOutstanding
-          ? 'bg-rose-50 border-rose-200'
-          : 'bg-emerald-50 border-emerald-200'}`}>
-          <div className="flex items-center gap-4">
-            <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${hasOutstanding
-              ? 'bg-rose-100 text-rose-600'
-              : 'bg-emerald-100 text-emerald-600'}`}>
-              <span className="material-symbols-outlined text-[28px]">
-                {hasOutstanding ? 'error' : 'verified'}
-              </span>
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-[10px] uppercase font-bold tracking-wider text-outline mb-0.5">Trạng thái học phí</p>
-              <p className={`text-lg font-bold ${hasOutstanding ? 'text-rose-700' : 'text-emerald-700'}`}>
-                {hasOutstanding ? 'Còn nợ học phí' : 'Đã thanh toán hết'}
-              </p>
-              {hasOutstanding && (
-                <p className="text-sm text-rose-600 mt-0.5">
-                  Tổng tiền còn nợ: <span className="font-extrabold">{fmtMoney(totalRemainingAll)}</span>
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <TuitionHistory
+        rows={rows}
+        totalRemaining={totalRemainingAll}
+        selected={{ month: filterMonth, year: filterYear }}
+        onSelect={(m, y) => { setFilterMonth(m); setFilterYear(y) }}
+      />
 
       {rows.length > 0 && (
         <div className="profile-tuition-summary grid grid-cols-3 gap-4">
