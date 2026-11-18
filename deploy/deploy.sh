@@ -10,6 +10,18 @@ log() { echo -e "\n\033[1;34m==> $*\033[0m"; }
 
 log "Cài thư viện"
 npm ci --no-audit --no-fund
+log "Sao lưu database qlhv trước khi migrate"
+# Bằng chính tài khoản DB của ứng dụng (user qlhv không có sudo postgres). Lỗi → dừng deploy, chưa migrate.
+# Giữ 10 bản gần nhất. Khôi phục: pg_restore --clean --if-exists -d "<DATABASE_URL>" <file>
+BACKUP_DIR=$HOME/backups/pre-migrate
+mkdir -p "$BACKUP_DIR" && chmod 700 "$BACKUP_DIR"
+DB_URL=$(set -a; . ./.env; echo "${DATABASE_URL%%\?*}")   # pg_dump không nhận tham số ?schema=… của Prisma
+BACKUP="$BACKUP_DIR/qlhv-$(date +%Y%m%d-%H%M%S).dump"
+pg_dump -Fc "$DB_URL" -f "$BACKUP.tmp"
+mv "$BACKUP.tmp" "$BACKUP" && chmod 600 "$BACKUP"
+ls -1t "$BACKUP_DIR"/qlhv-*.dump | tail -n +11 | xargs -r rm -f
+echo "Đã sao lưu: $BACKUP ($(du -h "$BACKUP" | cut -f1))"
+
 log "Prisma client + migration"
 npx prisma generate
 npx prisma migrate deploy
