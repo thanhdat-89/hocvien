@@ -876,7 +876,7 @@ const HISTORY_STATUS: Record<HistoryStatus, { label: string; cls: string }> = {
   PAID:     { label: 'Đã đóng',         cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
   ESTIMATE: { label: 'Chưa nộp học phí', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
   PARTIAL:  { label: 'Đóng một phần',   cls: 'bg-orange-50 text-orange-700 border-orange-200' },
-  UNPAID:   { label: 'Chưa đóng',       cls: 'bg-rose-50 text-rose-700 border-rose-200' },
+  UNPAID:   { label: 'Chưa nộp học phí', cls: 'bg-rose-50 text-rose-700 border-rose-200' },
 }
 
 function buildTuitionHistory(rows: TuitionRow[]) {
