@@ -946,7 +946,7 @@ function TuitionHistory({ rows, totalRemaining, selected, onSelect }: {
                   className={`cursor-pointer border-b border-outline-variant/15 last:border-0 hover:bg-surface-container-low ${isSel ? 'bg-primary/5' : ''}`}>
                 <td className="py-2.5 pr-2 font-semibold text-on-surface whitespace-nowrap">Tháng {e.month}/{e.year}</td>
                 <td className="py-2.5 px-2 text-right font-bold text-on-surface whitespace-nowrap">
-                  {fmtMoney(e.amount)}{e.status === 'ESTIMATE' && <span className="font-normal text-outline"> (Dự kiến)</span>}
+                  {fmtMoney(e.amount)}{e.status === 'ESTIMATE' && e.unbilled && <span className="font-normal text-outline"> (Dự kiến)</span>}
                   {e.status === 'PARTIAL' && <p className="text-[11px] font-normal text-rose-600 mt-0.5">Còn {fmtMoney(e.remaining)}</p>}
                 </td>
                 <td className="py-2.5 pl-2 text-right">
