@@ -632,7 +632,7 @@ export default function Tuition() {
                                   <span className={`text-xs font-bold transition-colors ${
                                     isPaid ? (isChanged ? 'text-primary' : 'text-emerald-600') : 'text-red-800 group-hover:text-red-900'
                                   }`}>
-                                    {isPaid ? 'Đã đóng' : 'Chưa đóng'}
+                                    {isPaid ? 'Đã đóng' : 'Chưa nộp học phí'}
                                   </span>
                                 </button>
                               )
