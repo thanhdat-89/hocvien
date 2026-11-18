@@ -879,12 +879,16 @@ const HISTORY_STATUS: Record<HistoryStatus, { label: string; cls: string }> = {
   UNPAID:   { label: 'Chưa nộp học phí', cls: 'bg-rose-50 text-rose-700 border-rose-200' },
 }
 
+// Lịch sử học phí và tổng còn nợ chỉ tính từ tháng 10/2026.
+const HISTORY_FROM = 2026 * 12 + 9
+const fromHistoryStart = (r: TuitionRow) => r.year * 12 + (r.month - 1) >= HISTORY_FROM
+
 function buildTuitionHistory(rows: TuitionRow[]) {
   const now = new Date()
   const curKey = now.getFullYear() * 12 + now.getMonth()
   const months = new Map<string, { month: number; year: number; amount: number; paid: number; remaining: number; billed: boolean; unbilled: boolean }>()
   for (const r of rows) {
-    if (r.year * 12 + (r.month - 1) > curKey) continue
+    if (r.year * 12 + (r.month - 1) > curKey || !fromHistoryStart(r)) continue
     const k = `${r.year}-${r.month}`
     const e = months.get(k) ?? { month: r.month, year: r.year, amount: 0, paid: 0, remaining: 0, billed: false, unbilled: false }
     if (r.tuitionRecord) {
@@ -1193,7 +1197,7 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
   const totalDiscount = filteredRows.reduce((s, r) => s + r.discountAmount, 0)
 
   // Tổng hợp trạng thái học phí trên TẤT CẢ tháng (không lọc theo tháng đang xem)
-  const totalRemainingAll = rows.reduce((s, r) => s + (r.tuitionRecord?.remainingAmount ?? 0), 0)
+  const totalRemainingAll = rows.filter(fromHistoryStart).reduce((s, r) => s + (r.tuitionRecord?.remainingAmount ?? 0), 0)
   const activeEnrollments = enrollments.filter(e => e.status === 'ACTIVE')
   const availableYears = [...new Set(rows.map(r => r.year))].sort((a, b) => b - a)
 
