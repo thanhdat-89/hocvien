@@ -23,7 +23,7 @@ import type { ClassEnrollment } from '../types/models'
 import { parseInvoiceInfo } from '../services/studentInvoiceInfo'
 import { getStudentInvoicePreview } from '../services/studentInvoicePreview'
 import { createInitialWeekdayPlan, setEnrollmentWeekdays } from '../services/enrollmentWeekdays'
-import { importPrivateSchedule } from '../services/privateScheduleImport'
+import { importPrivateSchedule, privateScheduleSuggestions } from '../services/privateScheduleImport'
 
 const router = Router()
 router.use(authenticate)
@@ -173,6 +173,14 @@ router.get('/private-sessions/all', async (req: AuthRequest, res: Response, next
       include: privateSessionInclude,
     })
     res.json(sessions.map(privateSessionDoc))
+  } catch (err) { next(err) }
+})
+
+// GET /api/students/private-schedule/suggestions?ids=a,b — gợi ý thứ học và học phí từ lịch học riêng trước đây
+router.get('/private-schedule/suggestions', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const ids = String(req.query.ids ?? '').split(',').map(id => id.trim()).filter(Boolean)
+    res.json(await privateScheduleSuggestions(ids))
   } catch (err) { next(err) }
 })
 

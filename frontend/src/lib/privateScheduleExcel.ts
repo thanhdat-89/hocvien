@@ -124,13 +124,22 @@ export async function readPrivateScheduleFile(file: File): Promise<PrivateImport
   return []
 }
 
+export type TemplateSuggestions = Record<string, { weekdays: number[]; ratePerSession: number | null }>
+
+const WD_LABEL = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7']
+
 export function downloadPrivateScheduleTemplate(
-  students: { fullName: string; gradeLevel?: number | null }[],
+  students: { id: string; fullName: string; gradeLevel?: number | null }[],
   month: string, // YYYY-MM
+  suggestions: TemplateSuggestions = {},
 ) {
   const m = Number(month.slice(5)), y = Number(month.slice(0, 4))
   const body = students.length
-    ? students.map(s => [s.fullName, s.gradeLevel ?? '', '', m, y, '', '', ''])
+    ? students.map(s => {
+        // Gợi ý từ lịch học riêng trước đây; học viên mới để trống
+        const sug = suggestions[s.id]
+        return [s.fullName, s.gradeLevel ?? '', sug?.weekdays.map(d => WD_LABEL[d]).join(', ') ?? '', m, y, '', sug?.ratePerSession ?? '', '']
+      })
     : [['Nguyễn Văn A', 6, 'T2, T5', m, y, '23, 27', 200000, '']]
   const ws = XLSX.utils.aoa_to_sheet([TEMPLATE_HEADERS, ...body])
   ws['!cols'] = [{ wch: 26 }, { wch: 9 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 14 }, { wch: 14 }, { wch: 20 }]

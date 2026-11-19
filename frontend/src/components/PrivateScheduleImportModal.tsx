@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import api from '../services/api'
 import { useConfirm } from './ConfirmDialog'
-import { downloadPrivateScheduleTemplate, LegacyTemplateError, PrivateImportRow, readPrivateScheduleFile } from '../lib/privateScheduleExcel'
+import { downloadPrivateScheduleTemplate, LegacyTemplateError, PrivateImportRow, readPrivateScheduleFile, TemplateSuggestions } from '../lib/privateScheduleExcel'
 
 interface Issue { level: 'error' | 'warning'; code: string; message: string }
 interface Candidate { id: string; fullName: string; gradeLevel: number | null; activeClasses: string[] }
@@ -34,7 +34,7 @@ const fmtMoney = (v: number | string) => (typeof v === 'number' ? v.toLocaleStri
 
 export default function PrivateScheduleImportModal({ month, missingStudents, onClose, onImported }: {
   month: string // YYYY-MM — tháng gợi ý cho file mẫu
-  missingStudents: { fullName: string; gradeLevel?: number | null }[]
+  missingStudents: { id: string; fullName: string; gradeLevel?: number | null }[]
   onClose: () => void
   onImported: () => void
 }) {
@@ -52,6 +52,19 @@ export default function PrivateScheduleImportModal({ month, missingStudents, onC
   const [dragOver, setDragOver] = useState(false)
   const [onlyProblems, setOnlyProblems] = useState(false)
   const previewSeq = useRef(0)
+  const [downloading, setDownloading] = useState(false)
+
+  const downloadTemplate = async () => {
+    setDownloading(true)
+    let suggestions: TemplateSuggestions = {}
+    try {
+      if (missingStudents.length) {
+        const r = await api.get('/students/private-schedule/suggestions', { params: { ids: missingStudents.map(s => s.id).join(',') } })
+        suggestions = r.data ?? {}
+      }
+    } catch { /* không có gợi ý thì vẫn tải file mẫu trống */ }
+    try { downloadPrivateScheduleTemplate(missingStudents, month, suggestions) } finally { setDownloading(false) }
+  }
 
   const payload = () => ({
     rows: rows.map(r => ({ ...r, studentId: picks[r.row] || undefined })),
@@ -120,10 +133,10 @@ export default function PrivateScheduleImportModal({ month, missingStudents, onC
             <p className="text-sm text-outline mt-0.5">Mỗi dòng: học viên + khối, các thứ học, tháng, năm, ngày nghỉ, học phí/buổi. Ngày nghỉ của học viên và ngày nghỉ lễ được tự bỏ qua.</p>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => downloadPrivateScheduleTemplate(missingStudents, month)}
+            <button onClick={() => void downloadTemplate()} disabled={downloading}
               title={missingStudents.length ? `File mẫu điền sẵn ${missingStudents.length} học viên chưa có lịch tháng ${fmtMonth(month)}` : undefined}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-primary bg-primary/8 hover:bg-primary/15 rounded-lg transition-all">
-              <span className="material-symbols-outlined text-[15px]">download</span>
+              <span className={`material-symbols-outlined text-[15px] ${downloading ? 'animate-spin' : ''}`}>{downloading ? 'progress_activity' : 'download'}</span>
               Tải file mẫu
             </button>
             <button onClick={onClose} aria-label="Đóng" className="p-1.5 hover:bg-surface-container-low rounded-lg">

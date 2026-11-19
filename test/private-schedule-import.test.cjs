@@ -128,3 +128,17 @@ test('students in a regular class need confirmation', async () => {
   const ok = (await preview({ body: { rows: [row()], confirmedStudentIds: [st.id] } })).body.rows[0]
   assert.equal(ok.status, 'ok')
 })
+
+test('template suggestions come from the latest month of private sessions', async () => {
+  const old = await seed.student({ fullName: 'Song Lam', gradeLevel: 6 })
+  const fresh = await seed.student({ fullName: 'Tuệ Minh', gradeLevel: 12 })
+  const add = (date, rate, status = 'SCHEDULED') => prisma.privateSession.create({ data: { id: newId(), studentId: old.id, sessionDate: day(date), ratePerSession: rate, status } })
+  await add('2026-09-01', 150000)                 // T3, tháng cũ
+  await add('2026-10-05', 180000)                 // T2
+  await add('2026-10-08', 200000)                 // T5 — buổi mới nhất có học phí
+  await add('2026-10-10', 200000, 'CANCELLED')    // T7 huỷ: không tính
+  const handler = routeHandler(router, '/private-schedule/suggestions', 'get')
+  const res = (await handler({ query: { ids: `${old.id},${fresh.id}` } })).body
+  assert.deepEqual(res[old.id], { weekdays: [1, 4], ratePerSession: 200000 })
+  assert.equal(res[fresh.id], undefined, 'học viên mới không có gợi ý')
+})

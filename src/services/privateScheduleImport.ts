@@ -254,3 +254,30 @@ export async function importPrivateSchedule(rows: ImportRowInput[], opts: Import
   ])
   return { dryRun: false, summary, rows: results.map(strip), created: created.count, deleted: deleted.count }
 }
+
+/**
+ * Gợi ý cho file mẫu: thứ học = các thứ có buổi học riêng (không tính buổi huỷ) trong tháng gần nhất có lịch,
+ * học phí = học phí của buổi gần nhất có học phí. Học viên chưa có lịch sử học riêng → không có gợi ý.
+ */
+export async function privateScheduleSuggestions(studentIds: string[]) {
+  const ids = [...new Set(studentIds)].slice(0, MAX_ROWS)
+  const out: Record<string, { weekdays: number[]; ratePerSession: number | null }> = {}
+  if (!ids.length) return out
+  const sessions = await prisma.privateSession.findMany({
+    where: { studentId: { in: ids }, status: { not: 'CANCELLED' } },
+    select: { studentId: true, sessionDate: true, ratePerSession: true },
+    orderBy: { sessionDate: 'desc' },
+  })
+  for (const s of sessions) {
+    const date = ymd(s.sessionDate)
+    let sug = out[s.studentId] as (typeof out)[string] & { month?: string }
+    if (!sug) sug = out[s.studentId] = Object.assign({ weekdays: [], ratePerSession: null }, { month: monthKey(date) })
+    if (monthKey(date) === sug.month && !sug.weekdays.includes(s.sessionDate.getUTCDay())) sug.weekdays.push(s.sessionDate.getUTCDay())
+    if (sug.ratePerSession == null && s.ratePerSession > 0) sug.ratePerSession = s.ratePerSession
+  }
+  for (const sug of Object.values(out) as any[]) {
+    delete sug.month
+    sug.weekdays.sort((a: number, b: number) => (a || 7) - (b || 7))
+  }
+  return out
+}
