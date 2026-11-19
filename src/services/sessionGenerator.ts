@@ -8,7 +8,7 @@ const DAY_OF_WEEK_MAP: Record<string, number> = {
 const ymd = (d: Date) => d.toISOString().slice(0, 10)
 
 /** Tập ngày nghỉ lễ "YYYY-MM-DD" của một cơ sở (theo danh sách `dates`, hoặc khoảng startDate–endDate). */
-async function holidayDates(branchId: string): Promise<Set<string>> {
+export async function holidayDates(branchId: string): Promise<Set<string>> {
   const set = new Set<string>()
   for (const h of await prisma.holiday.findMany({ where: { branches: { some: { branchId } } } })) {
     if (h.dates.length) { h.dates.forEach(d => set.add(ymd(d))); continue }

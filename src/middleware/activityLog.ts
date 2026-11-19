@@ -31,6 +31,7 @@ const SKIP_PATTERNS: RegExp[] = [
   /^\/api\/activity/,
   /^\/api\/alerts\//,
   /^\/api\/zns\/test-send$/,
+  /^\/api\/students\/private-schedule\/import\/preview$/,
 ]
 
 const RESOURCE_LABEL: Record<string, string> = {

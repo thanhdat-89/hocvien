@@ -23,6 +23,7 @@ import type { ClassEnrollment } from '../types/models'
 import { parseInvoiceInfo } from '../services/studentInvoiceInfo'
 import { getStudentInvoicePreview } from '../services/studentInvoicePreview'
 import { createInitialWeekdayPlan, setEnrollmentWeekdays } from '../services/enrollmentWeekdays'
+import { importPrivateSchedule } from '../services/privateScheduleImport'
 
 const router = Router()
 router.use(authenticate)
@@ -183,6 +184,30 @@ router.get('/private-schedule/missing', async (req: AuthRequest, res: Response, 
     res.setHeader('Cache-Control', 'no-store')
     res.json(await getMissingPrivateStudents(month, year, String(req.query.version || ''), req.query.force === 'true'))
   } catch (error) { next(error) }
+})
+
+// POST /api/students/private-schedule/import/preview — kiểm tra file Excel lịch học riêng, không ghi
+// POST /api/students/private-schedule/import — ghi các dòng hợp lệ
+function importOptions(body: any, dryRun: boolean) {
+  return {
+    dryRun,
+    replaceExisting: body?.replaceExisting === true,
+    skipHolidays: body?.skipHolidays === true,
+    confirmedStudentIds: Array.isArray(body?.confirmedStudentIds) ? body.confirmedStudentIds.map(String) : [],
+  }
+}
+router.post('/private-schedule/import/preview', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try { res.json(await importPrivateSchedule(req.body?.rows, importOptions(req.body, true))) } catch (err) { next(err) }
+})
+router.post('/private-schedule/import', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const result = await importPrivateSchedule(req.body?.rows, importOptions(req.body, false))
+    if (!result.created) { res.status(400).json({ message: 'Không có dòng hợp lệ để import.', ...result }); return }
+    const students = new Set(result.rows.filter(r => r.status !== 'error').map(r => r.studentId)).size
+    req.activity = { action: 'CREATE', resourceType: 'students',
+      description: `Import lịch học riêng từ Excel — ${result.created} buổi, ${students} học viên${result.deleted ? `, xoá ${result.deleted} buổi cũ` : ''}` }
+    res.status(201).json(result)
+  } catch (err) { next(err) }
 })
 
 // GET /api/students/:id — Hồ sơ chi tiết

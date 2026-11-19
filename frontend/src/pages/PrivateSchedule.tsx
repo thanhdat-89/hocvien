@@ -5,6 +5,7 @@ import { useAuth } from '../hooks/useAuth'
 import { PrivateScheduleModal } from './StudentProfile'
 import TopBar from '../components/TopBar'
 import MobileWeekAgenda from '../components/MobileWeekAgenda'
+import PrivateScheduleImportModal from '../components/PrivateScheduleImportModal'
 import { useConfirm } from '../components/ConfirmDialog'
 import api from '../services/api'
 
@@ -230,7 +231,8 @@ export default function PrivateSchedule() {
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<PrivateSession | null>(null)
 
-  const { canManageStudents } = useAuth()
+  const { canManageStudents, canImportStudents } = useAuth()
+  const [showImport, setShowImport] = useState(false)
   const [privateStudent, setPrivateStudent] = useState<Student | null>(null)
   const [missingStudents, setMissingStudents] = useState<Student[]>([])
   const [missingGrade, setMissingGrade] = useState<number | null>(null)
@@ -343,6 +345,12 @@ export default function PrivateSchedule() {
             <span className="text-[11px] font-bold text-primary tracking-[0.2em] uppercase mb-2 block">Lịch Đào Tạo</span>
             <h2 className="text-4xl font-black text-on-surface font-headline tracking-tight">Lịch Học Riêng</h2>
           </div>
+          {canImportStudents && (
+            <button onClick={() => setShowImport(true)} className="btn-secondary self-start md:self-auto">
+              <span className="material-symbols-outlined text-base">upload_file</span>
+              Import Excel
+            </button>
+          )}
         </div>
 
         {/* Học viên chưa có lịch học riêng trong tháng */}
@@ -530,6 +538,13 @@ export default function PrivateSchedule() {
         studentName={privateStudent.fullName}
         onClose={() => setPrivateStudent(null)}
         onSaved={() => { setPrivateStudent(null); loadSessions(weekStart); void loadMissingStudents(true) }}
+      />}
+
+      {showImport && <PrivateScheduleImportModal
+        month={monthKey}
+        missingStudents={missingStudents}
+        onClose={() => setShowImport(false)}
+        onImported={() => { loadSessions(weekStart); void loadMissingStudents(true) }}
       />}
 
       {selected && (
