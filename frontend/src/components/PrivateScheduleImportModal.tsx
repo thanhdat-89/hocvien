@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import api from '../services/api'
 import { useConfirm } from './ConfirmDialog'
-import { downloadPrivateScheduleTemplate, PrivateImportRow, readPrivateScheduleFile } from '../lib/privateScheduleExcel'
+import { downloadPrivateScheduleTemplate, LegacyTemplateError, PrivateImportRow, readPrivateScheduleFile } from '../lib/privateScheduleExcel'
 
 interface Issue { level: 'error' | 'warning'; code: string; message: string }
 interface Candidate { id: string; fullName: string; gradeLevel: number | null; activeClasses: string[] }
@@ -15,6 +15,7 @@ interface RowResult {
   activeClasses?: string[]
   dates: string[]
   holidayDates: string[]
+  absentDates: string[]
   duplicateDates: string[]
   issues: Issue[]
 }
@@ -27,7 +28,8 @@ interface ImportResult {
 }
 
 const WD = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7']
-const fmtMonth = (m: string) => (/^\d{4}-\d{2}$/.test(m) ? `${m.slice(5)}/${m.slice(0, 4)}` : m || '—')
+const fmtMonth = (m: string) => `${Number(m.slice(5))}/${m.slice(0, 4)}`
+const dayList = (dates: string[]) => dates.map(d => Number(d.slice(8))).join(', ')
 const fmtMoney = (v: number | string) => (typeof v === 'number' ? v.toLocaleString('vi-VN') + 'đ' : v || '—')
 
 export default function PrivateScheduleImportModal({ month, missingStudents, onClose, onImported }: {
@@ -43,26 +45,17 @@ export default function PrivateScheduleImportModal({ month, missingStudents, onC
   const [picks, setPicks] = useState<Record<number, string>>({}) // dòng → studentId khi trùng tên
   const [confirmed, setConfirmed] = useState<Set<string>>(new Set())
   const [replaceExisting, setReplaceExisting] = useState(false)
-  const [skipHolidays, setSkipHolidays] = useState(false)
   const [preview, setPreview] = useState<ImportResult | null>(null)
   const [result, setResult] = useState<ImportResult | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [dragOver, setDragOver] = useState(false)
   const [onlyProblems, setOnlyProblems] = useState(false)
-  const [teachers, setTeachers] = useState<string[]>([])
   const previewSeq = useRef(0)
-
-  useEffect(() => {
-    api.get('/teachers').then(r => {
-      const list = Array.isArray(r.data) ? r.data : (r.data?.data ?? [])
-      setTeachers(list.map((t: { fullName: string }) => t.fullName).filter(Boolean))
-    }).catch(() => {})
-  }, [])
 
   const payload = () => ({
     rows: rows.map(r => ({ ...r, studentId: picks[r.row] || undefined })),
-    replaceExisting, skipHolidays, confirmedStudentIds: [...confirmed],
+    replaceExisting, confirmedStudentIds: [...confirmed],
   })
 
   // Xem trước lại mỗi khi dữ liệu hoặc tuỳ chọn đổi
@@ -74,16 +67,16 @@ export default function PrivateScheduleImportModal({ month, missingStudents, onC
       .then(r => { if (seq === previewSeq.current) setPreview(r.data) })
       .catch(err => { if (seq === previewSeq.current) setError(err.response?.data?.message ?? 'Không kiểm tra được file.') })
       .finally(() => { if (seq === previewSeq.current) setBusy(false) })
-  }, [rows, picks, confirmed, replaceExisting, skipHolidays])
+  }, [rows, picks, confirmed, replaceExisting])
 
   const handleFile = async (file: File) => {
-    setError(''); setResult(null); setPicks({}); setConfirmed(new Set()); setReplaceExisting(false); setSkipHolidays(false)
+    setError(''); setResult(null); setPicks({}); setConfirmed(new Set()); setReplaceExisting(false)
     try {
       const parsed = await readPrivateScheduleFile(file)
       if (!parsed.length) { setError('Không tìm thấy dòng dữ liệu. Kiểm tra file có cột "Họ tên học viên" như file mẫu.'); return }
       setRows(parsed); setFileName(file.name)
-    } catch {
-      setError('Không đọc được file. Vui lòng dùng file .xlsx hoặc .xls')
+    } catch (err) {
+      setError(err instanceof LegacyTemplateError ? err.message : 'Không đọc được file. Vui lòng dùng file .xlsx hoặc .xls')
     }
   }
 
@@ -109,7 +102,6 @@ export default function PrivateScheduleImportModal({ month, missingStudents, onC
 
   const byRow = new Map(preview?.rows.map(r => [r.row, r]) ?? [])
   const hasDuplicate = preview?.rows.some(r => r.duplicateDates.length > 0) ?? false
-  const hasHoliday = preview?.rows.some(r => r.holidayDates.length > 0) ?? false
   const visible = rows.filter(r => !onlyProblems || (byRow.get(r.row)?.status ?? 'ok') !== 'ok')
 
   const toggleConfirmed = (id: string) => setConfirmed(prev => {
@@ -125,10 +117,10 @@ export default function PrivateScheduleImportModal({ month, missingStudents, onC
         <div className="p-6 border-b border-outline-variant/10 flex items-center justify-between gap-3">
           <div>
             <h3 id="private-import-title" className="text-lg font-headline font-bold text-on-surface">Import lịch học riêng từ Excel</h3>
-            <p className="text-sm text-outline mt-0.5">Mỗi dòng: học viên + khối, các thứ học, từ tháng → đến tháng, giờ, giáo viên, học phí/buổi</p>
+            <p className="text-sm text-outline mt-0.5">Mỗi dòng: học viên + khối, các thứ học, tháng, năm, ngày nghỉ, học phí/buổi. Ngày nghỉ của học viên và ngày nghỉ lễ được tự bỏ qua.</p>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => downloadPrivateScheduleTemplate(missingStudents, teachers, month)}
+            <button onClick={() => downloadPrivateScheduleTemplate(missingStudents, month)}
               title={missingStudents.length ? `File mẫu điền sẵn ${missingStudents.length} học viên chưa có lịch tháng ${fmtMonth(month)}` : undefined}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-primary bg-primary/8 hover:bg-primary/15 rounded-lg transition-all">
               <span className="material-symbols-outlined text-[15px]">download</span>
@@ -210,20 +202,12 @@ export default function PrivateScheduleImportModal({ month, missingStudents, onC
                 </div>
               </div>
 
-              {(hasDuplicate || hasHoliday || replaceExisting || skipHolidays) && (
-                <div className="space-y-2 p-3 rounded-xl bg-surface-container-low">
-                  {(hasDuplicate || replaceExisting) && (
-                    <label className="flex items-start gap-2 text-sm cursor-pointer">
-                      <input type="checkbox" className="mt-0.5" checked={replaceExisting} onChange={e => setReplaceExisting(e.target.checked)} />
-                      <span><b className="text-error">Xoá lịch học riêng đã xếp trước đó</b> trong các tháng import của những học viên bị trùng, rồi xếp lại theo file.</span>
-                    </label>
-                  )}
-                  {(hasHoliday || skipHolidays) && (
-                    <label className="flex items-start gap-2 text-sm cursor-pointer">
-                      <input type="checkbox" className="mt-0.5" checked={skipHolidays} onChange={e => setSkipHolidays(e.target.checked)} />
-                      <span>Không xếp buổi vào ngày nghỉ lễ</span>
-                    </label>
-                  )}
+              {(hasDuplicate || replaceExisting) && (
+                <div className="p-3 rounded-xl bg-surface-container-low">
+                  <label className="flex items-start gap-2 text-sm cursor-pointer">
+                    <input type="checkbox" className="mt-0.5" checked={replaceExisting} onChange={e => setReplaceExisting(e.target.checked)} />
+                    <span><b className="text-error">Xoá lịch học riêng đã xếp trước đó</b> trong tháng import của những học viên bị trùng, rồi xếp lại theo file.</span>
+                  </label>
                 </div>
               )}
 
@@ -234,7 +218,7 @@ export default function PrivateScheduleImportModal({ month, missingStudents, onC
                       <th className="px-3 py-2.5 w-14">Dòng</th>
                       <th className="px-3 py-2.5">Học viên</th>
                       <th className="px-3 py-2.5">Lịch</th>
-                      <th className="px-3 py-2.5">Giáo viên</th>
+                      <th className="px-3 py-2.5">Ngày bỏ qua</th>
                       <th className="px-3 py-2.5 text-right">Học phí/buổi</th>
                       <th className="px-3 py-2.5 text-right">Số buổi</th>
                       <th className="px-3 py-2.5 w-[34%]">Kiểm tra</th>
@@ -264,12 +248,13 @@ export default function PrivateScheduleImportModal({ month, missingStudents, onC
                           </td>
                           <td className="px-3 py-2 text-on-surface-variant whitespace-nowrap">
                             <p>{r.weekdays.length ? r.weekdays.map(d => WD[d]).join(', ') : <span className="text-error">{r.weekdaysRaw || 'Chưa có thứ'}</span>}</p>
-                            <p className="text-xs text-outline">
-                              {fmtMonth(r.fromMonth)}{r.toMonth && r.toMonth !== r.fromMonth ? ` → ${fmtMonth(r.toMonth)}` : ''}
-                              {r.startTime ? ` · ${r.startTime}${r.endTime ? `–${r.endTime}` : ''}` : ''}
-                            </p>
+                            <p className="text-xs text-outline">Tháng {r.month || '?'}/{r.year || '?'}</p>
                           </td>
-                          <td className="px-3 py-2 text-on-surface-variant">{r.teacherName || '—'}</td>
+                          <td className="px-3 py-2 text-xs text-on-surface-variant">
+                            {res?.absentDates.length ? <p>HV nghỉ: {dayList(res.absentDates)}</p> : null}
+                            {res?.holidayDates.length ? <p>Nghỉ lễ: {dayList(res.holidayDates)}</p> : null}
+                            {!res?.absentDates.length && !res?.holidayDates.length && (r.absentRaw ? <p className="text-outline">{r.absentRaw}</p> : '—')}
+                          </td>
                           <td className="px-3 py-2 text-right text-on-surface-variant whitespace-nowrap">{fmtMoney(r.ratePerSession)}</td>
                           <td className="px-3 py-2 text-right font-semibold">{res?.dates.length ?? '…'}</td>
                           <td className="px-3 py-2">

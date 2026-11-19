@@ -310,12 +310,13 @@ export default function PrivateSchedule() {
   const todayStr = toISO(new Date())
 
   // Collect unique time slots sorted
-  const timeSlots = [...new Set(sessions.map(s => s.startTime ?? '08:00'))].sort()
+  // Buổi không có giờ (học riêng không còn nhập giờ) nằm ở hàng "Trong ngày" đầu tiên
+  const timeSlots = [...new Set(sessions.map(s => s.startTime ?? ''))].sort()
 
   // Map: day ISO → time → sessions[]
   const grid: Record<string, Record<string, PrivateSession[]>> = {}
   for (const s of sessions) {
-    const t = s.startTime ?? '08:00'
+    const t = s.startTime ?? ''
     if (!grid[s.sessionDate]) grid[s.sessionDate] = {}
     if (!grid[s.sessionDate][t]) grid[s.sessionDate][t] = []
     grid[s.sessionDate][t].push(s)
@@ -484,7 +485,7 @@ export default function PrivateSchedule() {
                 timeSlots.map((time) => (
                   <tr key={time} className="border-t border-outline-variant/10">
                     <td className="p-3 text-xs font-medium text-outline border-r border-outline-variant/10 align-top w-20">
-                      {time}
+                      {time || 'Trong ngày'}
                     </td>
                     {weekDays.map((day) => {
                       const iso = toISO(day)

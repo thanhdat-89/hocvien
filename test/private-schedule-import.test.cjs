@@ -11,8 +11,8 @@ beforeEach(reset)
 after(() => prisma.$disconnect())
 
 // Tháng 11/2026: T2 = 2, 9, 16, 23, 30; T5 = 5, 12, 19, 26
-const row = (extra = {}) => ({ row: 2, studentName: 'Song Lam', gradeLevel: 6, weekdays: [1, 4], fromMonth: '2026-11', toMonth: '2026-11',
-  startTime: '18:00', endTime: '19:30', teacherName: 'Cô Hoa', ratePerSession: 200000, ...extra })
+const row = (extra = {}) => ({ row: 2, studentName: 'Song Lam', gradeLevel: 6, weekdays: [1, 4], month: 11, year: 2026,
+  absentDays: [], ratePerSession: 200000, ...extra })
 
 test('preview does not write; commit creates one session per weekday in range', async () => {
   const st = await seed.student({ fullName: 'Song Lam', gradeLevel: 6 })
@@ -27,7 +27,7 @@ test('preview does not write; commit creates one session per weekday in range', 
   assert.equal(c.body.created, 9)
   const saved = await prisma.privateSession.findMany({ orderBy: { sessionDate: 'asc' } })
   assert.equal(saved[0].sessionDate.toISOString().slice(0, 10), '2026-11-02')
-  assert.ok(saved.every(s => s.teacherName === 'Cô Hoa' && s.ratePerSession === 200000 && s.startTime === '18:00'))
+  assert.ok(saved.every(s => s.ratePerSession === 200000 && s.startTime === null && s.teacherName === null))
 })
 
 test('missing name, unknown name and same-name students are reported', async () => {
@@ -71,27 +71,51 @@ test('duplicates are errors unless the old private sessions are replaced', async
   assert.equal(c.created, 9)
   assert.equal(await prisma.privateSession.count({ where: { studentId: st.id } }), 9)
 
-  const inFile = (await preview({ body: { rows: [row({ row: 2, fromMonth: '2026-12', toMonth: '2026-12' }), row({ row: 3, fromMonth: '2026-12', toMonth: '2026-12', weekdays: [1] })] } })).body.rows
+  const inFile = (await preview({ body: { rows: [row({ row: 2, month: 12 }), row({ row: 3, month: 12, weekdays: [3] })] } })).body.rows
   assert.equal(inFile[1].issues.find(i => i.code === 'DUPLICATE_IN_FILE').level, 'error')
 })
 
-test('holidays warn and can be skipped; paid months are blocked', async () => {
-  const st = await seed.student({ fullName: 'Song Lam', gradeLevel: 6 })
+test('student absences and centre holidays are always left out', async () => {
+  await seed.student({ fullName: 'Song Lam', gradeLevel: 6 })
   const { branchId } = await context()
   await prisma.holiday.create({ data: { id: newId(), name: 'Nghỉ', startDate: day('2026-11-19'), endDate: day('2026-11-19'),
     branches: { create: { branchId } } } })
-  const warned = (await preview({ body: { rows: [row()] } })).body.rows[0]
-  assert.equal(warned.status, 'warning')
-  assert.deepEqual(warned.holidayDates, ['2026-11-19'])
-  assert.equal(warned.dates.length, 9)
-  const skipped = (await preview({ body: { rows: [row()], skipHolidays: true } })).body.rows[0]
-  assert.equal(skipped.dates.length, 8)
+  const r = (await preview({ body: { rows: [row({ absentDays: [23, 26] })] } })).body.rows[0]
+  assert.equal(r.status, 'ok')
+  assert.deepEqual(r.absentDates, ['2026-11-23', '2026-11-26'])
+  assert.deepEqual(r.holidayDates, ['2026-11-19'])
+  assert.deepEqual(r.dates, ['2026-11-02', '2026-11-05', '2026-11-09', '2026-11-12', '2026-11-16', '2026-11-30'])
+  const c = (await commit({ body: { rows: [row({ absentDays: [23, 26] })] } })).body
+  assert.equal(c.created, 6)
+})
 
-  const rec = await seed.tuition({ studentId: st.id, classId: null, billingMonth: 12, billingYear: 2026, finalAmount: 100000, paidAmount: 100000 })
-  assert.ok(rec)
-  const blocked = (await preview({ body: { rows: [row({ toMonth: '2026-12' })] } })).body.rows[0]
+test('bad month, year and absence days are errors; an absence off the study days only warns', async () => {
+  await seed.student({ fullName: 'Song Lam', gradeLevel: 6 })
+  const rows = (await preview({ body: { rows: [
+    row({ row: 2, month: '11/2026' }),
+    row({ row: 3, year: 26 }),
+    row({ row: 4, absentDays: [31] }),
+    row({ row: 5, absentDays: ['abc'] }),
+    row({ row: 7, weekdays: [1], month: 12, absentDays: [7, 14, 21, 28] }),
+  ] } })).body.rows
+  const offDay = (await preview({ body: { rows: [row({ absentDays: [24] })] } })).body.rows[0]
+  assert.ok(rows[0].issues.some(i => i.code === 'BAD_MONTH'))
+  assert.ok(rows[1].issues.some(i => i.code === 'BAD_YEAR'))
+  assert.ok(rows[2].issues.some(i => i.code === 'BAD_ABSENT'))
+  assert.ok(rows[3].issues.some(i => i.code === 'BAD_ABSENT'))
+  assert.equal(offDay.status, 'warning')
+  assert.equal(offDay.issues[0].code, 'ABSENT_NOT_STUDY_DAY')
+  assert.equal(offDay.dates.length, 9)
+  assert.ok(rows[4].issues.some(i => i.code === 'NO_DATES'))
+})
+
+test('paid months are blocked', async () => {
+  const st = await seed.student({ fullName: 'Song Lam', gradeLevel: 6 })
+  await seed.tuition({ studentId: st.id, classId: null, billingMonth: 12, billingYear: 2026, finalAmount: 100000, paidAmount: 100000 })
+  const blocked = (await preview({ body: { rows: [row({ month: 12 })] } })).body.rows[0]
   assert.equal(blocked.status, 'error')
   assert.ok(blocked.issues.some(i => i.code === 'PAID_MONTH'))
+  assert.equal((await preview({ body: { rows: [row()] } })).body.rows[0].status, 'ok')
 })
 
 test('students in a regular class need confirmation', async () => {

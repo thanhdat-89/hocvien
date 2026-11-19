@@ -192,7 +192,6 @@ function importOptions(body: any, dryRun: boolean) {
   return {
     dryRun,
     replaceExisting: body?.replaceExisting === true,
-    skipHolidays: body?.skipHolidays === true,
     confirmedStudentIds: Array.isArray(body?.confirmedStudentIds) ? body.confirmedStudentIds.map(String) : [],
   }
 }

@@ -2,8 +2,9 @@ import { prisma, newId } from '../lib/db'
 import { holidayDates } from './sessionGenerator'
 
 /**
- * Import lịch học riêng từ Excel — mỗi dòng là một mẫu lặp:
- * học viên + khối, các thứ trong tuần, từ tháng → đến tháng, giờ, giáo viên, học phí/buổi.
+ * Import lịch học riêng từ Excel — mỗi dòng là một tháng của một học viên:
+ * học viên + khối, các thứ học, tháng, năm, ngày học viên nghỉ, học phí/buổi.
+ * Buổi = mọi ngày trong tháng rơi vào thứ học, trừ ngày học viên nghỉ và ngày nghỉ lễ của trung tâm.
  * Frontend đọc file và chuẩn hoá giá trị; ở đây kiểm tra lại, sinh ngày và (khi commit) ghi trong một transaction.
  */
 
@@ -15,11 +16,10 @@ export interface ImportRowInput {
   studentId?: string
   /** JS getDay(): 0 = CN … 6 = T7 */
   weekdays?: number[]
-  fromMonth?: string // YYYY-MM
-  toMonth?: string   // YYYY-MM
-  startTime?: string // HH:MM
-  endTime?: string
-  teacherName?: string
+  month?: number | string
+  year?: number | string
+  /** Ngày trong tháng học viên nghỉ */
+  absentDays?: (number | string)[]
   ratePerSession?: number | string
   notes?: string
 }
@@ -28,7 +28,6 @@ export interface ImportOptions {
   dryRun: boolean
   /** Xoá các buổi học riêng đã xếp trong các tháng import của học viên trước khi tạo (thay cho báo lỗi trùng). */
   replaceExisting?: boolean
-  skipHolidays?: boolean
   /** Học viên đang học lớp thường mà người dùng đã xác nhận vẫn xếp lịch riêng. */
   confirmedStudentIds?: string[]
 }
@@ -47,35 +46,30 @@ export interface RowResult {
   activeClasses?: string[]
   dates: string[]
   holidayDates: string[]
+  /** Ngày học viên nghỉ đã bỏ khỏi lịch */
+  absentDates: string[]
   duplicateDates: string[]
   issues: RowIssue[]
 }
 
 const MAX_ROWS = 500
-const MAX_MONTHS = 12
 const WD_LABEL = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7']
 
 const norm = (v: unknown) => String(v ?? '').normalize('NFC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('vi')
-const monthRe = /^(\d{4})-(0[1-9]|1[0-2])$/
-const timeRe = /^([01]\d|2[0-3]):[0-5]\d$/
 const ymd = (d: Date) => d.toISOString().slice(0, 10)
 const monthKey = (date: string) => date.slice(0, 7)
 
-function datesFor(weekdays: number[], fromMonth: string, toMonth: string): string[] {
-  const [fy, fm] = fromMonth.split('-').map(Number)
-  const [ty, tm] = toMonth.split('-').map(Number)
+/** Các ngày trong tháng rơi vào thứ học */
+function datesFor(weekdays: number[], year: number, month: number): string[] {
   const wd = new Set(weekdays)
   const out: string[] = []
-  for (const cur = new Date(Date.UTC(fy, fm - 1, 1)), end = new Date(Date.UTC(ty, tm, 0)); cur <= end; cur.setUTCDate(cur.getUTCDate() + 1)) {
+  for (const cur = new Date(Date.UTC(year, month - 1, 1)); cur.getUTCMonth() === month - 1; cur.setUTCDate(cur.getUTCDate() + 1)) {
     if (wd.has(cur.getUTCDay())) out.push(ymd(cur))
   }
   return out
 }
 
-const monthsBetween = (from: string, to: string) => {
-  const [fy, fm] = from.split('-').map(Number), [ty, tm] = to.split('-').map(Number)
-  return (ty - fy) * 12 + (tm - fm) + 1
-}
+const isWhole = (v: unknown) => /^\d+$/.test(String(v ?? '').trim())
 
 export async function importPrivateSchedule(rows: ImportRowInput[], opts: ImportOptions) {
   if (!Array.isArray(rows) || rows.length === 0) throw Object.assign(new Error('File không có dòng dữ liệu nào.'), { status: 400 })
@@ -111,7 +105,7 @@ export async function importPrivateSchedule(rows: ImportRowInput[], opts: Import
     const grade = gradeRaw != null && Number.isInteger(gradeRaw) && gradeRaw >= 1 && gradeRaw <= 12 ? gradeRaw : null
     const result: RowResult = {
       row: input.row, status: 'ok', studentId: null, studentName: name, gradeLevel: grade,
-      dates: [], holidayDates: [], duplicateDates: [], issues,
+      dates: [], holidayDates: [], absentDates: [], duplicateDates: [], issues,
     }
     results.push(result)
 
@@ -152,35 +146,41 @@ export async function importPrivateSchedule(rows: ImportRowInput[], opts: Import
     // ── Lịch ──
     const weekdays = [...new Set((input.weekdays ?? []).map(Number))].filter(d => Number.isInteger(d) && d >= 0 && d <= 6)
     if (!weekdays.length) err('NO_WEEKDAY', 'Chưa có thứ học (VD: T2, T5).')
-    const from = String(input.fromMonth ?? ''), to = String(input.toMonth ?? from)
-    if (!monthRe.test(from)) err('BAD_FROM', 'Từ tháng không hợp lệ (VD: 11/2026).')
-    else if (!monthRe.test(to)) err('BAD_TO', 'Đến tháng không hợp lệ (VD: 12/2026).')
-    else if (to < from) err('BAD_RANGE', 'Đến tháng phải sau hoặc bằng từ tháng.')
-    else if (monthsBetween(from, to) > MAX_MONTHS) err('RANGE_TOO_LONG', `Tối đa ${MAX_MONTHS} tháng mỗi dòng.`)
-    const startTime = String(input.startTime ?? '').trim(), endTime = String(input.endTime ?? '').trim()
-    if (startTime && !timeRe.test(startTime)) err('BAD_START', `Giờ bắt đầu "${startTime}" không hợp lệ.`)
-    if (endTime && !timeRe.test(endTime)) err('BAD_END', `Giờ kết thúc "${endTime}" không hợp lệ.`)
-    if (timeRe.test(startTime) && timeRe.test(endTime) && endTime <= startTime) err('BAD_TIME_RANGE', 'Giờ kết thúc phải sau giờ bắt đầu.')
+    const month = isWhole(input.month) ? Number(input.month) : NaN
+    const year = isWhole(input.year) ? Number(input.year) : NaN
+    const periodOk = month >= 1 && month <= 12 && year >= 2000 && year <= 2100
+    if (!(month >= 1 && month <= 12)) err('BAD_MONTH', `Tháng "${input.month ?? ''}" không hợp lệ — nhập một số từ 1 đến 12.`)
+    if (!(year >= 2000 && year <= 2100)) err('BAD_YEAR', `Năm "${input.year ?? ''}" không hợp lệ — nhập 4 chữ số, VD 2026.`)
     const rate = Number(String(input.ratePerSession ?? '').replace(/[^\d]/g, ''))
     if (!rate) err('NO_RATE', 'Chưa có học phí mỗi buổi.')
 
-    if (weekdays.length && monthRe.test(from) && monthRe.test(to) && to >= from && monthsBetween(from, to) <= MAX_MONTHS) {
-      let dates = datesFor(weekdays, from, to)
+    // Ngày học viên nghỉ
+    const absent = new Set<string>()
+    if (periodOk) {
+      const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate()
+      const bad = (input.absentDays ?? []).filter(d => !isWhole(d) || Number(d) < 1 || Number(d) > daysInMonth)
+      if (bad.length) err('BAD_ABSENT', `Ngày nghỉ "${bad.join(', ')}" không có trong tháng ${month}/${year}.`)
+      for (const d of input.absentDays ?? []) {
+        if (isWhole(d) && Number(d) >= 1 && Number(d) <= daysInMonth) absent.add(`${year}-${String(month).padStart(2, '0')}-${String(Number(d)).padStart(2, '0')}`)
+      }
+    }
+
+    if (weekdays.length && periodOk) {
+      let dates = datesFor(weekdays, year, month)
+      const notStudyDays = [...absent].filter(d => !dates.includes(d)).sort()
+      if (notStudyDays.length) warn('ABSENT_NOT_STUDY_DAY', `Ngày nghỉ ${notStudyDays.map(d => Number(d.slice(8))).join(', ')} không rơi vào thứ học (${weekdays.map(d => WD_LABEL[d]).join(', ')}) — kiểm tra lại.`)
+      result.absentDates = dates.filter(d => absent.has(d))
+      dates = dates.filter(d => !absent.has(d))
       if (student) {
         if (!holidayCache.has(student.branchId)) holidayCache.set(student.branchId, await holidayDates(student.branchId))
         const hol = holidayCache.get(student.branchId)!
         result.holidayDates = dates.filter(d => hol.has(d))
-        if (result.holidayDates.length) {
-          warn('HOLIDAY', `${result.holidayDates.length} buổi rơi vào ngày nghỉ lễ${opts.skipHolidays ? ' — sẽ bỏ qua' : ''}: ${result.holidayDates.map(d => d.slice(8) + '/' + d.slice(5, 7)).join(', ')}.`)
-          if (opts.skipHolidays) dates = dates.filter(d => !hol.has(d))
-        }
+        dates = dates.filter(d => !hol.has(d))
       }
       result.dates = dates
-      if (!dates.length) err('NO_DATES', `Không có ngày ${weekdays.map(d => WD_LABEL[d]).join(', ')} nào trong khoảng đã chọn.`)
+      if (!dates.length) err('NO_DATES', 'Không còn buổi nào sau khi bỏ ngày nghỉ của học viên và ngày nghỉ lễ.')
     }
-    // Giữ lại để sinh buổi
-    ;(result as any)._sess = { from, to, startTime: startTime || null, endTime: endTime || null, rate,
-      teacherName: String(input.teacherName ?? '').trim() || null, notes: String(input.notes ?? '').trim() || null }
+    ;(result as any)._sess = { month, year, rate, notes: String(input.notes ?? '').trim() || null }
   }
 
   // ── Kiểm tra theo học viên: trùng trong file, trùng buổi đã có, tháng đã có phiếu thu ──
@@ -205,7 +205,7 @@ export async function importPrivateSchedule(rows: ImportRowInput[], opts: Import
     })
     const paidKeys = new Set(paid.map(p => `${p.studentId}|${p.billingYear}-${String(p.billingMonth).padStart(2, '0')}`))
 
-    const seenInFile = new Map<string, number>() // studentId|date → row
+    const seenInFile = new Map<string, number>() // studentId|YYYY-MM → row
     for (const r of withStudent) {
       const blocked = [...new Set(r.dates.map(monthKey))].filter(m => paidKeys.has(`${r.studentId}|${m}`))
       if (blocked.length) {
@@ -215,13 +215,12 @@ export async function importPrivateSchedule(rows: ImportRowInput[], opts: Import
       if (r.duplicateDates.length && !opts.replaceExisting) {
         r.issues.push({ level: 'error', code: 'DUPLICATE', message: `Trùng ${r.duplicateDates.length} buổi đã xếp lịch riêng trước đó. Chọn "Xoá lịch riêng đã xếp" để thay thế.` })
       } else if (r.duplicateDates.length) {
-        r.issues.push({ level: 'warning', code: 'REPLACE', message: `Sẽ xoá các buổi học riêng đã xếp trong tháng ${[...new Set(r.dates.map(monthKey))].map(m => `${m.slice(5)}/${m.slice(0, 4)}`).join(', ')} rồi xếp lại.` })
+        r.issues.push({ level: 'warning', code: 'REPLACE', message: `Sẽ xoá các buổi học riêng đã xếp trong tháng ${Number(r.dates[0].slice(5, 7))}/${r.dates[0].slice(0, 4)} rồi xếp lại.` })
       }
-      const clash = r.dates.filter(d => seenInFile.has(`${r.studentId}|${d}`))
-      if (clash.length) {
-        r.issues.push({ level: 'error', code: 'DUPLICATE_IN_FILE', message: `Trùng ${clash.length} buổi với dòng ${seenInFile.get(`${r.studentId}|${clash[0]}`)} trong file.` })
-      }
-      r.dates.forEach(d => { if (!seenInFile.has(`${r.studentId}|${d}`)) seenInFile.set(`${r.studentId}|${d}`, r.row) })
+      const key = `${r.studentId}|${monthKey(r.dates[0])}`
+      if (seenInFile.has(key)) {
+        r.issues.push({ level: 'error', code: 'DUPLICATE_IN_FILE', message: `Học viên đã có ở dòng ${seenInFile.get(key)} cùng tháng — mỗi học viên một dòng mỗi tháng.` })
+      } else seenInFile.set(key, r.row)
     }
   }
 
@@ -238,16 +237,14 @@ export async function importPrivateSchedule(rows: ImportRowInput[], opts: Import
   // ── Ghi: xoá lịch cũ (nếu chọn thay thế) rồi tạo buổi mới, tất cả trong một transaction ──
   const deleteWhere = opts.replaceExisting
     ? valid.filter(r => r.duplicateDates.length).map(r => {
-        const { from, to } = (r as any)._sess
-        const [ty, tm] = to.split('-').map(Number)
-        return { studentId: r.studentId!, sessionDate: { gte: new Date(from + '-01T00:00:00Z'), lte: new Date(Date.UTC(ty, tm, 0)) } }
+        const { month, year } = (r as any)._sess
+        return { studentId: r.studentId!, sessionDate: { gte: new Date(Date.UTC(year, month - 1, 1)), lte: new Date(Date.UTC(year, month, 0)) } }
       })
     : []
   const data = valid.flatMap(r => {
     const sess = (r as any)._sess
     return r.dates.map(d => ({
       id: newId(), studentId: r.studentId!, sessionDate: new Date(d + 'T00:00:00Z'),
-      startTime: sess.startTime, endTime: sess.endTime, teacherName: sess.teacherName,
       ratePerSession: sess.rate, status: 'SCHEDULED' as const, notes: sess.notes,
     }))
   })
