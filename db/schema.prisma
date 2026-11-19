@@ -404,13 +404,30 @@ model ClassEnrollment {
   createdAt         DateTime         @default(now()) @db.Timestamptz(3)
   updatedAt         DateTime?        @updatedAt @db.Timestamptz(3)
 
-  class   Class   @relation(fields: [classId], references: [id], onDelete: Restrict)
-  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  class        Class                   @relation(fields: [classId], references: [id], onDelete: Restrict)
+  student      Student                 @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  weekdayPlans EnrollmentWeekdayPlan[]
 
   // Một học viên chỉ có 1 ghi danh ACTIVE mỗi lớp: partial unique index ở cuối migration init
   @@index([classId, status])
   @@index([studentId, status])
   @@map("class_enrollments")
+}
+
+/// Lịch cố định trong tuần của học viên ở một lớp (ví dụ lớp học T3+T7 nhưng em chỉ học T3).
+/// Mỗi dòng có hiệu lực từ effectiveFrom đến dòng kế tiếp; không có dòng nào hoặc days rỗng = học mọi buổi của lớp.
+/// Học phí chỉ tính các buổi của lớp rơi vào những thứ này — xem src/lib/enrollmentDays.ts.
+model EnrollmentWeekdayPlan {
+  id            String      @id
+  enrollmentId  String
+  effectiveFrom DateTime    @db.Date
+  days          DayOfWeek[]
+  createdAt     DateTime    @default(now()) @db.Timestamptz(3)
+
+  enrollment ClassEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  @@unique([enrollmentId, effectiveFrom])
+  @@map("enrollment_weekday_plans")
 }
 
 model Schedule {

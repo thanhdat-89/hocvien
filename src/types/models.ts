@@ -126,6 +126,10 @@ export interface ClassEnrollment {
   customTuitionRate?: number
   notes?: string
   createdAt: string
+  /** Lịch cố định trong tuần theo thời gian; rỗng = học mọi buổi của lớp. */
+  weekdayPlans?: { effectiveFrom: string; days: string[] }[]
+  /** Các thứ đang học hôm nay; null = học mọi buổi. */
+  weekdays?: string[] | null
 }
 
 export interface Schedule {

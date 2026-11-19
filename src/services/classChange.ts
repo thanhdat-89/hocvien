@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { prisma, newId, toDay } from '../lib/db'
-import { classDoc, classInclude, scheduleDoc, scheduleInclude, sessionDoc, sessionInclude } from '../lib/docs'
+import { classDoc, classInclude, enrollmentDoc, enrollmentInclude, scheduleDoc, scheduleInclude, sessionDoc, sessionInclude } from '../lib/docs'
+import { WEEKDAY_LABELS, weekdaysOn, type Weekday } from '../lib/enrollmentDays'
 
 type Day = 'SUNDAY' | 'MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY' | 'FRIDAY' | 'SATURDAY'
 type Slot = { dayOfWeek: Day; startTime: string; endTime: string }
@@ -148,6 +149,19 @@ export async function prepareClassChange(classId: string, input: ClassChangeInpu
     fail('Lịch mới không tạo được buổi học thay thế; giữ nguyên lịch cũ', 409)
   }
 
+  // Học viên học cố định một số thứ: thứ đó bị bỏ khỏi lịch lớp → em sẽ không còn buổi nào ở thứ đó; cần chọn lại lịch.
+  const newWeekdays = new Set(requestedDays.map(slot => slot.dayOfWeek as string))
+  const fixedScheduleStudents = scheduleChanged
+    ? (await prisma.classEnrollment.findMany({ where: { classId, status: 'ACTIVE' }, include: enrollmentInclude }))
+        .map(enrollmentDoc)
+        .flatMap(e => {
+          const days = weekdaysOn(e, effectiveDate)
+          return days && days.some(day => !newWeekdays.has(day))
+            ? [{ studentId: e.studentId, studentName: e.studentName, days: days.map(day => WEEKDAY_LABELS[day as Weekday] ?? day) }]
+            : []
+        })
+    : []
+
   const fingerprint = createHash('sha256').update(JSON.stringify({
     classUpdatedAt: cls.updatedAt, schedules: schedules.map(s => [s.id, s.effectiveFrom, s.effectiveTo]),
     sessions: sessions.map(s => [s.id, s.status, s.sessionDate]),
@@ -158,7 +172,7 @@ export async function prepareClassChange(classId: string, input: ClassChangeInpu
     rate, rateEffectiveMonth, token: fingerprint,
     summary: { scheduleChanged, rateChanged, removeSessions: toRemove.length, createSessions: toCreate.length,
       protectedSessions: sessions.filter(s => s.status === 'COMPLETED').length,
-      effectiveDate, rateEffectiveMonth } }
+      effectiveDate, rateEffectiveMonth, fixedScheduleStudents } }
 }
 
 export async function applyClassChange(classId: string, input: ClassChangeInput) {

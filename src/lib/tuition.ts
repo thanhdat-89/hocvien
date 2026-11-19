@@ -5,6 +5,7 @@ import {
 } from './docs'
 import type { ClassEnrollment } from '../types/models'
 import { classRateForMonth } from '../services/classChange'
+import { enrollmentCoversSession } from './enrollmentDays'
 
 // Đọc dạng tài liệu Firestore cũ (ngày là chuỗi, classId "private") để giữ nguyên phép tính bên dưới.
 const loadEnrollments = (studentId: string) =>
@@ -57,12 +58,10 @@ export async function computeTuitionSummary(studentId: string): Promise<TuitionS
 
   await Promise.all(enrollments.map(async (enroll) => {
     const fromDate = enroll.enrollmentDate ?? '2000-01-01'
-    const toDate = enroll.status === 'DROPPED' && (enroll as any).dropDate
-      ? (enroll as any).dropDate
-      : '9999-12-31'
 
+    // Chỉ những buổi thuộc khoảng ghi danh và lịch cố định trong tuần của học viên
     const sessions = (await loadClassSessions(enroll.classId)).filter((s: any) =>
-      s.sessionDate >= fromDate && s.sessionDate <= toDate && s.status !== 'CANCELLED'
+      s.status !== 'CANCELLED' && enrollmentCoversSession(enroll, s.sessionDate)
     )
 
     const cls = classMap[enroll.classId] ?? {}

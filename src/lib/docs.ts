@@ -1,5 +1,8 @@
 import type { Prisma } from '@prisma/client'
 import { api, fromClassId } from './db'
+import { weekdaysOn } from './enrollmentDays'
+
+const vietnamToday = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' })
 
 // ─── Đọc PostgreSQL ra đúng hình dạng tài liệu Firestore cũ ──────────────
 // Logic nghiệp vụ (tính học phí, đối soát, đổi lịch) và frontend vẫn nhận các trường denormalized
@@ -31,10 +34,18 @@ export function classDoc({ subject, teacher, rateHistory, ...c }: Prisma.ClassGe
 
 // ─── Ghi danh, lịch, buổi học ────────────────────────────────
 
-export const enrollmentInclude = { class: name, student: fullName } satisfies Prisma.ClassEnrollmentInclude
+export const enrollmentInclude = {
+  class: name, student: fullName,
+  weekdayPlans: { select: { effectiveFrom: true, days: true }, orderBy: { effectiveFrom: 'asc' } },
+} satisfies Prisma.ClassEnrollmentInclude
 
-export function enrollmentDoc({ class: cls, student, ...e }: Prisma.ClassEnrollmentGetPayload<{ include: typeof enrollmentInclude }>) {
-  return api({ ...e, className: cls.name, studentName: student.fullName })
+/**
+ * `weekdayPlans`: lịch cố định trong tuần theo thời gian (xem lib/enrollmentDays).
+ * `weekdays`: các thứ đang học hôm nay — null = học mọi buổi của lớp.
+ */
+export function enrollmentDoc({ class: cls, student, weekdayPlans, ...e }: Prisma.ClassEnrollmentGetPayload<{ include: typeof enrollmentInclude }>) {
+  const doc = api({ ...e, className: cls.name, studentName: student.fullName, weekdayPlans })
+  return { ...doc, weekdays: weekdaysOn(doc, vietnamToday()) }
 }
 
 export const scheduleInclude = { class: name } satisfies Prisma.ScheduleInclude

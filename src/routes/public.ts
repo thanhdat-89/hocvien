@@ -138,7 +138,8 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
 
     const classes: PublicClass[] = enrollments.map(e => {
       const cls = classesById.get(e.classId)
-      const scheds = (schedulesByClass.get(e.classId) ?? []).map(sc => ({
+      // Học viên học một phần số buổi của lớp → chỉ hiện các thứ em học.
+      const scheds = (schedulesByClass.get(e.classId) ?? []).filter(sc => !e.weekdays || e.weekdays.includes(sc.dayOfWeek)).map(sc => ({
         dayOfWeek: sc.dayOfWeek,
         startTime: sc.startTime,
         endTime: sc.endTime,

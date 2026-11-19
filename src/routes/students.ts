@@ -11,6 +11,7 @@ import { s } from '../lib/params'
 import { recountClassActiveStudents } from '../lib/classSync'
 import { computeTuitionSummary } from '../lib/tuition'
 import { classRateForMonth } from '../services/classChange'
+import { enrollmentCoversSession } from '../lib/enrollmentDays'
 import { requireRole } from '../middleware/auth'
 import { authenticate } from '../middleware/auth'
 import { activityContext } from '../middleware/activityContext'
@@ -21,6 +22,7 @@ import { currentSchoolYearId, defaultBranchId } from '../lib/branchContext'
 import type { ClassEnrollment } from '../types/models'
 import { parseInvoiceInfo } from '../services/studentInvoiceInfo'
 import { getStudentInvoicePreview } from '../services/studentInvoicePreview'
+import { createInitialWeekdayPlan, setEnrollmentWeekdays } from '../services/enrollmentWeekdays'
 
 const router = Router()
 router.use(authenticate)
@@ -378,7 +380,11 @@ router.post('/bulk-delete', requireRole('ADMIN'), async (req: AuthRequest, res: 
 router.post('/:id/enroll', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const studentId = s(req.params.id)
-    const { classId, enrollmentDate, customTuitionRate, notes } = req.body as { classId: string; enrollmentDate?: string; customTuitionRate?: number; notes?: string }
+    const { classId, enrollmentDate, customTuitionRate, notes, weekdays } = req.body as {
+      classId: string; enrollmentDate?: string; customTuitionRate?: number; notes?: string
+      /** Lịch cố định trong tuần; bỏ trống = học mọi buổi của lớp. */
+      weekdays?: string[]
+    }
 
     const [student, cls] = await Promise.all([
       prisma.student.findUnique({ where: { id: studentId }, select: { id: true } }),
@@ -398,12 +404,22 @@ router.post('/:id/enroll', requireRole('ADMIN', 'STAFF'), async (req: AuthReques
           customTuitionRate: customTuitionRate ? Number(customTuitionRate) : null,
           notes: notes || null,
         },
-        include: enrollmentInclude,
       })
+      await createInitialWeekdayPlan(tx, created, weekdays)
       await recountClassActiveStudents(classId, tx)
-      return created
+      return tx.classEnrollment.findUniqueOrThrow({ where: { id: created.id }, include: enrollmentInclude })
     })
     res.status(201).json(enrollmentDoc(enrollment))
+  } catch (err) {
+    next(err)
+  }
+})
+
+// PUT /api/students/:id/enroll/:enrollmentId/weekdays — lịch cố định trong tuần (học một phần số buổi của lớp)
+// body: { days: ['TUESDAY'], effectiveFrom?: 'YYYY-MM-DD' } — days đủ mọi thứ của lớp = học đủ.
+router.put('/:id/enroll/:enrollmentId/weekdays', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    res.json(await setEnrollmentWeekdays(s(req.params.id), s(req.params.enrollmentId), req.body ?? {}))
   } catch (err) {
     next(err)
   }
@@ -478,10 +494,7 @@ router.get('/:id/schedule', async (req: AuthRequest, res: Response, next: NextFu
         .sort((a, b) => Number(b.status === 'ACTIVE') - Number(a.status === 'ACTIVE')
           || (b.enrollmentDate || '').localeCompare(a.enrollmentDate || '')
           || a.id.localeCompare(b.id))
-      const enroll = classEnrollments.find(e =>
-        (!e.enrollmentDate || s.sessionDate >= e.enrollmentDate)
-        && (e.status !== 'DROPPED' || !e.dropDate || s.sessionDate <= e.dropDate)
-      )
+      const enroll = classEnrollments.find(e => enrollmentCoversSession(e, s.sessionDate))
       if (!enroll) continue
       // Học phí buổi: ưu tiên customTuitionRate của enrollment, fallback về class tuitionRate
       const rate = (enroll?.customTuitionRate as number) || classRateForMonth(cls, month, year)

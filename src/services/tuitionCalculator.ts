@@ -5,6 +5,7 @@ import {
 } from '../lib/docs'
 import type { ClassEnrollment, StudentPromotion, TuitionRecord } from '../types/models'
 import { classRateForMonth } from './classChange'
+import { enrollmentCoversSession } from '../lib/enrollmentDays'
 
 type TuitionRecordDoc = TuitionRecord & { id: string; paidAmount?: number; remainingAmount?: number }
 
@@ -92,15 +93,14 @@ export async function calculateTuitionForStudent(
   const classData = classRow ? classDoc(classRow) : {}
   const classRate = classRateForMonth(classData, month, year) || Number(classRow?.subject?.tuitionRatePerSession || 0)
 
-  // Sessions không CANCELLED trong tháng (theo lịch dự kiến)
+  // Sessions không CANCELLED trong tháng (theo lịch dự kiến), chỉ những buổi thuộc lịch cố định của học viên
   const sessions = (await prisma.session.findMany({
     where: { classId, sessionDate: { gte: toDay(fromDate)!, lte: toDay(toDate)! } },
     include: sessionInclude,
   })).map(sessionDoc)
   const sessionRates = sessions.flatMap((data: any) => {
     if (data.status === 'CANCELLED') return []
-    const covering = enrollments.find(e => (!e.enrollmentDate || data.sessionDate >= e.enrollmentDate)
-      && (e.status !== 'DROPPED' || !e.dropDate || data.sessionDate <= e.dropDate))
+    const covering = enrollments.find(e => enrollmentCoversSession(e, data.sessionDate))
     return covering ? [Number(covering.customTuitionRate) || classRate] : []
   })
   const totalSessions = sessionRates.length

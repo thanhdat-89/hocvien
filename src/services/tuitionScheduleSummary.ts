@@ -5,6 +5,7 @@ import {
 } from '../lib/docs'
 import type { TuitionRecord } from '../types/models'
 import { classRateForMonth } from './classChange'
+import { enrollmentCoversSession } from '../lib/enrollmentDays'
 
 /** Dữ liệu đầu vào dạng tài liệu Firestore cũ — tách khỏi phép tính để test truyền thẳng mảng. */
 export interface TuitionScheduleData {
@@ -111,8 +112,7 @@ export function buildTuitionScheduleSummary(data: TuitionScheduleData, month: nu
     const classSessions = sessionsByClass[enrollment.classId] ?? []
     const sessions = classSessions.flatMap((sess: any) => {
       if (!sess.sessionDate || !sess.sessionDate.startsWith(monthStr) || sess.status === 'CANCELLED') return []
-      const covering = group.find(e => (!e.enrollmentDate || sess.sessionDate >= e.enrollmentDate)
-        && (e.status !== 'DROPPED' || !e.dropDate || sess.sessionDate <= e.dropDate))
+      const covering = group.find(e => enrollmentCoversSession(e, sess.sessionDate))
       if (!covering) return []
       return [{ ...sess, rate: Number(covering.customTuitionRate) || classRateForMonth(cls, m, y) }]
     })

@@ -2,6 +2,7 @@ import { Router, Response, NextFunction } from 'express'
 import { prisma, toClassId } from '../lib/db'
 import { enrollmentDoc, enrollmentInclude, monthlyScoreDoc, monthlyScoreInclude, privateSessionDoc, privateSessionInclude, sessionDoc, sessionInclude } from '../lib/docs'
 import { s } from '../lib/params'
+import { attendsOn } from '../lib/enrollmentDays'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
 import type { MonthlyScores, Session, PrivateSession, ClassEnrollment, Class } from '../types/models'
@@ -53,22 +54,24 @@ async function buildRows(year: number, month: number, classFilter?: string): Pro
   if (classFilter !== PRIVATE_CLASS_ID) {
     const sessions: Session[] = (await prisma.session.findMany({ where: { sessionDate: inMonthRange }, include: sessionInclude })).map(sessionDoc)
 
-    // Group sessions by class, count non-cancelled
-    const sessionCountByClass = new Map<string, { count: number; className: string }>()
+    // Group non-cancelled session dates by class
+    const sessionsByClass = new Map<string, { dates: string[]; className: string }>()
     sessions.forEach(sess => {
       if (sess.status === 'CANCELLED') return
       if (classFilter && sess.classId !== classFilter) return
-      const ent = sessionCountByClass.get(sess.classId)
-      if (ent) ent.count += 1
-      else sessionCountByClass.set(sess.classId, { count: 1, className: sess.className })
+      const ent = sessionsByClass.get(sess.classId)
+      if (ent) ent.dates.push(sess.sessionDate)
+      else sessionsByClass.set(sess.classId, { dates: [sess.sessionDate], className: sess.className })
     })
 
-    // For each class, list active enrollments
-    for (const [classId, { count: expectedCount, className }] of sessionCountByClass) {
+    // For each class, list active enrollments; số ô điểm = số buổi theo lịch cố định trong tuần của học viên
+    for (const [classId, { dates, className }] of sessionsByClass) {
       const enrollments: ClassEnrollment[] = (await prisma.classEnrollment.findMany({
         where: { classId, status: 'ACTIVE' }, include: enrollmentInclude,
       })).map(enrollmentDoc)
       enrollments.forEach(en => {
+        const expectedCount = dates.filter(date => attendsOn(en, date)).length
+        if (!expectedCount) return
         rows.push({
           id: rowId(en.studentId, classId, year, month),
           studentId: en.studentId,
@@ -197,12 +200,14 @@ router.put('/:rowId', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req: Auth
       })
       className = PRIVATE_CLASS_NAME
     } else {
-      const [sessionCount, cls, student] = await Promise.all([
-        prisma.session.count({ where: { classId, sessionDate: inMonthRange, status: { not: 'CANCELLED' } } }),
+      const [sessionDates, enrollment, cls, student] = await Promise.all([
+        prisma.session.findMany({ where: { classId, sessionDate: inMonthRange, status: { not: 'CANCELLED' } }, select: { sessionDate: true } }),
+        prisma.classEnrollment.findFirst({ where: { classId, studentId, status: 'ACTIVE' }, include: enrollmentInclude }),
         prisma.class.findUnique({ where: { id: classId }, select: { name: true } }),
         prisma.student.findUnique({ where: { id: studentId }, select: { fullName: true } }),
       ])
-      expectedCount = sessionCount
+      const en = enrollment ? enrollmentDoc(enrollment) : null
+      expectedCount = sessionDates.filter(r => !en || attendsOn(en, r.sessionDate.toISOString().slice(0, 10))).length
       className = cls?.name || ''
       studentName = student?.fullName ?? ''
     }

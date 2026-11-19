@@ -8,6 +8,7 @@ import { useAuth } from '../hooks/useAuth'
 import { gradeOfClass } from '../lib/classGrade'
 import { buildParentUrl } from '../lib/parentUrl'
 import InvoicePreviewModal from '../components/InvoicePreviewModal'
+import WeekdayPicker, { useClassSlots, weekdayLabel } from '../components/WeekdayPicker'
 import { TheodoiNotice } from './MovedToTheodoi'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -321,13 +322,19 @@ function EnrollModal({ student, enrollments, onClose, onSaved }: { student: Stud
     ? availableClasses.filter(cls => gradeOfClass(cls) !== studentGrade)
     : []
   const selectedClass = availableClasses.find(cls => cls.id === classId)
+  // Lịch cố định trong tuần: mặc định học đủ mọi buổi của lớp.
+  const { slots, error: slotsError } = useClassSlots(classId || undefined, enrollmentDate)
+  const [days, setDays] = useState<string[]>([])
+  useEffect(() => { setDays((slots ?? []).map(s => s.dayOfWeek)) }, [slots])
+  const partial = !!slots && slots.length > 0 && days.length < slots.length
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!classId) { setError('Vui lòng chọn lớp học'); return }
+    if (slots?.length && !days.length) { setError('Cần chọn ít nhất một buổi học trong tuần'); return }
     setSaving(true); setError('')
     try {
-      await api.post(`/students/${student.id}/enroll`, { classId, enrollmentDate })
+      await api.post(`/students/${student.id}/enroll`, { classId, enrollmentDate, weekdays: partial ? days : undefined })
       onSaved()
     } catch (err: any) {
       setError(err.response?.data?.message ?? 'Có lỗi xảy ra')
@@ -405,6 +412,14 @@ function EnrollModal({ student, enrollments, onClose, onSaved }: { student: Stud
               )}
             </div>
 
+            {classId && (
+              <div className="border-t border-slate-100 pt-5">
+                <h4 className="text-sm font-semibold text-on-surface">Buổi học trong tuần</h4>
+                <p className="mb-3 mt-0.5 text-xs text-slate-500">Bỏ chọn những buổi học viên không theo học. Mặc định học đủ.</p>
+                <WeekdayPicker slots={slots} error={slotsError} value={days} onChange={setDays} />
+              </div>
+            )}
+
             <div className="border-t border-slate-100 pt-5">
               <label htmlFor="enrollment-date" className="mb-1.5 block text-sm font-semibold text-on-surface">Ngày đăng ký</label>
               <input id="enrollment-date" value={enrollmentDate} onChange={e => setEnrollmentDate(e.target.value)} type="date"
@@ -416,7 +431,7 @@ function EnrollModal({ student, enrollments, onClose, onSaved }: { student: Stud
             <span className="hidden min-w-0 truncate text-xs text-slate-500 sm:block" title={selectedClass?.name}>{selectedClass ? `Đã chọn: ${selectedClass.name}` : 'Chưa chọn lớp học'}</span>
             <div className="ml-auto flex gap-2">
               <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">Hủy</button>
-              <button type="submit" disabled={saving || !classId} className="inline-flex min-w-[112px] items-center justify-center rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
+              <button type="submit" disabled={saving || !classId || (!!slots?.length && !days.length)} className="inline-flex min-w-[112px] items-center justify-center rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50">
                 {saving ? 'Đang lưu...' : 'Đăng ký'}
               </button>
             </div>
@@ -424,6 +439,61 @@ function EnrollModal({ student, enrollments, onClose, onSaved }: { student: Stud
         </form>
       </div>
     </div>
+  )
+}
+
+// ─── Weekdays Modal (lịch cố định trong tuần) ─────────────────────────────────
+
+function WeekdaysModal({ studentId, enrollment, onClose, onSaved }: { studentId: string; enrollment: ClassEnrollment; onClose: () => void; onSaved: () => void }) {
+  const [effectiveFrom, setEffectiveFrom] = useState(() => {
+    const now = new Date()
+    const firstOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+    return enrollment.enrollmentDate > firstOfMonth ? enrollment.enrollmentDate : firstOfMonth
+  })
+  const { slots, error: slotsError } = useClassSlots(enrollment.classId, effectiveFrom)
+  const [days, setDays] = useState<string[]>([])
+  useEffect(() => {
+    if (!slots) return
+    const all = slots.map(s => s.dayOfWeek)
+    setDays(enrollment.weekdays?.length ? all.filter(d => enrollment.weekdays!.includes(d)) : all)
+  }, [slots, enrollment.weekdays])
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!days.length) { setError('Cần chọn ít nhất một buổi học trong tuần'); return }
+    setSaving(true); setError('')
+    try {
+      await api.put(`/students/${studentId}/enroll/${enrollment.id}/weekdays`, { days, effectiveFrom })
+      onSaved()
+    } catch (err: any) {
+      setError(err.response?.data?.message ?? 'Có lỗi xảy ra')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title={`Buổi học cố định · ${enrollment.className}`} onClose={onClose}>
+      <form onSubmit={handleSubmit} className="space-y-5">
+        {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
+        <Field label="Học viên học các buổi">
+          <WeekdayPicker slots={slots} error={slotsError} value={days} onChange={setDays} />
+        </Field>
+        <Field label="Áp dụng từ ngày">
+          <input type="date" value={effectiveFrom} min={enrollment.enrollmentDate} onChange={e => setEffectiveFrom(e.target.value)}
+            className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
+          <p className="mt-1.5 text-xs text-outline">Học phí trước ngày này giữ nguyên. Phiếu chưa thu từ tháng này trở đi được tính lại; tháng đã thu tiền hoặc đã xuất hoá đơn thì không đổi được.</p>
+        </Field>
+        <div className="flex gap-3 pt-1">
+          <button type="button" onClick={onClose} className="flex-1 btn-secondary justify-center">Huỷ</button>
+          <button type="submit" disabled={saving || !slots?.length || !days.length} className="flex-1 btn-primary justify-center disabled:opacity-60">
+            {saving ? 'Đang lưu...' : 'Lưu lịch học'}
+          </button>
+        </div>
+      </form>
+    </Modal>
   )
 }
 
@@ -577,6 +647,7 @@ function InfoTab({
   const showAlert = useAlert()
   const [parentModal, setParentModal] = useState<{ open: boolean; parent: (Parent & { id: string }) | null }>({ open: false, parent: null })
   const [enrollModal, setEnrollModal] = useState(false)
+  const [weekdaysFor, setWeekdaysFor] = useState<ClassEnrollment | null>(null)
   const [invoiceModal, setInvoiceModal] = useState(false)
   const [invoicePreview, setInvoicePreview] = useState(false)
   const [confirm, setConfirm] = useState<{ message: string; onConfirm: () => void } | null>(null)
@@ -671,9 +742,23 @@ function InfoTab({
                     <div className="min-w-0">
                       <p className="font-semibold text-on-surface text-sm">{e.className}</p>
                       <p className="text-xs text-outline">Ngày đăng ký: {fmt(e.enrollmentDate)}</p>
+                      {!!e.weekdays?.length && (
+                        <p className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                          <span className="material-symbols-outlined text-[14px]">event_repeat</span>Chỉ học {weekdayLabel(e.weekdays)}
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <span className="text-[10px] bg-secondary-container/30 text-secondary px-2 py-1 rounded-full font-bold whitespace-nowrap">Đang học</span>
+                      {canManage && (
+                        <button
+                          onClick={() => setWeekdaysFor(e)}
+                          className="p-1.5 rounded-lg hover:bg-primary/10 text-outline hover:text-primary transition-colors"
+                          title="Chọn buổi học trong tuần"
+                        >
+                          <span className="material-symbols-outlined text-base">edit_calendar</span>
+                        </button>
+                      )}
                       {canManage && (
                         <button
                           onClick={() => dropEnrollment(e)}
@@ -825,6 +910,14 @@ function InfoTab({
           parent={parentModal.parent}
           onClose={() => setParentModal({ open: false, parent: null })}
           onSaved={() => { setParentModal({ open: false, parent: null }); onRefresh() }}
+        />
+      )}
+      {weekdaysFor && (
+        <WeekdaysModal
+          studentId={student.id}
+          enrollment={weekdaysFor}
+          onClose={() => setWeekdaysFor(null)}
+          onSaved={() => { setWeekdaysFor(null); onRefresh() }}
         />
       )}
       {enrollModal && (

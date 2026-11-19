@@ -10,6 +10,7 @@ import StudentModal from './StudentModal'
 import { PrivateScheduleModal } from './StudentProfile'
 import * as XLSX from 'xlsx'
 import { buildParentUrl } from '../lib/parentUrl'
+import { weekdayLabel } from '../components/WeekdayPicker'
 
 function StatusBadge({ status }: { status: string }) {
   if (status === 'ACTIVE')
@@ -613,8 +614,9 @@ export default function Students() {
                       {student.enrollments && student.enrollments.length > 0 ? (
                         <div className="flex flex-wrap gap-1.5">
                           {student.enrollments.map((e) => (
-                            <span key={e.id} className="inline-flex max-w-full items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium leading-4 text-primary" title={e.className}>
+                            <span key={e.id} className="inline-flex max-w-full items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium leading-4 text-primary" title={e.weekdays?.length ? `${e.className} · chỉ học ${weekdayLabel(e.weekdays)}` : e.className}>
                               {e.className}
+                              {!!e.weekdays?.length && <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800">{weekdayLabel(e.weekdays)}</span>}
                             </span>
                           ))}
                         </div>

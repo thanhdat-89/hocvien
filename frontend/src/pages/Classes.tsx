@@ -442,7 +442,7 @@ function EditClassModal({ cls, section, currentPassword, onClose, onSaved }: { c
     rateEffectiveMonth: nextMonth,
   })
   const [daySchedules, setDaySchedules] = useState<Record<string, DaySchedule>>({})
-  const [preview, setPreview] = useState<null | { previewToken: string; scheduleChanged: boolean; rateChanged: boolean; removeSessions: number; createSessions: number; protectedSessions: number }>(null)
+  const [preview, setPreview] = useState<null | { previewToken: string; scheduleChanged: boolean; rateChanged: boolean; removeSessions: number; createSessions: number; protectedSessions: number; effectiveDate?: string; fixedScheduleStudents?: { studentId: string; studentName: string; days: string[] }[] }>(null)
   const [schedulesLoaded, setSchedulesLoaded] = useState(section !== 'schedule')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -589,6 +589,13 @@ function EditClassModal({ cls, section, currentPassword, onClose, onSaved }: { c
             {section === 'schedule' && <p>Thay {preview.removeSessions} buổi tương lai bằng {preview.createSessions} buổi theo lịch mới.</p>}
             {section === 'rate' && <p>Đơn giá mới áp dụng từ tháng {form.rateEffectiveMonth}.</p>}
             <p>{preview.protectedSessions} buổi đã hoàn thành được giữ nguyên. Phiếu học phí đã lập không bị sửa.</p>
+            {!!preview.fixedScheduleStudents?.length && <div className="mt-2 rounded-lg bg-amber-50 border border-amber-200 p-3 text-amber-900">
+              <p className="font-semibold">{preview.fixedScheduleStudents.length} học viên học cố định vào thứ bị bỏ khỏi lịch:</p>
+              <ul className="mt-1 list-disc pl-5">
+                {preview.fixedScheduleStudents.map(st => <li key={st.studentId}>{st.studentName} (chỉ học {st.days.join(', ')})</li>)}
+              </ul>
+              <p className="mt-1 text-xs">Sau khi lưu, hãy vào hồ sơ từng em để chọn lại lịch học từ ngày {preview.effectiveDate}; nếu không các em sẽ không còn buổi nào ở thứ đó.</p>
+            </div>}
           </div>}
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={onClose} className="flex-1 btn-secondary justify-center">Huỷ</button>
