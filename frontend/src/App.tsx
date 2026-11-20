@@ -35,7 +35,7 @@ export default function App() {
             <Route path="/students/:id" element={<StudentProfile />} />
             <Route path="/classes" element={<Classes />} />
             <Route path="/private-schedule" element={<PrivateSchedule />} />
-            {/* Điểm kiểm tra, nhận xét: đã chuyển sang theodoi.cqt.vn */}
+            {/* Điểm kiểm tra, nhận xét: đã chuyển sang btvn.cqt.vn */}
             <Route path="/exams" element={<MovedToTheodoi />} />
             <Route path="/reviews" element={<MovedToTheodoi />} />
             <Route path="/materials" element={<Materials />} />
