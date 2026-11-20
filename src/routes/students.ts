@@ -22,7 +22,7 @@ import { currentSchoolYearId, defaultBranchId } from '../lib/branchContext'
 import type { ClassEnrollment } from '../types/models'
 import { parseInvoiceInfo } from '../services/studentInvoiceInfo'
 import { getStudentInvoicePreview } from '../services/studentInvoicePreview'
-import { createInitialWeekdayPlan, setEnrollmentWeekdays } from '../services/enrollmentWeekdays'
+import { createInitialWeekdayPlan, dropEnrollment, previewEnrollmentChange, setEnrollmentWeekdays } from '../services/enrollmentWeekdays'
 import { importPrivateSchedule, privateScheduleSuggestions } from '../services/privateScheduleImport'
 
 const router = Router()
@@ -457,18 +457,23 @@ router.put('/:id/enroll/:enrollmentId/weekdays', requireRole('ADMIN', 'STAFF'), 
   }
 })
 
-// PUT /api/students/:id/enroll/:enrollmentId/drop
+// PUT /api/students/:id/enroll/:enrollmentId/drop — body: { dropDate?: 'YYYY-MM-DD' } (mặc định hôm nay; buổi ngày nghỉ vẫn tính)
 router.put('/:id/enroll/:enrollmentId/drop', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { dropDate } = req.body
-    await prisma.$transaction(async tx => {
-      const enrollment = await tx.classEnrollment.update({
-        where: { id: s(req.params.enrollmentId) },
-        data: { status: 'DROPPED', dropDate: toDay(dropDate || today())! },
-      })
-      await recountClassActiveStudents(enrollment.classId, tx)
-    })
-    res.json({ message: 'Đã nghỉ lớp' })
+    const result = await dropEnrollment(s(req.params.id), s(req.params.enrollmentId), req.body ?? {})
+    res.json({ message: 'Đã nghỉ lớp', ...result })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// POST /api/students/:id/enroll/:enrollmentId/preview — xem trước ảnh hưởng học phí, không ghi gì.
+// body: { action: 'weekdays', days, effectiveFrom } | { action: 'drop', dropDate }
+router.post('/:id/enroll/:enrollmentId/preview', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const body = req.body ?? {}
+    if (body.action !== 'weekdays' && body.action !== 'drop') { res.status(400).json({ message: 'Thao tác không hợp lệ' }); return }
+    res.json(await previewEnrollmentChange(s(req.params.id), s(req.params.enrollmentId), body))
   } catch (err) {
     next(err)
   }

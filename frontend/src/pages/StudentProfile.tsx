@@ -444,11 +444,72 @@ function EnrollModal({ student, enrollments, onClose, onSaved }: { student: Stud
 
 // ─── Weekdays Modal (lịch cố định trong tuần) ─────────────────────────────────
 
-function WeekdaysModal({ studentId, enrollment, onClose, onSaved }: { studentId: string; enrollment: ClassEnrollment; onClose: () => void; onSaved: () => void }) {
+interface MonthImpact {
+  month: number; year: number
+  before: { sessions: number; amount: number }
+  after: { sessions: number; amount: number }
+  record: { status: string; finalAmount: number; locked: boolean } | null
+  outcome: 'none' | 'recalculate' | 'delete' | 'locked'
+}
+interface ChangePreview { fromDate: string; months: MonthImpact[]; blocked: string | null }
+
+const vnToday = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' })
+
+/** Ảnh hưởng học phí theo tháng của thao tác đang chọn (gọi API xem trước, không ghi gì). */
+function ImpactPreview({ preview, loading, error }: { preview: ChangePreview | null; loading: boolean; error: string }) {
+  if (error) return <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
+  if (!preview) return <p className="text-xs text-outline">{loading ? 'Đang tính học phí...' : ''}</p>
+  const note = (m: MonthImpact) => {
+    if (m.outcome === 'locked') return { text: 'Đã thu/xuất HĐ — không đổi được', cls: 'text-rose-700' }
+    if (m.outcome === 'delete') return { text: 'Phiếu chưa thu sẽ bị xoá', cls: 'text-amber-700' }
+    if (m.outcome === 'recalculate') return { text: 'Phiếu chưa thu sẽ được tính lại', cls: 'text-primary' }
+    if (m.record?.locked) return { text: 'Đã thu — giữ nguyên', cls: 'text-outline' }
+    return { text: 'Chưa lập phiếu — tính theo lịch mới khi lập', cls: 'text-outline' }
+  }
+  return (
+    <div className={`space-y-2 ${loading ? 'opacity-60' : ''}`} aria-live="polite">
+      <div className="rounded-xl border border-slate-200 divide-y divide-slate-100">
+        {preview.months.map(m => {
+          const same = m.before.sessions === m.after.sessions && m.before.amount === m.after.amount
+          const n = note(m)
+          return (
+            <div key={`${m.year}-${m.month}`} className="flex items-start justify-between gap-3 px-4 py-2.5 text-sm">
+              <div className="min-w-0">
+                <p className="font-semibold text-on-surface">Tháng {m.month}/{m.year}</p>
+                <p className={`text-xs ${n.cls}`}>{n.text}</p>
+              </div>
+              <div className="text-right tabular-nums">
+                {same ? (
+                  <p className="text-on-surface">{m.after.sessions} buổi · {fmtMoney(m.after.amount)}</p>
+                ) : (
+                  <>
+                    <p className="text-xs text-outline line-through">{m.before.sessions} buổi · {fmtMoney(m.before.amount)}</p>
+                    <p className="font-semibold text-on-surface">{m.after.sessions} buổi · {fmtMoney(m.after.amount)}</p>
+                  </>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <p className="text-[11px] text-outline">Ước tính theo các buổi học đã lên lịch, đã trừ khuyến mãi.</p>
+      {preview.blocked && (
+        <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{preview.blocked}</div>
+      )}
+    </div>
+  )
+}
+
+/** Lịch học của học viên ở một lớp: đổi buổi học cố định trong tuần hoặc cho nghỉ lớp. */
+function EnrollmentScheduleModal({ studentId, enrollment, onClose, onSaved }: { studentId: string; enrollment: ClassEnrollment; onClose: () => void; onSaved: () => void }) {
+  const [tab, setTab] = useState<'weekdays' | 'drop'>('weekdays')
   const [effectiveFrom, setEffectiveFrom] = useState(() => {
-    const now = new Date()
-    const firstOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+    const firstOfMonth = vnToday().slice(0, 8) + '01'
     return enrollment.enrollmentDate > firstOfMonth ? enrollment.enrollmentDate : firstOfMonth
+  })
+  const [dropDate, setDropDate] = useState(() => {
+    const today = vnToday()
+    return enrollment.enrollmentDate > today ? enrollment.enrollmentDate : today
   })
   const { slots, error: slotsError } = useClassSlots(enrollment.classId, effectiveFrom)
   const [days, setDays] = useState<string[]>([])
@@ -460,12 +521,34 @@ function WeekdaysModal({ studentId, enrollment, onClose, onSaved }: { studentId:
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
+  // Xem trước học phí mỗi khi đổi lựa chọn (chờ 300ms để không gọi liên tục khi đang gõ ngày).
+  const [preview, setPreview] = useState<ChangePreview | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState('')
+  const body = tab === 'drop' ? { action: 'drop', dropDate } : { action: 'weekdays', days, effectiveFrom }
+  const bodyKey = JSON.stringify(body)
+  const ready = tab === 'drop' ? !!dropDate : !!effectiveFrom && !!slots?.length && days.length > 0
+  useEffect(() => {
+    setPreview(null); setPreviewError('')
+    if (!ready) return
+    let cancelled = false
+    setPreviewLoading(true)
+    const timer = setTimeout(() => {
+      api.post(`/students/${studentId}/enroll/${enrollment.id}/preview`, JSON.parse(bodyKey))
+        .then(r => { if (!cancelled) setPreview(r.data) })
+        .catch(err => { if (!cancelled) setPreviewError(err.response?.data?.message ?? 'Không tính được học phí') })
+        .finally(() => { if (!cancelled) setPreviewLoading(false) })
+    }, 300)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [bodyKey, ready, studentId, enrollment.id])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!days.length) { setError('Cần chọn ít nhất một buổi học trong tuần'); return }
+    if (tab === 'weekdays' && !days.length) { setError('Cần chọn ít nhất một buổi học trong tuần'); return }
     setSaving(true); setError('')
     try {
-      await api.put(`/students/${studentId}/enroll/${enrollment.id}/weekdays`, { days, effectiveFrom })
+      if (tab === 'drop') await api.put(`/students/${studentId}/enroll/${enrollment.id}/drop`, { dropDate })
+      else await api.put(`/students/${studentId}/enroll/${enrollment.id}/weekdays`, { days, effectiveFrom })
       onSaved()
     } catch (err: any) {
       setError(err.response?.data?.message ?? 'Có lỗi xảy ra')
@@ -474,23 +557,59 @@ function WeekdaysModal({ studentId, enrollment, onClose, onSaved }: { studentId:
     }
   }
 
+  const inputCls = 'w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20'
+  const tabCls = (on: boolean) => `flex-1 flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${on ? 'bg-white text-on-surface shadow-sm' : 'text-outline hover:text-on-surface'}`
+  const blocked = !!preview?.blocked
+  const current = enrollment.weekdays?.length ? `Chỉ học ${weekdayLabel(enrollment.weekdays)}` : 'Học đủ các buổi của lớp'
+
   return (
-    <Modal title={`Buổi học cố định · ${enrollment.className}`} onClose={onClose}>
+    <Modal title={`Lịch học · ${enrollment.className}`} onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-5">
+        <p className="-mt-4 text-sm text-outline">Đăng ký {fmt(enrollment.enrollmentDate)} · {current}</p>
+        <div role="tablist" aria-label="Thao tác" className="flex gap-1 rounded-xl bg-surface-container-low p-1">
+          <button type="button" role="tab" aria-selected={tab === 'weekdays'} onClick={() => { setTab('weekdays'); setError('') }} className={tabCls(tab === 'weekdays')}>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">edit_calendar</span>Đổi buổi học
+          </button>
+          <button type="button" role="tab" aria-selected={tab === 'drop'} onClick={() => { setTab('drop'); setError('') }} className={tabCls(tab === 'drop')}>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">person_remove</span>Nghỉ lớp
+          </button>
+        </div>
+
         {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
-        <Field label="Học viên học các buổi">
-          <WeekdayPicker slots={slots} error={slotsError} value={days} onChange={setDays} />
+
+        {tab === 'weekdays' ? (
+          <>
+            <Field label="Học viên học các buổi">
+              <WeekdayPicker slots={slots} error={slotsError} value={days} onChange={setDays} />
+            </Field>
+            <Field label="Áp dụng từ ngày">
+              <input type="date" value={effectiveFrom} min={enrollment.enrollmentDate} onChange={e => setEffectiveFrom(e.target.value)} className={inputCls} />
+              <p className="mt-1.5 text-xs text-outline">Học phí trước ngày này giữ nguyên. Phiếu chưa thu từ tháng này trở đi được tính lại; tháng đã thu tiền hoặc đã xuất hoá đơn thì không đổi được.</p>
+            </Field>
+          </>
+        ) : (
+          <Field label="Ngày nghỉ (buổi cuối cùng được tính tiền)">
+            <input type="date" value={dropDate} min={enrollment.enrollmentDate} onChange={e => setDropDate(e.target.value)} className={inputCls} />
+            <p className="mt-1.5 text-xs text-outline">Các buổi sau ngày này không tính học phí. Phiếu chưa thu được tính lại, phiếu không còn buổi nào bị xoá; tháng đã thu tiền hoặc đã xuất hoá đơn mà bị bớt buổi thì không cho nghỉ.</p>
+          </Field>
+        )}
+
+        <Field label="Ảnh hưởng học phí">
+          <ImpactPreview preview={preview} loading={previewLoading} error={previewError} />
         </Field>
-        <Field label="Áp dụng từ ngày">
-          <input type="date" value={effectiveFrom} min={enrollment.enrollmentDate} onChange={e => setEffectiveFrom(e.target.value)}
-            className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
-          <p className="mt-1.5 text-xs text-outline">Học phí trước ngày này giữ nguyên. Phiếu chưa thu từ tháng này trở đi được tính lại; tháng đã thu tiền hoặc đã xuất hoá đơn thì không đổi được.</p>
-        </Field>
+
         <div className="flex gap-3 pt-1">
           <button type="button" onClick={onClose} className="flex-1 btn-secondary justify-center">Huỷ</button>
-          <button type="submit" disabled={saving || !slots?.length || !days.length} className="flex-1 btn-primary justify-center disabled:opacity-60">
-            {saving ? 'Đang lưu...' : 'Lưu lịch học'}
-          </button>
+          {tab === 'weekdays' ? (
+            <button type="submit" disabled={saving || !slots?.length || !days.length || blocked} className="flex-1 btn-primary justify-center disabled:opacity-60">
+              {saving ? 'Đang lưu...' : 'Lưu lịch học'}
+            </button>
+          ) : (
+            <button type="submit" disabled={saving || !dropDate || blocked}
+              className="flex-1 inline-flex items-center justify-center rounded-xl bg-red-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-700/40 disabled:opacity-60">
+              {saving ? 'Đang lưu...' : 'Xác nhận nghỉ lớp'}
+            </button>
+          )}
         </div>
       </form>
     </Modal>
@@ -670,17 +789,6 @@ function InfoTab({
     })
   }
 
-  const dropEnrollment = (e: ClassEnrollment) => {
-    setConfirm({
-      message: `Cho học viên nghỉ lớp "${e.className}"?`,
-      onConfirm: async () => {
-        setConfirm(null)
-        await api.put(`/students/${student.id}/enroll/${e.id}/drop`, {})
-        onRefresh()
-      },
-    })
-  }
-
   const deleteParent = (p: Parent & { id: string }) => {
     setConfirm({
       message: `Xoá thông tin phụ huynh "${p.fullName}"?`,
@@ -754,18 +862,10 @@ function InfoTab({
                         <button
                           onClick={() => setWeekdaysFor(e)}
                           className="p-1.5 rounded-lg hover:bg-primary/10 text-outline hover:text-primary transition-colors"
-                          title="Chọn buổi học trong tuần"
+                          title="Lịch học: đổi buổi học hoặc cho nghỉ lớp"
+                          aria-label={`Lịch học lớp ${e.className}`}
                         >
                           <span className="material-symbols-outlined text-base">edit_calendar</span>
-                        </button>
-                      )}
-                      {canManage && (
-                        <button
-                          onClick={() => dropEnrollment(e)}
-                          className="p-1.5 rounded-lg hover:bg-error-container/20 text-outline hover:text-error transition-colors"
-                          title="Cho nghỉ lớp"
-                        >
-                          <span className="material-symbols-outlined text-base">person_remove</span>
                         </button>
                       )}
                     </div>
@@ -913,7 +1013,7 @@ function InfoTab({
         />
       )}
       {weekdaysFor && (
-        <WeekdaysModal
+        <EnrollmentScheduleModal
           studentId={student.id}
           enrollment={weekdaysFor}
           onClose={() => setWeekdaysFor(null)}

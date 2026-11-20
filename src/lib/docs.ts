@@ -2,7 +2,7 @@ import type { Prisma } from '@prisma/client'
 import { api, fromClassId } from './db'
 import { weekdaysOn } from './enrollmentDays'
 
-const vietnamToday = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' })
+export const vietnamToday = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' })
 
 // ─── Đọc PostgreSQL ra đúng hình dạng tài liệu Firestore cũ ──────────────
 // Logic nghiệp vụ (tính học phí, đối soát, đổi lịch) và frontend vẫn nhận các trường denormalized

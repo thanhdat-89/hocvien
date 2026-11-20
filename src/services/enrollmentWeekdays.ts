@@ -1,12 +1,15 @@
 import { prisma, newId, toDay, type Tx } from '../lib/db'
-import { enrollmentDoc, enrollmentInclude, scheduleDoc, scheduleInclude } from '../lib/docs'
-import { isWeekday, WEEKDAY_LABELS, WEEKDAYS, type Weekday } from '../lib/enrollmentDays'
-import { calculateTuitionForStudent } from './tuitionCalculator'
+import { enrollmentDoc, enrollmentInclude, scheduleDoc, scheduleInclude, vietnamToday } from '../lib/docs'
+import { recountClassActiveStudents } from '../lib/classSync'
+import { isWeekday, WEEKDAY_LABELS, WEEKDAYS, type Weekday, type WeekdayPlan } from '../lib/enrollmentDays'
+import type { ClassEnrollment } from '../types/models'
+import { calculateTuitionForStudent, estimateClassTuition } from './tuitionCalculator'
 
 const fail = (message: string, status = 400): never => { throw Object.assign(new Error(message), { status }) }
 const isDate = (value: unknown): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
   && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value
 const label = (days: string[]) => days.map(d => WEEKDAY_LABELS[d as Weekday] ?? d).join(', ')
+const monthKey = (month: number, year: number) => `${year}-${String(month).padStart(2, '0')}`
 
 /** Các thứ lớp có lịch học vào/sau ngày `from` — chỉ được chọn trong số này. */
 async function classWeekdaysFrom(classId: string, from: string, tx: Tx = prisma): Promise<Weekday[]> {
@@ -39,52 +42,180 @@ export async function createInitialWeekdayPlan(tx: Tx, enrollment: { id: string;
   await tx.enrollmentWeekdayPlan.create({ data: { id: newId(), enrollmentId: enrollment.id, effectiveFrom: enrollment.enrollmentDate, days } })
 }
 
-/**
- * Đổi lịch cố định trong tuần của học viên ở một lớp, áp dụng từ `effectiveFrom` trở đi.
- * Các tháng trước giữ nguyên. Tháng bị ảnh hưởng đã thu tiền/đã xuất hoá đơn → từ chối;
- * phiếu chưa thu của các tháng đó được tính lại theo lịch mới.
- */
-export async function setEnrollmentWeekdays(studentId: string, enrollmentId: string, body: { days?: unknown; effectiveFrom?: unknown }) {
-  const enrollment = await prisma.classEnrollment.findFirst({ where: { id: enrollmentId, studentId }, include: enrollmentInclude })
-  if (!enrollment) return fail('Không tìm thấy ghi danh', 404)
-  const doc = enrollmentDoc(enrollment)
-  if (doc.status !== 'ACTIVE') fail('Chỉ đổi lịch được cho lớp đang học', 409)
-  if (body.effectiveFrom != null && !isDate(body.effectiveFrom)) fail('Ngày áp dụng không hợp lệ')
-  const requested = (body.effectiveFrom as string | undefined) || doc.enrollmentDate
-  // Áp dụng trước ngày ghi danh cũng như áp dụng từ ngày ghi danh.
-  const effectiveFrom: string = requested < doc.enrollmentDate ? doc.enrollmentDate : requested
-  const days = await normalizeDays(doc.classId, effectiveFrom, body.days)
+// ─── Đổi buổi học / nghỉ lớp: cùng một quy trình xem trước → kiểm tra khoá → ghi ───────────────
 
-  const fromMonth = effectiveFrom.slice(0, 7)
+export type EnrollmentChange =
+  | { action: 'weekdays'; days?: unknown; effectiveFrom?: unknown }
+  | { action: 'drop'; dropDate?: unknown }
+
+/** Ảnh hưởng tới học phí một tháng (số tiền đã trừ khuyến mãi). */
+export interface MonthImpact {
+  month: number
+  year: number
+  before: { sessions: number; amount: number }
+  after: { sessions: number; amount: number }
+  /** Phiếu đang có: không có = chưa lập phiếu (sẽ tính theo lịch mới khi lập). */
+  record: { status: string; finalAmount: number; locked: boolean } | null
+  /** none: không đổi · recalculate: phiếu chưa thu được tính lại · delete: phiếu chưa thu bị xoá (không còn buổi) · locked: đã thu/xuất HĐ */
+  outcome: 'none' | 'recalculate' | 'delete' | 'locked'
+}
+
+interface Prepared {
+  enrollment: ClassEnrollment
+  /** Ngày bắt đầu có hiệu lực: ngày áp dụng lịch mới, hoặc ngày sau ngày nghỉ. */
+  fromDate: string
+  adjust: (enrollments: ClassEnrollment[]) => ClassEnrollment[]
+  /** Đổi buổi: tháng đã thu/xuất HĐ luôn chặn. Nghỉ lớp: chỉ chặn khi tháng đó bị bớt buổi. */
+  lockAnyAffectedMonth: boolean
+  write: (tx: Tx) => Promise<void>
+  /** Phiếu chưa thu không còn buổi nào thì xoá (chỉ khi nghỉ lớp). */
+  deleteEmpty: boolean
+}
+
+async function prepare(studentId: string, enrollmentId: string, change: EnrollmentChange): Promise<Prepared> {
+  const row = await prisma.classEnrollment.findFirst({ where: { id: enrollmentId, studentId }, include: enrollmentInclude })
+  if (!row) return fail('Không tìm thấy ghi danh', 404)
+  const enrollment: ClassEnrollment = enrollmentDoc(row)
+  if (enrollment.status !== 'ACTIVE') fail('Lớp này học viên đã nghỉ', 409)
+  const replace = (patch: Partial<ClassEnrollment>) => (list: ClassEnrollment[]) =>
+    list.map(e => e.id === enrollmentId ? { ...e, ...patch } : e)
+
+  if (change.action === 'drop') {
+    if (change.dropDate != null && change.dropDate !== '' && !isDate(change.dropDate)) fail('Ngày nghỉ không hợp lệ')
+    const dropDate = (change.dropDate as string | undefined) || vietnamToday()
+    if (dropDate < enrollment.enrollmentDate) fail(`Ngày nghỉ không được trước ngày đăng ký (${enrollment.enrollmentDate})`)
+    const next = new Date(`${dropDate}T00:00:00Z`); next.setUTCDate(next.getUTCDate() + 1)
+    return {
+      enrollment,
+      fromDate: next.toISOString().slice(0, 10),
+      adjust: replace({ status: 'DROPPED', dropDate } as Partial<ClassEnrollment>),
+      lockAnyAffectedMonth: false,
+      deleteEmpty: true,
+      write: async tx => {
+        await tx.classEnrollment.update({ where: { id: enrollmentId }, data: { status: 'DROPPED', dropDate: toDay(dropDate)! } })
+        await recountClassActiveStudents(enrollment.classId, tx)
+      },
+    }
+  }
+
+  if (change.effectiveFrom != null && change.effectiveFrom !== '' && !isDate(change.effectiveFrom)) fail('Ngày áp dụng không hợp lệ')
+  const requested = (change.effectiveFrom as string | undefined) || enrollment.enrollmentDate
+  // Áp dụng trước ngày ghi danh cũng như áp dụng từ ngày ghi danh.
+  const effectiveFrom = requested < enrollment.enrollmentDate ? enrollment.enrollmentDate : requested
+  const days = await normalizeDays(enrollment.classId, effectiveFrom, change.days)
+  // Lịch mới thay mọi kế hoạch từ ngày áp dụng trở đi; học đủ và không có lịch riêng trước đó → không cần dòng nào.
+  const earlier = ((enrollment as any).weekdayPlans ?? [] as WeekdayPlan[])
+    .filter((p: WeekdayPlan) => p.effectiveFrom < effectiveFrom && p.effectiveFrom >= enrollment.enrollmentDate)
+  const plans: WeekdayPlan[] = days.length || earlier.length ? [...earlier, { effectiveFrom, days }] : earlier
+  return {
+    enrollment,
+    fromDate: effectiveFrom,
+    adjust: replace({ weekdayPlans: plans } as Partial<ClassEnrollment>),
+    lockAnyAffectedMonth: true,
+    deleteEmpty: false,
+    write: async tx => {
+      await tx.enrollmentWeekdayPlan.deleteMany({
+        where: { enrollmentId, OR: [{ effectiveFrom: { gte: toDay(effectiveFrom)! } }, { effectiveFrom: { lt: toDay(enrollment.enrollmentDate)! } }] },
+      })
+      if (days.length || earlier.length) {
+        await tx.enrollmentWeekdayPlan.create({ data: { id: newId(), enrollmentId, effectiveFrom: toDay(effectiveFrom)!, days } })
+      }
+    },
+  }
+}
+
+/** Tính ảnh hưởng tới từng tháng (tháng bắt đầu hiệu lực + các tháng sau đã có phiếu) và lý do bị chặn nếu có. */
+async function evaluate(studentId: string, p: Prepared) {
+  const classId = p.enrollment.classId
+  const fromMonth = p.fromDate.slice(0, 7)
   const records = (await prisma.tuitionRecord.findMany({
-    where: { studentId, classId: doc.classId },
-    select: { id: true, billingMonth: true, billingYear: true, status: true, paidAmount: true },
-  })).filter(r => `${r.billingYear}-${String(r.billingMonth).padStart(2, '0')}` >= fromMonth)
+    where: { studentId, classId },
+    select: { id: true, billingMonth: true, billingYear: true, status: true, paidAmount: true, finalAmount: true, _count: { select: { payments: true } } },
+  })).filter(r => monthKey(r.billingMonth, r.billingYear) >= fromMonth)
   const invoiced = records.length ? await prisma.misaInvoice.findMany({
     where: { OR: [{ id: { in: records.map(r => r.id) } }, { recordIds: { hasSome: records.map(r => r.id) } }] },
     select: { id: true, recordIds: true },
   }) : []
   const invoicedIds = new Set(invoiced.flatMap(i => [i.id, ...i.recordIds]))
-  const locked = records.filter(r => r.status === 'PAID' || r.status === 'PARTIAL' || r.paidAmount > 0 || invoicedIds.has(r.id))
-  if (locked.length) {
-    const months = [...new Set(locked.map(r => `T${r.billingMonth}/${r.billingYear}`))].join(', ')
-    fail(`Học phí ${months} của lớp này đã thu hoặc đã xuất hoá đơn. Hãy chọn ngày áp dụng sau các tháng đó.`, 409)
+  const isLocked = (r: typeof records[number]) =>
+    r.status === 'PAID' || r.status === 'PARTIAL' || r.paidAmount > 0 || invoicedIds.has(r.id)
+
+  const [y, m] = fromMonth.split('-').map(Number)
+  const months = new Map<string, { month: number; year: number }>([[fromMonth, { month: m, year: y }]])
+  for (const r of records) months.set(monthKey(r.billingMonth, r.billingYear), { month: r.billingMonth, year: r.billingYear })
+
+  const impacts: (MonthImpact & { recordId?: string })[] = []
+  for (const [key, { month, year }] of [...months].sort(([a], [b]) => a.localeCompare(b))) {
+    const [before, after] = await Promise.all([
+      estimateClassTuition(studentId, classId, month, year),
+      estimateClassTuition(studentId, classId, month, year, p.adjust),
+    ])
+    const r = records.find(x => monthKey(x.billingMonth, x.billingYear) === key)
+    const locked = !!r && isLocked(r)
+    const changed = before.totalSessions !== after.totalSessions || before.finalAmount !== after.finalAmount
+    const blocks = locked && (p.lockAnyAffectedMonth || changed)
+    const outcome: MonthImpact['outcome'] = !r ? 'none'
+      : locked ? (blocks ? 'locked' : 'none')
+      : p.deleteEmpty && after.totalSessions === 0 && r._count.payments === 0 ? 'delete'
+      : 'recalculate'
+    impacts.push({
+      month, year, recordId: r?.id,
+      before: { sessions: before.totalSessions, amount: before.finalAmount },
+      after: { sessions: after.totalSessions, amount: after.finalAmount },
+      record: r ? { status: r.status, finalAmount: r.finalAmount, locked } : null,
+      outcome,
+    })
   }
 
-  await prisma.$transaction(async tx => {
-    // Lịch mới thay mọi kế hoạch từ ngày áp dụng trở đi.
-    await tx.enrollmentWeekdayPlan.deleteMany({
-      where: { enrollmentId, OR: [{ effectiveFrom: { gte: toDay(effectiveFrom)! } }, { effectiveFrom: { lt: toDay(doc.enrollmentDate)! } }] },
-    })
-    const earlier = await tx.enrollmentWeekdayPlan.count({ where: { enrollmentId } })
-    // Học đủ và không có lịch riêng trước đó → không cần dòng nào (mặc định là học đủ).
-    if (days.length || earlier) {
-      await tx.enrollmentWeekdayPlan.create({ data: { id: newId(), enrollmentId, effectiveFrom: toDay(effectiveFrom)!, days } })
-    }
-  })
-
-  for (const r of records) await calculateTuitionForStudent(studentId, doc.classId, r.billingMonth, r.billingYear)
-
-  const updated = await prisma.classEnrollment.findUniqueOrThrow({ where: { id: enrollmentId }, include: enrollmentInclude })
-  return { enrollment: enrollmentDoc(updated), recalculatedRecords: records.length }
+  const blockedMonths = impacts.filter(i => i.outcome === 'locked')
+  const blocked = blockedMonths.length
+    ? `Học phí ${blockedMonths.map(i => `T${i.month}/${i.year}`).join(', ')} của lớp này đã thu hoặc đã xuất hoá đơn. `
+      + (p.deleteEmpty ? 'Hãy chọn ngày nghỉ sau buổi học cuối của các tháng đó.' : 'Hãy chọn ngày áp dụng sau các tháng đó.')
+    : null
+  return { impacts, blocked }
 }
+
+const publicImpact = ({ recordId: _id, ...rest }: MonthImpact & { recordId?: string }): MonthImpact => rest
+
+/** Xem trước đổi buổi học / nghỉ lớp: không ghi gì. */
+export async function previewEnrollmentChange(studentId: string, enrollmentId: string, change: EnrollmentChange) {
+  const p = await prepare(studentId, enrollmentId, change)
+  const { impacts, blocked } = await evaluate(studentId, p)
+  return { fromDate: p.fromDate, months: impacts.map(publicImpact), blocked }
+}
+
+async function applyChange(studentId: string, enrollmentId: string, change: EnrollmentChange) {
+  const p = await prepare(studentId, enrollmentId, change)
+  const { impacts, blocked } = await evaluate(studentId, p)
+  if (blocked) fail(blocked, 409)
+  await prisma.$transaction(tx => p.write(tx))
+
+  let recalculatedRecords = 0, deletedRecords = 0
+  for (const i of impacts) {
+    if (!i.recordId) continue
+    if (i.outcome === 'delete') {
+      await prisma.tuitionRecord.delete({ where: { id: i.recordId } })
+      deletedRecords++
+    } else if (i.outcome === 'recalculate') {
+      await calculateTuitionForStudent(studentId, p.enrollment.classId, i.month, i.year)
+      recalculatedRecords++
+    }
+  }
+  const updated = await prisma.classEnrollment.findUniqueOrThrow({ where: { id: enrollmentId }, include: enrollmentInclude })
+  return { enrollment: enrollmentDoc(updated), recalculatedRecords, deletedRecords }
+}
+
+/**
+ * Đổi lịch cố định trong tuần của học viên ở một lớp, áp dụng từ `effectiveFrom` trở đi.
+ * Các tháng trước giữ nguyên. Tháng bị ảnh hưởng đã thu tiền/đã xuất hoá đơn → từ chối;
+ * phiếu chưa thu của các tháng đó được tính lại theo lịch mới.
+ */
+export const setEnrollmentWeekdays = (studentId: string, enrollmentId: string, body: { days?: unknown; effectiveFrom?: unknown }) =>
+  applyChange(studentId, enrollmentId, { action: 'weekdays', days: body.days, effectiveFrom: body.effectiveFrom })
+
+/**
+ * Cho học viên nghỉ lớp từ sau `dropDate` (buổi ngày nghỉ vẫn tính). Tháng đã thu/xuất hoá đơn mà bị bớt buổi → từ chối;
+ * phiếu chưa thu được tính lại, phiếu không còn buổi nào thì xoá.
+ */
+export const dropEnrollment = (studentId: string, enrollmentId: string, body: { dropDate?: unknown }) =>
+  applyChange(studentId, enrollmentId, { action: 'drop', dropDate: body.dropDate })

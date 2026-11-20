@@ -60,33 +60,37 @@ async function saveRecord(existingId: string | null, data: {
   return { tuitionRecord: await loadRecord(recordId), isNew: !existingId }
 }
 
+export interface ClassTuitionEstimate {
+  className: string
+  totalSessions: number
+  baseAmount: number
+  discountAmount: number
+  finalAmount: number
+}
+
 /**
- * Tính học phí cho 1 học viên / 1 lớp / 1 tháng
+ * Số buổi và số tiền của học viên ở một lớp trong một tháng, chưa ghi gì vào DB.
+ * `adjust` cho phép xem trước: thay ghi danh bằng phiên bản giả định (đổi buổi, nghỉ lớp).
  */
-export async function calculateTuitionForStudent(
-  studentId: string,
-  classId: string,
-  month: number,
-  year: number
-): Promise<{ tuitionRecord: TuitionRecordDoc; isNew: boolean }> {
+export async function estimateClassTuition(
+  studentId: string, classId: string, month: number, year: number,
+  adjust?: (enrollments: ClassEnrollment[]) => ClassEnrollment[],
+): Promise<ClassTuitionEstimate> {
   const monthStr = `${year}-${String(month).padStart(2, '0')}`
   const fromDate = `${monthStr}-01`
   const toDate = `${year}-${String(month).padStart(2, '0')}-${new Date(year, month, 0).getDate()}`
-
-  if (classId === 'private') {
-    return calculatePrivateTuition(studentId, month, year, fromDate, toDate)
-  }
 
   // Học viên có thể nghỉ rồi ghi danh lại cùng lớp (một ghi danh DROPPED + một ACTIVE). Tính như trang Học phí
   // (buildTuitionScheduleSummary): một buổi được tính nếu có bất kỳ ghi danh nào bao phủ, ưu tiên ghi danh ACTIVE
   // rồi ghi danh mới nhất. Trước đây chỉ lấy ghi danh có id nhỏ nhất — nếu đó là ghi danh đã nghỉ thì mọi buổi
   // sau ngày nghỉ bị loại và phiếu ra 0 đồng.
-  const enrollments: ClassEnrollment[] = (await prisma.classEnrollment.findMany({ where: { classId, studentId }, include: enrollmentInclude }))
+  const loaded: ClassEnrollment[] = (await prisma.classEnrollment.findMany({ where: { classId, studentId }, include: enrollmentInclude }))
     .map(enrollmentDoc)
+  if (!loaded.length) throw new Error(`Học viên ${studentId} không đăng ký lớp ${classId}`)
+  const enrollments = (adjust ? adjust(loaded) : loaded)
     .sort((a: any, b: any) => Number(b.status === 'ACTIVE') - Number(a.status === 'ACTIVE')
       || String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
       || String(a.id).localeCompare(String(b.id)))
-  if (!enrollments.length) throw new Error(`Học viên ${studentId} không đăng ký lớp ${classId}`)
 
   // Đơn giá mỗi buổi: customTuitionRate của ghi danh bao phủ buổi đó → class.tuitionRate → subject.tuitionRatePerSession
   const classRow = await prisma.class.findUnique({ where: { id: classId }, include: { ...classInclude, subject: true } })
@@ -104,7 +108,6 @@ export async function calculateTuitionForStudent(
     return covering ? [Number(covering.customTuitionRate) || classRate] : []
   })
   const totalSessions = sessionRates.length
-  const chargedSessions = totalSessions
 
   const baseAmount = sessionRates.reduce((sum, rate) => sum + rate, 0)
   const ratePerSession = totalSessions ? baseAmount / totalSessions : classRate
@@ -123,6 +126,26 @@ export async function calculateTuitionForStudent(
     }
   }
   discountAmount = Math.min(discountAmount, baseAmount)
+  const base = Math.round(baseAmount), discount = Math.round(discountAmount)
+  return { className: classRow?.name ?? '', totalSessions, baseAmount: base, discountAmount: discount, finalAmount: base - discount }
+}
+
+/**
+ * Tính học phí cho 1 học viên / 1 lớp / 1 tháng
+ */
+export async function calculateTuitionForStudent(
+  studentId: string,
+  classId: string,
+  month: number,
+  year: number
+): Promise<{ tuitionRecord: TuitionRecordDoc; isNew: boolean }> {
+  if (classId === 'private') {
+    const fromDate = `${year}-${String(month).padStart(2, '0')}-01`
+    const toDate = `${year}-${String(month).padStart(2, '0')}-${new Date(year, month, 0).getDate()}`
+    return calculatePrivateTuition(studentId, month, year, fromDate, toDate)
+  }
+
+  const { className, totalSessions, baseAmount, discountAmount } = await estimateClassTuition(studentId, classId, month, year)
 
   // Kiểm tra đã có phiếu chưa
   const existing = await findRecord(studentId, classId, month, year)
@@ -138,8 +161,8 @@ export async function calculateTuitionForStudent(
   }
 
   return saveRecord(existing?.id ?? null, {
-    studentId, classId, className: classRow?.name ?? '', month, year,
-    totalSessions, chargedSessions, baseAmount, discountAmount,
+    studentId, classId, className, month, year,
+    totalSessions, chargedSessions: totalSessions, baseAmount, discountAmount,
   })
 }
 
