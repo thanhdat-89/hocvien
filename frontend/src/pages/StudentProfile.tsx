@@ -451,12 +451,15 @@ interface MonthImpact {
   record: { status: string; finalAmount: number; locked: boolean } | null
   outcome: 'none' | 'recalculate' | 'delete' | 'locked'
 }
-interface ChangePreview { fromDate: string; months: MonthImpact[]; blocked: string | null }
+interface ChangePreview { fromDate: string; months: MonthImpact[]; blocked: string | null; suggestedDate: string | null }
 
 const vnToday = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' })
 
 /** Ảnh hưởng học phí theo tháng của thao tác đang chọn (gọi API xem trước, không ghi gì). */
-function ImpactPreview({ preview, loading, error }: { preview: ChangePreview | null; loading: boolean; error: string }) {
+function ImpactPreview({ preview, loading, error, suggestionLabel, onUseSuggestion }: {
+  preview: ChangePreview | null; loading: boolean; error: string
+  suggestionLabel: string; onUseSuggestion: (date: string) => void
+}) {
   if (error) return <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
   if (!preview) return <p className="text-xs text-outline">{loading ? 'Đang tính học phí...' : ''}</p>
   const note = (m: MonthImpact) => {
@@ -494,7 +497,18 @@ function ImpactPreview({ preview, loading, error }: { preview: ChangePreview | n
       </div>
       <p className="text-[11px] text-outline">Ước tính theo các buổi học đã lên lịch, đã trừ khuyến mãi.</p>
       {preview.blocked && (
-        <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{preview.blocked}</div>
+        <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          <p>{preview.blocked}</p>
+          {preview.suggestedDate && (
+            <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 border-t border-rose-200 pt-2.5">
+              <span className="text-on-surface">Gợi ý: {suggestionLabel} <strong>{fmt(preview.suggestedDate)}</strong></span>
+              <button type="button" onClick={() => onUseSuggestion(preview.suggestedDate!)}
+                className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-primary ring-1 ring-primary/30 hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                Dùng ngày này
+              </button>
+            </div>
+          )}
+        </div>
       )}
     </div>
   )
@@ -595,7 +609,9 @@ function EnrollmentScheduleModal({ studentId, enrollment, onClose, onSaved }: { 
         )}
 
         <Field label="Ảnh hưởng học phí">
-          <ImpactPreview preview={preview} loading={previewLoading} error={previewError} />
+          <ImpactPreview preview={preview} loading={previewLoading} error={previewError}
+            suggestionLabel={tab === 'drop' ? 'học hết tháng rồi nghỉ — ngày nghỉ' : 'áp dụng từ ngày'}
+            onUseSuggestion={date => tab === 'drop' ? setDropDate(date) : setEffectiveFrom(date)} />
         </Field>
 
         <div className="flex gap-3 pt-1">

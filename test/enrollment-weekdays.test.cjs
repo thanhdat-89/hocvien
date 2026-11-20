@@ -83,6 +83,9 @@ test('nghỉ lớp giữa tháng: xem trước, chặn tháng đã thu bị bớ
   await prisma.tuitionRecord.update({ where: { id: nov.id }, data: { status: 'PAID', paidAmount: 1350000 } })
   const blocked = (await preview({ params: { id: student.id, enrollmentId: e.id }, body: { action: 'drop', dropDate: '2026-11-15' } })).body
   assert.match(blocked.blocked, /T11\/2026/)
+  assert.equal(blocked.suggestedDate, '2026-11-30', 'gợi ý học hết tháng đã thu rồi nghỉ')
+  const weekdayBlocked = (await preview({ params: { id: student.id, enrollmentId: e.id }, body: { action: 'weekdays', days: ['FRIDAY'], effectiveFrom: '2026-11-01' } })).body
+  assert.equal(weekdayBlocked.suggestedDate, '2026-12-01', 'đổi buổi: gợi ý từ đầu tháng sau')
   await assert.rejects(drop({ params: { id: student.id, enrollmentId: e.id }, body: { dropDate: '2026-11-15' } }),
     err => err.status === 409 && /T11\/2026/.test(err.message))
 

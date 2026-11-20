@@ -181,7 +181,30 @@ const publicImpact = ({ recordId: _id, ...rest }: MonthImpact & { recordId?: str
 export async function previewEnrollmentChange(studentId: string, enrollmentId: string, change: EnrollmentChange) {
   const p = await prepare(studentId, enrollmentId, change)
   const { impacts, blocked } = await evaluate(studentId, p)
-  return { fromDate: p.fromDate, months: impacts.map(publicImpact), blocked }
+  const suggestedDate = blocked ? await suggestDate(studentId, enrollmentId, change, impacts) : null
+  return { fromDate: p.fromDate, months: impacts.map(publicImpact), blocked, suggestedDate }
+}
+
+const lastDayOf = (month: number, year: number) => `${monthKey(month, year)}-${String(new Date(Date.UTC(year, month, 0)).getUTCDate()).padStart(2, '0')}`
+const firstDayAfter = (month: number, year: number) => month === 12 ? `${year + 1}-01-01` : `${monthKey(month + 1, year)}-01`
+
+/**
+ * Ngày gợi ý khi bị chặn vì tháng đã thu/xuất hoá đơn: nghỉ lớp → ngày cuối của tháng bị chặn sau cùng
+ * (học hết tháng đó rồi nghỉ); đổi buổi → ngày đầu tháng kế tiếp. Thử lại nếu tháng sau đó cũng đã thu.
+ */
+async function suggestDate(studentId: string, enrollmentId: string, change: EnrollmentChange, impacts: MonthImpact[]) {
+  let blockedMonths = impacts.filter(i => i.outcome === 'locked')
+  for (let tries = 0; tries < 12 && blockedMonths.length; tries++) {
+    const last = blockedMonths[blockedMonths.length - 1]
+    const date = change.action === 'drop' ? lastDayOf(last.month, last.year) : firstDayAfter(last.month, last.year)
+    const next: EnrollmentChange = change.action === 'drop' ? { ...change, dropDate: date } : { ...change, effectiveFrom: date }
+    // Ngày gợi ý không hợp lệ (vd lớp đổi lịch, không còn thứ đã chọn) → không gợi ý.
+    const result = await prepare(studentId, enrollmentId, next).then(p => evaluate(studentId, p), () => null)
+    if (!result) return null
+    if (!result.blocked) return date
+    blockedMonths = result.impacts.filter(i => i.outcome === 'locked')
+  }
+  return null
 }
 
 async function applyChange(studentId: string, enrollmentId: string, change: EnrollmentChange) {
