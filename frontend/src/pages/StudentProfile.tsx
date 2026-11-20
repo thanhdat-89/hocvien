@@ -456,10 +456,7 @@ interface ChangePreview { fromDate: string; months: MonthImpact[]; blocked: stri
 const vnToday = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' })
 
 /** Ảnh hưởng học phí theo tháng của thao tác đang chọn (gọi API xem trước, không ghi gì). */
-function ImpactPreview({ preview, loading, error, suggestionLabel, onUseSuggestion }: {
-  preview: ChangePreview | null; loading: boolean; error: string
-  suggestionLabel: string; onUseSuggestion: (date: string) => void
-}) {
+function ImpactPreview({ preview, loading, error }: { preview: ChangePreview | null; loading: boolean; error: string }) {
   if (error) return <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
   if (!preview) return <p className="text-xs text-outline">{loading ? 'Đang tính học phí...' : ''}</p>
   const note = (m: MonthImpact) => {
@@ -497,18 +494,7 @@ function ImpactPreview({ preview, loading, error, suggestionLabel, onUseSuggesti
       </div>
       <p className="text-[11px] text-outline">Ước tính theo các buổi học đã lên lịch, đã trừ khuyến mãi.</p>
       {preview.blocked && (
-        <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          <p>{preview.blocked}</p>
-          {preview.suggestedDate && (
-            <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 border-t border-rose-200 pt-2.5">
-              <span className="text-on-surface">Gợi ý: {suggestionLabel} <strong>{fmt(preview.suggestedDate)}</strong></span>
-              <button type="button" onClick={() => onUseSuggestion(preview.suggestedDate!)}
-                className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-primary ring-1 ring-primary/30 hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-                Dùng ngày này
-              </button>
-            </div>
-          )}
-        </div>
+        <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{preview.blocked}</div>
       )}
     </div>
   )
@@ -530,7 +516,11 @@ function EnrollmentScheduleModal({ studentId, enrollment, onClose, onSaved }: { 
   useEffect(() => {
     if (!slots) return
     const all = slots.map(s => s.dayOfWeek)
-    setDays(enrollment.weekdays?.length ? all.filter(d => enrollment.weekdays!.includes(d)) : all)
+    setDays(prev => {
+      const kept = all.filter(d => prev.includes(d))
+      if (kept.length) return kept
+      return enrollment.weekdays?.length ? all.filter(d => enrollment.weekdays!.includes(d)) : all
+    })
   }, [slots, enrollment.weekdays])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -539,6 +529,8 @@ function EnrollmentScheduleModal({ studentId, enrollment, onClose, onSaved }: { 
   const [preview, setPreview] = useState<ChangePreview | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState('')
+  // Tháng đã thu/xuất hoá đơn chặn ngày đang chọn → tự chuyển sang ngày gợi ý và báo cho người dùng.
+  const [autoMoved, setAutoMoved] = useState<{ tab: 'weekdays' | 'drop'; from: string; to: string; months: string } | null>(null)
   const body = tab === 'drop' ? { action: 'drop', dropDate } : { action: 'weekdays', days, effectiveFrom }
   const bodyKey = JSON.stringify(body)
   const ready = tab === 'drop' ? !!dropDate : !!effectiveFrom && !!slots?.length && days.length > 0
@@ -549,7 +541,20 @@ function EnrollmentScheduleModal({ studentId, enrollment, onClose, onSaved }: { 
     setPreviewLoading(true)
     const timer = setTimeout(() => {
       api.post(`/students/${studentId}/enroll/${enrollment.id}/preview`, JSON.parse(bodyKey))
-        .then(r => { if (!cancelled) setPreview(r.data) })
+        .then(r => {
+          if (cancelled) return
+          const data: ChangePreview = r.data
+          const sent = JSON.parse(bodyKey)
+          const from: string = sent.action === 'drop' ? sent.dropDate : sent.effectiveFrom
+          if (data.blocked && data.suggestedDate && data.suggestedDate !== from) {
+            const months = data.months.filter(m => m.outcome === 'locked').map(m => `T${m.month}/${m.year}`).join(', ')
+            setAutoMoved({ tab: sent.action, from, to: data.suggestedDate, months })
+            if (sent.action === 'drop') setDropDate(data.suggestedDate)
+            else setEffectiveFrom(data.suggestedDate)
+            return
+          }
+          setPreview(data)
+        })
         .catch(err => { if (!cancelled) setPreviewError(err.response?.data?.message ?? 'Không tính được học phí') })
         .finally(() => { if (!cancelled) setPreviewLoading(false) })
     }, 300)
@@ -597,21 +602,31 @@ function EnrollmentScheduleModal({ studentId, enrollment, onClose, onSaved }: { 
               <WeekdayPicker slots={slots} error={slotsError} value={days} onChange={setDays} />
             </Field>
             <Field label="Áp dụng từ ngày">
-              <input type="date" value={effectiveFrom} min={enrollment.enrollmentDate} onChange={e => setEffectiveFrom(e.target.value)} className={inputCls} />
+              <input type="date" value={effectiveFrom} min={enrollment.enrollmentDate} onChange={e => { setAutoMoved(null); setEffectiveFrom(e.target.value) }} className={inputCls} />
+              {autoMoved?.tab === 'weekdays' && autoMoved.to === effectiveFrom && (
+                <p role="status" className="mt-1.5 flex items-start gap-1.5 rounded-lg bg-blue-50 px-3 py-2 text-xs text-primary">
+                  <span aria-hidden="true" className="material-symbols-outlined text-[16px]">event_available</span>
+                  <span>Học phí {autoMoved.months} đã thu hoặc đã xuất hoá đơn nên ngày áp dụng được chuyển từ {fmt(autoMoved.from)} sang <strong>{fmt(autoMoved.to)}</strong>.</span>
+                </p>
+              )}
               <p className="mt-1.5 text-xs text-outline">Học phí trước ngày này giữ nguyên. Phiếu chưa thu từ tháng này trở đi được tính lại; tháng đã thu tiền hoặc đã xuất hoá đơn thì không đổi được.</p>
             </Field>
           </>
         ) : (
           <Field label="Ngày nghỉ (buổi cuối cùng được tính tiền)">
-            <input type="date" value={dropDate} min={enrollment.enrollmentDate} onChange={e => setDropDate(e.target.value)} className={inputCls} />
+            <input type="date" value={dropDate} min={enrollment.enrollmentDate} onChange={e => { setAutoMoved(null); setDropDate(e.target.value) }} className={inputCls} />
+            {autoMoved?.tab === 'drop' && autoMoved.to === dropDate && (
+              <p role="status" className="mt-1.5 flex items-start gap-1.5 rounded-lg bg-blue-50 px-3 py-2 text-xs text-primary">
+                <span aria-hidden="true" className="material-symbols-outlined text-[16px]">event_available</span>
+                <span>Học phí {autoMoved.months} đã thu hoặc đã xuất hoá đơn nên ngày nghỉ (học hết tháng rồi nghỉ) được chuyển từ {fmt(autoMoved.from)} sang <strong>{fmt(autoMoved.to)}</strong>.</span>
+              </p>
+            )}
             <p className="mt-1.5 text-xs text-outline">Các buổi sau ngày này không tính học phí. Phiếu chưa thu được tính lại, phiếu không còn buổi nào bị xoá; tháng đã thu tiền hoặc đã xuất hoá đơn mà bị bớt buổi thì không cho nghỉ.</p>
           </Field>
         )}
 
         <Field label="Ảnh hưởng học phí">
-          <ImpactPreview preview={preview} loading={previewLoading} error={previewError}
-            suggestionLabel={tab === 'drop' ? 'học hết tháng rồi nghỉ — ngày nghỉ' : 'áp dụng từ ngày'}
-            onUseSuggestion={date => tab === 'drop' ? setDropDate(date) : setEffectiveFrom(date)} />
+          <ImpactPreview preview={preview} loading={previewLoading} error={previewError} />
         </Field>
 
         <div className="flex gap-3 pt-1">
