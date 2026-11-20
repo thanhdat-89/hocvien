@@ -6,7 +6,7 @@ import { useConfirm, useAlert } from '../components/ConfirmDialog'
 import api from '../services/api'
 import { Session, Class } from '../types'
 import { useAuth } from '../hooks/useAuth'
-import { gradeOfClass } from '../lib/classGrade'
+import { gradeOfClass, gradeFromName } from '../lib/classGrade'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -192,14 +192,18 @@ interface DaySchedule {
   endTime: string
 }
 
-function ClassModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+const GRADE_OPTIONS = Array.from({ length: 12 }, (_, i) => i + 1)
+
+function ClassModal({ onClose, onSaved }: { onClose: () => void; onSaved: (sessionsCreated: number) => void }) {
   const [form, setForm] = useState({
     name: '',
+    gradeLevel: '',
     tuitionRate: '',
-    startDate: new Date().toISOString().slice(0, 10),
+    startDate: new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' }),
     endDate: '',
-    notes: '',
   })
+  // Người dùng đã tự chọn khối thì không tự điền lại theo tên nữa
+  const [gradeTouched, setGradeTouched] = useState(false)
   // Map: dayOfWeek → { startTime, endTime }
   const [daySchedules, setDaySchedules] = useState<Record<string, DaySchedule>>({})
   const [saving, setSaving] = useState(false)
@@ -207,6 +211,15 @@ function ClassModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }))
+
+  const setName = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const name = e.target.value
+    setForm((f) => {
+      if (gradeTouched) return { ...f, name }
+      const guessed = gradeFromName(name)
+      return { ...f, name, gradeLevel: guessed ? String(guessed) : '' }
+    })
+  }
 
   const toggleDay = (day: string) => {
     setDaySchedules((prev) => {
@@ -224,48 +237,28 @@ function ClassModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
   }
 
   const selectedDays = DAY_OF_WEEK_OPTIONS.filter((d) => daySchedules[d.value])
+  const badTimeDays = selectedDays.filter(({ value }) => daySchedules[value].endTime <= daySchedules[value].startTime)
+  const rate = Number(form.tuitionRate)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!form.name) { setError('Vui lòng nhập tên lớp'); return }
+    if (!form.name.trim()) { setError('Vui lòng nhập tên lớp'); return }
+    if (!form.gradeLevel) { setError('Vui lòng chọn khối'); return }
     if (!form.tuitionRate) { setError('Vui lòng nhập học phí'); return }
+    if (badTimeDays.length) { setError(`Giờ kết thúc phải sau giờ bắt đầu (${badTimeDays.map(d => d.label).join(', ')})`); return }
+    if (form.endDate && form.endDate < form.startDate) { setError('Ngày kết thúc phải sau ngày bắt đầu'); return }
     setSaving(true); setError('')
     try {
-      // 1. Tạo lớp học
-      const classRes = await api.post('/classes', {
-        name: form.name,
-        tuitionRate: Number(form.tuitionRate),
+      // Server tạo lớp, lịch học và buổi học tháng này + tháng sau trong cùng một transaction
+      const res = await api.post('/classes', {
+        name: form.name.trim(),
+        gradeLevel: Number(form.gradeLevel),
+        tuitionRate: rate,
         startDate: form.startDate,
         ...(form.endDate && { endDate: form.endDate }),
-        ...(form.notes && { notes: form.notes }),
+        schedules: selectedDays.map(({ value }) => ({ dayOfWeek: value, ...daySchedules[value] })),
       })
-      const classId = classRes.data.id
-
-      // 2. Tạo lịch học cho từng thứ đã chọn (mỗi thứ có giờ riêng)
-      const days = Object.entries(daySchedules)
-      if (days.length > 0) {
-        await Promise.all(
-          days.map(([dayOfWeek, { startTime, endTime }]) =>
-            api.post('/schedules', {
-              classId,
-              dayOfWeek,
-              startTime,
-              endTime,
-              effectiveFrom: form.startDate,
-              ...(form.endDate && { effectiveTo: form.endDate }),
-            })
-          )
-        )
-        // 3. Tự động tạo buổi học cho tháng hiện tại và tháng tiếp theo
-        const cur = new Date()
-        const nxt = new Date(); nxt.setMonth(nxt.getMonth() + 1)
-        await Promise.all([
-          api.post('/schedules/generate-month', { classId, month: cur.getMonth() + 1, year: cur.getFullYear() }).catch(() => {}),
-          api.post('/schedules/generate-month', { classId, month: nxt.getMonth() + 1, year: nxt.getFullYear() }).catch(() => {}),
-        ])
-      }
-
-      onSaved()
+      onSaved(res.data.sessionsCreated ?? 0)
     } catch (err: any) {
       setError(err.response?.data?.message ?? 'Có lỗi xảy ra')
     } finally {
@@ -285,18 +278,25 @@ function ClassModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
         {error && <div className="mb-4 p-3 bg-error-container/10 text-error rounded-xl text-sm">{error}</div>}
 
         <form onSubmit={handleSubmit} className="space-y-5">
-          {/* Tên lớp */}
+          {/* Tên lớp + Khối */}
           <div>
-            <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Tên lớp *</label>
-            <input value={form.name} onChange={set('name')} required placeholder="VD: Toán 9A - Tối T2/T4/T6"
-              className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
-          </div>
-
-          {/* Học phí */}
-          <div>
-            <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Học phí / buổi (đ) *</label>
-            <input type="number" value={form.tuitionRate} onChange={set('tuitionRate')} required placeholder="200000" min={0}
-              className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
+            <div className="grid grid-cols-[1fr_8rem] gap-4">
+              <div>
+                <label htmlFor="new-class-name" className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Tên lớp *</label>
+                <input id="new-class-name" value={form.name} onChange={setName} required placeholder="VD: Toán 9 - CQT01" autoFocus
+                  className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
+              </div>
+              <div>
+                <label htmlFor="new-class-grade" className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Khối *</label>
+                <select id="new-class-grade" value={form.gradeLevel} required
+                  onChange={(e) => { setGradeTouched(true); set('gradeLevel')(e) }}
+                  className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
+                  <option value="">Chọn</option>
+                  {GRADE_OPTIONS.map((g) => <option key={g} value={g}>Khối {g}</option>)}
+                </select>
+              </div>
+            </div>
+            <p className="mt-1.5 text-xs text-outline">Khối tự điền theo tên lớp và không đổi được sau khi tạo.</p>
           </div>
 
           {/* Lịch học */}
@@ -329,7 +329,7 @@ function ClassModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
             {selectedDays.length > 0 && (
               <div className="space-y-2 pt-1">
                 {selectedDays.map(({ value, label }) => (
-                  <div key={value} className="flex items-center gap-3 bg-surface-container rounded-xl px-3 py-2">
+                  <div key={value} className={`flex items-center gap-3 bg-surface-container rounded-xl px-3 py-2 ${daySchedules[value].endTime <= daySchedules[value].startTime ? 'ring-2 ring-error/40' : ''}`}>
                     <span className="w-7 h-7 rounded-lg bg-primary/10 text-primary text-xs font-black flex items-center justify-center flex-shrink-0">{label}</span>
                     <div className="flex items-center gap-2 flex-1">
                       <input
@@ -353,20 +353,31 @@ function ClassModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
                 ))}
               </div>
             )}
+            {selectedDays.length === 0 && (
+              <p className="text-xs text-outline">Chưa chọn thứ nào: lớp sẽ chưa có lịch và chưa có buổi học.</p>
+            )}
+          </div>
+
+          {/* Học phí */}
+          <div>
+            <label htmlFor="new-class-rate" className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Học phí / buổi (đ) *</label>
+            <input id="new-class-rate" type="number" value={form.tuitionRate} onChange={set('tuitionRate')} required placeholder="200000" min={0} step={1000}
+              className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-primary/20" />
+            {rate > 0 && <p className="mt-1.5 text-xs text-outline">{rate.toLocaleString('vi-VN')}đ / buổi</p>}
           </div>
 
           {/* Ngày bắt đầu / kết thúc */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">Ngày bắt đầu *</label>
-              <input type="date" value={form.startDate} onChange={set('startDate')} required
+              <input type="date" value={form.startDate} onChange={set('startDate')} required max={form.endDate || undefined}
                 className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
             </div>
             <div>
               <label className="text-[10px] font-bold text-outline uppercase tracking-wider block mb-1.5">
                 Ngày kết thúc <span className="text-outline/50 normal-case font-normal">(tuỳ chọn)</span>
               </label>
-              <input type="date" value={form.endDate} onChange={set('endDate')}
+              <input type="date" value={form.endDate} onChange={set('endDate')} min={form.startDate}
                 className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
             </div>
           </div>
@@ -1189,7 +1200,10 @@ export default function Classes() {
       {showClassModal && (
         <ClassModal
           onClose={() => setShowClassModal(false)}
-          onSaved={() => { setShowClassModal(false); loadClasses() }}
+          onSaved={(sessionsCreated) => {
+            setShowClassModal(false); loadClasses(); loadSchedules(); loadSessions(weekStart)
+            showToast(sessionsCreated ? `Đã tạo lớp và ${sessionsCreated} buổi học` : 'Đã tạo lớp học', 'success')
+          }}
         />
       )}
       {editingClass && (

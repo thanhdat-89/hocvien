@@ -13,7 +13,7 @@ test('lớp, học viên, ngày nghỉ mới vào cơ sở mặc định và nă
   const { branchId, schoolYearId } = await context()
   const user = await admin()
 
-  const created = await routeHandler(classes, '/', 'post')({ user, body: { name: 'Toán 9A' } })
+  const created = await routeHandler(classes, '/', 'post')({ user, body: { name: 'Toán 9A', gradeLevel: 9 } })
   assert.equal(created.status, 201)
   assert.deepEqual(await prisma.class.findUniqueOrThrow({ where: { id: created.body.id }, select: { branchId: true, schoolYearId: true } }), { branchId, schoolYearId })
 
@@ -42,7 +42,7 @@ test('nhập Excel chỉ ghi danh vào lớp cùng tên của năm học đang c
 test('không có năm học đang chạy thì tạo lớp báo 409, không ghi gì', async () => {
   await context()
   await prisma.schoolYear.updateMany({ data: { status: 'CLOSED' } })
-  await assert.rejects(routeHandler(classes, '/', 'post')({ user: await admin(), body: { name: 'Toán 9A' } }), err => err.status === 409)
+  await assert.rejects(routeHandler(classes, '/', 'post')({ user: await admin(), body: { name: 'Toán 9A', gradeLevel: 9 } }), err => err.status === 409)
   assert.equal(await prisma.class.count(), 0)
 })
 
@@ -52,8 +52,8 @@ test('xem nhiều cơ sở thì phải chọn cơ sở trước khi thêm lớp,
   await prisma.branch.create({ data: { id: newId(), name: 'Cơ sở B' } })
   const user = await admin()
   const post = routeHandler(classes, '/', 'post')
-  await assert.rejects(runInScope({ branchIds: null, schoolYearId: null }, () => post({ user, body: { name: 'Toán 9A' } })), err => err.status === 400)
-  const created = await runInScope({ branchIds: [A], schoolYearId: null }, () => post({ user, body: { name: 'Toán 9A' } }))
+  await assert.rejects(runInScope({ branchIds: null, schoolYearId: null }, () => post({ user, body: { name: 'Toán 9A', gradeLevel: 9 } })), err => err.status === 400)
+  const created = await runInScope({ branchIds: [A], schoolYearId: null }, () => post({ user, body: { name: 'Toán 9A', gradeLevel: 9 } }))
   assert.equal(created.status, 201)
   assert.equal((await prisma.class.findUniqueOrThrow({ where: { id: created.body.id } })).branchId, A)
 })

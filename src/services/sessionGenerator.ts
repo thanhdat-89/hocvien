@@ -1,4 +1,6 @@
-import { prisma, newId, toDay } from '../lib/db'
+import { prisma, newId, toDay, type Tx } from '../lib/db'
+
+type Db = Tx | typeof prisma
 
 const DAY_OF_WEEK_MAP: Record<string, number> = {
   SUNDAY: 0, MONDAY: 1, TUESDAY: 2, WEDNESDAY: 3,
@@ -8,9 +10,9 @@ const DAY_OF_WEEK_MAP: Record<string, number> = {
 const ymd = (d: Date) => d.toISOString().slice(0, 10)
 
 /** Tập ngày nghỉ lễ "YYYY-MM-DD" của một cơ sở (theo danh sách `dates`, hoặc khoảng startDate–endDate). */
-export async function holidayDates(branchId: string): Promise<Set<string>> {
+export async function holidayDates(branchId: string, db: Db = prisma): Promise<Set<string>> {
   const set = new Set<string>()
-  for (const h of await prisma.holiday.findMany({ where: { branches: { some: { branchId } } } })) {
+  for (const h of await db.holiday.findMany({ where: { branches: { some: { branchId } } } })) {
     if (h.dates.length) { h.dates.forEach(d => set.add(ymd(d))); continue }
     for (const cur = new Date(h.startDate); cur <= h.endDate; cur.setUTCDate(cur.getUTCDate() + 1)) set.add(ymd(cur))
   }
@@ -24,12 +26,13 @@ export async function holidayDates(branchId: string): Promise<Set<string>> {
 export async function generateSessionsFromSchedule(
   scheduleId: string,
   fromDate: Date,
-  toDate: Date
+  toDate: Date,
+  db: Db = prisma
 ): Promise<number> {
-  const schedule = await prisma.schedule.findUnique({ where: { id: scheduleId }, include: { class: true } })
+  const schedule = await db.schedule.findUnique({ where: { id: scheduleId }, include: { class: true } })
   if (!schedule) throw new Error('Không tìm thấy lịch học')
 
-  const holidaySet = await holidayDates(schedule.class.branchId)
+  const holidaySet = await holidayDates(schedule.class.branchId, db)
   const targetDow = DAY_OF_WEEK_MAP[schedule.dayOfWeek]
   const sessionDates: string[] = []
 
@@ -44,7 +47,7 @@ export async function generateSessionsFromSchedule(
 
   if (sessionDates.length === 0) return 0
 
-  const { count } = await prisma.session.createMany({
+  const { count } = await db.session.createMany({
     data: sessionDates.map(dateStr => ({
       id: newId(),
       classId: schedule.classId,
@@ -66,12 +69,13 @@ export async function generateSessionsFromSchedule(
 export async function generateSessionsForClassMonth(
   classId: string,
   year: number,
-  month: number
+  month: number,
+  db: Db = prisma
 ): Promise<number> {
   const fromDate = new Date(Date.UTC(year, month - 1, 1))
   const toDate = new Date(Date.UTC(year, month, 0))
 
-  const schedules = await prisma.schedule.findMany({
+  const schedules = await db.schedule.findMany({
     where: {
       classId,
       effectiveFrom: { lte: toDate },
@@ -83,7 +87,7 @@ export async function generateSessionsForClassMonth(
   for (const s of schedules) {
     const start = s.effectiveFrom > fromDate ? s.effectiveFrom : fromDate
     const end = s.effectiveTo && s.effectiveTo < toDate ? s.effectiveTo : toDate
-    total += await generateSessionsFromSchedule(s.id, start, end)
+    total += await generateSessionsFromSchedule(s.id, start, end, db)
   }
   return total
 }

@@ -11,6 +11,7 @@ import { defaultBranchId, openSchoolYearId, viewedSchoolYearId } from '../lib/br
 import { applyClassChange, prepareClassChange, renameClass } from '../services/classChange'
 import { auditClassTuition } from '../services/classIntegrityAudit'
 import { alertClassAudit } from '../services/adminAlerts'
+import { generateSessionsForClassMonth } from '../services/sessionGenerator'
 
 const router = Router()
 
@@ -89,12 +90,46 @@ router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) =
   }
 })
 
-// POST /api/classes
+// POST /api/classes — tạo lớp, lịch học theo thứ và buổi học tháng này + tháng sau trong một transaction
+const WEEKDAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'] as const
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/
+
+type NewSchedule = { dayOfWeek: typeof WEEKDAYS[number]; startTime: string; endTime: string }
+
+/** Kiểm tra danh sách lịch gửi lên; trả về thông báo lỗi hoặc danh sách đã chuẩn hoá. */
+function parseSchedules(input: unknown): string | NewSchedule[] {
+  if (input === undefined) return []
+  if (!Array.isArray(input)) return 'Lịch học không hợp lệ'
+  const seen = new Set<string>()
+  const out: NewSchedule[] = []
+  for (const item of input) {
+    const { dayOfWeek, startTime, endTime } = (item ?? {}) as Record<string, unknown>
+    if (typeof dayOfWeek !== 'string' || !(WEEKDAYS as readonly string[]).includes(dayOfWeek)) return 'Thứ trong lịch học không hợp lệ'
+    if (seen.has(dayOfWeek)) return 'Mỗi thứ chỉ được chọn một lần'
+    if (typeof startTime !== 'string' || typeof endTime !== 'string' || !HHMM.test(startTime) || !HHMM.test(endTime)) return 'Giờ học không hợp lệ'
+    if (endTime <= startTime) return 'Giờ kết thúc phải sau giờ bắt đầu'
+    seen.add(dayOfWeek)
+    out.push({ dayOfWeek: dayOfWeek as NewSchedule['dayOfWeek'], startTime, endTime })
+  }
+  return out
+}
+
+const isIsoDay = (v: unknown): v is string => typeof v === 'string' && ISO_DAY.test(v) && toDay(v)?.toISOString().slice(0, 10) === v
+
 router.post('/', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { name, subjectId, teacherId, room, maxStudents, notes, tuitionRate, sessionsPerMonth, gradeLevel, startDate, endDate } = req.body
 
-    if (!name) { res.status(400).json({ message: 'Tên lớp là bắt buộc' }); return }
+    if (!name || !String(name).trim()) { res.status(400).json({ message: 'Tên lớp là bắt buộc' }); return }
+    const grade = Number(gradeLevel)
+    if (!Number.isInteger(grade) || grade < 1 || grade > 12) { res.status(400).json({ message: 'Vui lòng chọn khối (1–12)' }); return }
+    if (startDate !== undefined && !isIsoDay(startDate)) { res.status(400).json({ message: 'Ngày bắt đầu không hợp lệ' }); return }
+    if (endDate && !isIsoDay(endDate)) { res.status(400).json({ message: 'Ngày kết thúc không hợp lệ' }); return }
+    if (startDate && endDate && endDate < startDate) { res.status(400).json({ message: 'Ngày kết thúc phải sau ngày bắt đầu' }); return }
+    const schedules = parseSchedules(req.body.schedules)
+    if (typeof schedules === 'string') { res.status(400).json({ message: schedules }); return }
+    if (schedules.length && !startDate) { res.status(400).json({ message: 'Cần ngày bắt đầu để tạo lịch học' }); return }
 
     if (subjectId && !(await prisma.subject.findUnique({ where: { id: subjectId }, select: { id: true } }))) {
       res.status(404).json({ message: 'Không tìm thấy môn học' }); return
@@ -103,27 +138,44 @@ router.post('/', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Re
       res.status(404).json({ message: 'Không tìm thấy giáo viên' }); return
     }
 
-    const created = await prisma.class.create({
-      data: {
-        id: newId(),
-        name,
-        status: 'ACTIVE',
-        subjectId: subjectId || null,
-        teacherId: teacherId || null,
-        room: room || null,
-        notes: notes || null,
-        tuitionRate: tuitionRate ? Number(tuitionRate) : null,
-        sessionsPerMonth: sessionsPerMonth ? Number(sessionsPerMonth) : null,
-        maxStudents: maxStudents ? Number(maxStudents) : null,
-        gradeLevel: gradeLevel ? Number(gradeLevel) : null,
-        startDate: toDay(startDate),
-        endDate: toDay(endDate),
-        branchId: await defaultBranchId(),
-        schoolYearId: await openSchoolYearId(),
-      },
-      include: classInclude,
-    })
-    res.status(201).json(classDoc(created))
+    const [year, month] = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' }).slice(0, 7).split('-').map(Number)
+    const months = [{ year, month }, month === 12 ? { year: year + 1, month: 1 } : { year, month: month + 1 }]
+
+    const { created, sessionsCreated } = await prisma.$transaction(async tx => {
+      const cls = await tx.class.create({
+        data: {
+          id: newId(),
+          name: String(name).trim(),
+          status: 'ACTIVE',
+          subjectId: subjectId || null,
+          teacherId: teacherId || null,
+          room: room || null,
+          notes: notes || null,
+          tuitionRate: tuitionRate ? Number(tuitionRate) : null,
+          sessionsPerMonth: sessionsPerMonth ? Number(sessionsPerMonth) : null,
+          maxStudents: maxStudents ? Number(maxStudents) : null,
+          gradeLevel: grade,
+          startDate: toDay(startDate),
+          endDate: toDay(endDate),
+          branchId: await defaultBranchId(tx),
+          schoolYearId: await openSchoolYearId(tx),
+        },
+        select: { id: true },
+      })
+      if (schedules.length) {
+        await tx.schedule.createMany({
+          data: schedules.map(s => ({
+            id: newId(), classId: cls.id, ...s,
+            effectiveFrom: toDay(startDate)!, effectiveTo: toDay(endDate),
+          })),
+        })
+      }
+      let sessionsCreated = 0
+      for (const m of schedules.length ? months : []) sessionsCreated += await generateSessionsForClassMonth(cls.id, m.year, m.month, tx)
+      const created = await tx.class.findUniqueOrThrow({ where: { id: cls.id }, include: classInclude })
+      return { created, sessionsCreated }
+    }, { timeout: 20000 })
+    res.status(201).json({ ...classDoc(created), sessionsCreated })
   } catch (err) {
     next(err)
   }
