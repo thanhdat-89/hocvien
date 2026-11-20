@@ -515,28 +515,81 @@ const addDays = (date: string, n: number) => {
   const d = new Date(`${date}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10)
 }
 
-/** Danh sách tháng: số buổi / số tiền trước → sau, kèm ghi chú phiếu sẽ ra sao. */
-function MonthList({ months, note }: { months: TransferMonth[]; note: (m: TransferMonth) => { text: string; cls: string } }) {
+/** Ảnh hưởng học phí khi chuyển lớp, gộp theo tháng: tháng đã thu so "đã thu" với "học thực tế"; tháng chưa thu liệt kê phiếu từng lớp. */
+function TransferImpact({ preview }: { preview: TransferPreview }) {
+  const { oldClass, newClass, settlement, startDate, dropDate } = preview
+  const keyOf = (m: { month: number; year: number }) => m.year * 100 + m.month
+  const keys = [...new Set([...oldClass.months, ...newClass.months].map(keyOf))].sort((x, y) => x - y)
+  const ddmm = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`
+  const inMonth = (d: string, k: number) => Number(d.slice(0, 4)) * 100 + Number(d.slice(5, 7)) === k
+  const shown = (m?: TransferMonth): m is TransferMonth => !!m && (m.before.sessions > 0 || m.after.sessions > 0 || !!m.record)
+
   return (
-    <div className="rounded-xl border border-slate-200 divide-y divide-slate-100">
-      {months.map(m => {
-        const same = m.before.sessions === m.after.sessions && m.before.amount === m.after.amount
-        const n = note(m)
-        return (
-          <div key={`${m.year}-${m.month}`} className="flex items-start justify-between gap-3 px-4 py-2.5 text-sm">
-            <div className="min-w-0">
-              <p className="font-semibold text-on-surface">Tháng {m.month}/{m.year}</p>
-              <p className={`text-xs ${n.cls}`}>{n.text}</p>
+    <div className="space-y-2">
+      {keys.map(k => {
+        const o = oldClass.months.find(m => keyOf(m) === k)
+        const n = newClass.months.find(m => keyOf(m) === k)
+        const month = k % 100, year = Math.floor(k / 100)
+        const paid = settlement?.months.find(x => keyOf(x) === k)
+        const oldLine = `${oldClass.name} · ${o?.after.sessions ?? 0} buổi${inMonth(dropDate, k) ? ` (đến ${ddmm(dropDate)})` : ''}`
+        const newLine = `${newClass.name} · ${n?.after.sessions ?? 0} buổi${inMonth(startDate, k) ? ` (từ ${ddmm(startDate)})` : ''}`
+
+        if (paid && o) {
+          const oldActual = o.after.amount
+          const diff = paid.actual - paid.paid
+          return (
+            <div key={k} className="rounded-xl border border-slate-200 px-4 py-3 text-sm tabular-nums">
+              <div className="flex items-baseline justify-between gap-3">
+                <p className="font-semibold text-on-surface">Tháng {month}/{year}</p>
+                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">Đã thu · giữ nguyên phiếu</span>
+              </div>
+              <div className="mt-2 space-y-1">
+                <p className="flex justify-between gap-3"><span className="text-slate-600">Đã thu ({oldClass.name}, {o.before.sessions} buổi)</span><span className="font-semibold">{fmtMoney(paid.paid)}</span></p>
+                <p className="pt-1 text-xs font-semibold text-slate-500">Học thực tế sau khi chuyển</p>
+                <p className="flex justify-between gap-3 pl-3 text-slate-600"><span>{oldLine}</span><span>{fmtMoney(oldActual)}</span></p>
+                <p className="flex justify-between gap-3 pl-3 text-slate-600"><span>{newLine}</span><span>{fmtMoney(paid.actual - oldActual)}</span></p>
+                <p className="flex justify-between gap-3 border-t border-slate-100 pt-1"><span className="text-slate-600">Tổng học thực tế</span><span className="font-semibold">{fmtMoney(paid.actual)}</span></p>
+              </div>
+              <p className={`mt-2 rounded-lg px-3 py-1.5 text-xs font-semibold ${diff === 0 ? 'bg-slate-50 text-slate-600' : 'bg-amber-50 text-amber-800'}`}>
+                {diff === 0 ? 'Khớp số đã thu — không chênh lệch'
+                  : diff > 0 ? `Đã thu ít hơn ${fmtMoney(diff)}` : `Đã thu nhiều hơn ${fmtMoney(-diff)}`}
+              </p>
+              <p className="mt-1.5 text-[11px] text-outline">Buổi học ở lớp mới tháng này đã gồm trong phiếu đã thu, không thu riêng.</p>
             </div>
-            <div className="text-right tabular-nums">
-              {same ? (
-                <p className="text-on-surface">{m.after.sessions} buổi · {fmtMoney(m.after.amount)}</p>
-              ) : (
-                <>
-                  <p className="text-xs text-outline line-through">{m.before.sessions} buổi · {fmtMoney(m.before.amount)}</p>
-                  <p className="font-semibold text-on-surface">{m.after.sessions} buổi · {fmtMoney(m.after.amount)}</p>
-                </>
-              )}
+          )
+        }
+
+        const lines: { text: string; amount: string; note: string; cls: string }[] = []
+        if (shown(o)) {
+          lines.push(o.outcome === 'delete'
+            ? { text: `${oldClass.name} · 0 buổi`, amount: '0đ', note: `Xoá phiếu chưa thu (${o.before.sessions} buổi · ${fmtMoney(o.before.amount)})`, cls: 'text-amber-700' }
+            : o.outcome === 'recalculate'
+              ? { text: oldLine, amount: fmtMoney(o.after.amount), note: `Tính lại phiếu chưa thu (trước: ${o.before.sessions} buổi · ${fmtMoney(o.before.amount)})`, cls: 'text-primary' }
+              : o.outcome === 'locked'
+                ? { text: oldLine, amount: fmtMoney(o.record?.finalAmount ?? o.before.amount), note: 'Đã thu — giữ nguyên phiếu', cls: 'text-outline' }
+                : { text: oldLine, amount: fmtMoney(o.after.amount), note: 'Chưa lập phiếu', cls: 'text-outline' })
+        }
+        if (shown(n)) {
+          lines.push({
+            text: newLine, amount: fmtMoney(n.after.amount),
+            note: n.outcome === 'create' ? 'Lập phiếu mới'
+              : n.outcome === 'recalculate' ? 'Tính lại phiếu chưa thu'
+              : n.outcome === 'locked' ? 'Đã thu — giữ nguyên phiếu'
+              : 'Chưa lập phiếu — tính khi lập phiếu tháng',
+            cls: n.outcome === 'create' || n.outcome === 'recalculate' ? 'text-primary' : 'text-outline',
+          })
+        }
+        if (!lines.length) return null
+        return (
+          <div key={k} className="rounded-xl border border-slate-200 px-4 py-3 text-sm tabular-nums">
+            <p className="font-semibold text-on-surface">Tháng {month}/{year}</p>
+            <div className="mt-1.5 space-y-1.5">
+              {lines.map((l, i) => (
+                <div key={i}>
+                  <p className="flex justify-between gap-3"><span className="text-slate-700">{l.text}</span><span className="font-semibold">{l.amount}</span></p>
+                  <p className={`text-xs ${l.cls}`}>{l.note}</p>
+                </div>
+              ))}
             </div>
           </div>
         )
@@ -544,18 +597,6 @@ function MonthList({ months, note }: { months: TransferMonth[]; note: (m: Transf
     </div>
   )
 }
-
-const oldClassNote = (m: TransferMonth) =>
-  m.outcome === 'locked' ? { text: 'Đã thu/xuất HĐ — giữ nguyên phiếu', cls: 'text-outline' }
-  : m.outcome === 'delete' ? { text: 'Phiếu chưa thu sẽ bị xoá', cls: 'text-amber-700' }
-  : m.outcome === 'recalculate' ? { text: 'Phiếu chưa thu sẽ được tính lại', cls: 'text-primary' }
-  : { text: 'Chưa lập phiếu', cls: 'text-outline' }
-const newClassNote = (m: TransferMonth) =>
-  m.outcome === 'covered' ? { text: 'Đã gồm trong phiếu lớp cũ đã thu — không thu riêng', cls: 'text-outline' }
-  : m.outcome === 'create' ? { text: 'Lập phiếu lớp mới', cls: 'text-primary' }
-  : m.outcome === 'recalculate' ? { text: 'Phiếu chưa thu sẽ được tính lại', cls: 'text-primary' }
-  : m.outcome === 'locked' ? { text: 'Đã thu/xuất HĐ — giữ nguyên phiếu', cls: 'text-outline' }
-  : { text: 'Chưa lập phiếu — tính khi lập phiếu tháng', cls: 'text-outline' }
 
 function TransferPanel({ studentId, enrollment, activeClassIds, onClose, onSaved }: {
   studentId: string; enrollment: ClassEnrollment; activeClassIds: string[]; onClose: () => void; onSaved: () => void
@@ -660,56 +701,34 @@ function TransferPanel({ studentId, enrollment, activeClassIds, onClose, onSaved
             : !preview ? <p className="text-xs text-outline">{previewLoading ? 'Đang tính học phí...' : ''}</p>
             : (
               <div className={`space-y-3 ${previewLoading ? 'opacity-60' : ''}`} aria-live="polite">
-                <div>
-                  <p className="mb-1.5 text-xs font-semibold text-slate-600">Lớp cũ · {preview.oldClass.name}</p>
-                  <MonthList months={preview.oldClass.months} note={oldClassNote} />
-                </div>
-                <div>
-                  <p className="mb-1.5 text-xs font-semibold text-slate-600">Lớp mới · {preview.newClass.name}</p>
-                  <MonthList months={preview.newClass.months} note={newClassNote} />
-                </div>
+                <TransferImpact preview={preview} />
                 <p className="text-[11px] text-outline">Ước tính theo các buổi học đã lên lịch, đã trừ khuyến mãi.</p>
               </div>
             )}
         </Field>
       )}
 
-      {settlement && (
-        <fieldset className={`rounded-xl border px-4 py-3 ${settlement.amount === 0 ? 'border-slate-200 bg-slate-50' : 'border-amber-200 bg-amber-50'}`}>
+      {settlement && settlement.amount !== 0 && (
+        <fieldset className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
           <legend className="sr-only">Chênh lệch học phí</legend>
-          <p className="text-xs font-semibold text-slate-600">Tháng lớp cũ đã thu: so số tiền trên phiếu với học phí thực tế sau khi chuyển</p>
-          <div className="mt-1.5 space-y-0.5 text-sm tabular-nums">
-            {settlement.months.map(x => (
-              <p key={`${x.year}-${x.month}`} className="flex flex-wrap justify-between gap-x-3">
-                <span>Tháng {x.month}/{x.year}</span>
-                <span>Đã thu {fmtMoney(x.paid)} · Thực tế {fmtMoney(x.actual)}</span>
-              </p>
+          <p className="text-sm text-amber-900">
+            {settlement.amount > 0
+              ? <>Đã thu <strong>ít hơn {fmtMoney(settlement.amount)}</strong>. Thu thêm khoản này vào học phí lớp mới <strong>tháng {settlement.month}/{settlement.year}</strong>?</>
+              : <>Đã thu <strong>nhiều hơn {fmtMoney(-settlement.amount)}</strong>. Giảm khoản này vào học phí lớp mới <strong>tháng {settlement.month}/{settlement.year}</strong>?</>}
+          </p>
+          <div className="mt-2.5 flex flex-wrap gap-2">
+            {[
+              { v: true, label: settlement.amount > 0 ? `Có, thu thêm ${fmtMoney(settlement.amount)}` : `Có, giảm ${fmtMoney(-settlement.amount)}` },
+              { v: false, label: 'Không điều chỉnh' },
+            ].map(o => (
+              <label key={String(o.v)} className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm ${applyAdjustment === o.v ? 'border-primary bg-white text-primary' : 'border-amber-200 bg-white/60 text-slate-700'}`}>
+                <input type="radio" name="applyAdjustment" checked={applyAdjustment === o.v} onChange={() => setApplyAdjustment(o.v)} className="accent-primary" />
+                {o.label}
+              </label>
             ))}
           </div>
-          {settlement.amount === 0 ? (
-            <p className="mt-2 text-sm text-slate-700">Không chênh lệch — không cần điều chỉnh học phí.</p>
-          ) : (
-            <>
-              <p className="mt-2 text-sm text-amber-900">
-                {settlement.amount > 0
-                  ? <>Đã thu <strong>ít hơn {fmtMoney(settlement.amount)}</strong>. Thu thêm khoản này vào học phí lớp mới <strong>tháng {settlement.month}/{settlement.year}</strong>?</>
-                  : <>Đã thu <strong>nhiều hơn {fmtMoney(-settlement.amount)}</strong>. Giảm khoản này vào học phí lớp mới <strong>tháng {settlement.month}/{settlement.year}</strong>?</>}
-              </p>
-              <div className="mt-2.5 flex flex-wrap gap-2">
-                {[
-                  { v: true, label: settlement.amount > 0 ? `Có, thu thêm ${fmtMoney(settlement.amount)}` : `Có, giảm ${fmtMoney(-settlement.amount)}` },
-                  { v: false, label: 'Không điều chỉnh' },
-                ].map(o => (
-                  <label key={String(o.v)} className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm ${applyAdjustment === o.v ? 'border-primary bg-white text-primary' : 'border-amber-200 bg-white/60 text-slate-700'}`}>
-                    <input type="radio" name="applyAdjustment" checked={applyAdjustment === o.v} onChange={() => setApplyAdjustment(o.v)} className="accent-primary" />
-                    {o.label}
-                  </label>
-                ))}
-              </div>
-              {applyAdjustment && settlement.amount < 0 && -settlement.amount > settlement.nextMonthBase && (
-                <p className="mt-2 text-xs text-amber-800">Học phí lớp mới tháng {settlement.month} ước tính {fmtMoney(settlement.nextMonthBase)}, ít hơn khoản giảm: phần dư {fmtMoney(-settlement.amount - settlement.nextMonthBase)} không được trừ tự động.</p>
-              )}
-            </>
+          {applyAdjustment && settlement.amount < 0 && -settlement.amount > settlement.nextMonthBase && (
+            <p className="mt-2 text-xs text-amber-800">Học phí lớp mới tháng {settlement.month} ước tính {fmtMoney(settlement.nextMonthBase)}, ít hơn khoản giảm: phần dư {fmtMoney(-settlement.amount - settlement.nextMonthBase)} không được trừ tự động.</p>
           )}
         </fieldset>
       )}
