@@ -126,25 +126,6 @@ router.put('/:id/complete', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req
   }
 })
 
-// POST /api/sessions/complete-past — Hoàn thành các buổi đã qua, không tạo điểm danh
-router.post('/complete-past', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    const today = toDay(new Date().toISOString().slice(0, 10))!
-    const { count } = await prisma.session.updateMany({
-      where: { status: 'SCHEDULED', sessionDate: { lte: today } },
-      data: { status: 'COMPLETED' },
-    })
-
-    if (count === 0) {
-      res.json({ message: 'Không có buổi học đã qua nào cần hoàn thành', count: 0 })
-      return
-    }
-    res.json({ message: `Đã hoàn thành ${count} buổi học`, count })
-  } catch (err) {
-    next(err)
-  }
-})
-
 // PUT /api/sessions/:id/cancel
 router.put('/:id/cancel', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {

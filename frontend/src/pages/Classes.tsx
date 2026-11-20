@@ -2,7 +2,6 @@ import React, { useEffect, useState, useCallback } from 'react'
 import TopBar from '../components/TopBar'
 import MobileWeekAgenda from '../components/MobileWeekAgenda'
 import Toast, { ToastMessage } from '../components/Toast'
-import { useConfirm, useAlert } from '../components/ConfirmDialog'
 import api from '../services/api'
 import { Session, Class } from '../types'
 import { useAuth } from '../hooks/useAuth'
@@ -30,6 +29,13 @@ function toISO(date: Date) {
   const m = String(date.getMonth() + 1).padStart(2, '0')
   const d = String(date.getDate()).padStart(2, '0')
   return `${y}-${m}-${d}`
+}
+
+/** Buổi chưa huỷ mà đã qua giờ kết thúc thì coi là đã học, không cần ai bấm hoàn thành. */
+function displayStatus(s: Pick<Session, 'status' | 'sessionDate' | 'startTime' | 'endTime'>, now = new Date()): Session['status'] {
+  if (s.status !== 'SCHEDULED') return s.status
+  const end = new Date(`${s.sessionDate}T${s.endTime || s.startTime || '23:59'}`)
+  return end <= now ? 'COMPLETED' : 'SCHEDULED'
 }
 
 function displayedClassRate(cls: Class) {
@@ -72,6 +78,7 @@ function SessionModal({ session, onClose, onDone, onSessionUpdate }: {
   const todayLocal = toISO(new Date())
   const isPast = session.sessionDate <= todayLocal
   const isCancelled = sessionStatus === 'CANCELLED'
+  const shownStatus = displayStatus({ ...session, status: sessionStatus })
 
   useEffect(() => {
     api.get('/teachers')
@@ -144,8 +151,8 @@ function SessionModal({ session, onClose, onDone, onSessionUpdate }: {
         <div className="space-y-5 px-6 py-5">
           <div className="flex items-center justify-between gap-3">
             <span className="text-sm text-on-surface-variant">Trạng thái buổi học</span>
-            <span className={`rounded-full px-3 py-1 text-xs font-semibold ${isCancelled ? 'bg-error/10 text-error' : sessionStatus === 'COMPLETED' ? 'bg-secondary-container/30 text-secondary' : 'bg-primary/10 text-primary'}`}>
-              {isCancelled ? 'Đã huỷ' : sessionStatus === 'COMPLETED' ? 'Hoàn thành' : 'Dự kiến'}
+            <span className={`rounded-full px-3 py-1 text-xs font-semibold ${isCancelled ? 'bg-error/10 text-error' : shownStatus === 'COMPLETED' ? 'bg-secondary-container/30 text-secondary' : 'bg-primary/10 text-primary'}`}>
+              {isCancelled ? 'Đã huỷ' : shownStatus === 'COMPLETED' ? 'Hoàn thành' : 'Dự kiến'}
             </span>
           </div>
           {isCancelled ? (
@@ -167,7 +174,7 @@ function SessionModal({ session, onClose, onDone, onSessionUpdate }: {
         {!isCancelled && (
           <div className="flex flex-wrap justify-end gap-2 border-t border-outline-variant/15 px-6 py-4">
             {canManageClasses && <button type="button" onClick={handleCancel} disabled={savingStatus} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-error hover:bg-error/10 disabled:opacity-50">Huỷ buổi học</button>}
-            {sessionStatus === 'SCHEDULED' && isPast && <button type="button" onClick={handleComplete} disabled={savingStatus} className="btn-primary disabled:opacity-50">{savingStatus ? 'Đang lưu...' : 'Đánh dấu hoàn thành'}</button>}
+            {shownStatus === 'SCHEDULED' && isPast && <button type="button" onClick={handleComplete} disabled={savingStatus} className="btn-primary disabled:opacity-50">{savingStatus ? 'Đang lưu...' : 'Đánh dấu hoàn thành'}</button>}
           </div>
         )}
       </div>
@@ -747,40 +754,6 @@ function DeleteClassModal({ cls, onClose, onDone }: {
   )
 }
 
-// ─── Complete past sessions without attendance ───────────────────────────────
-
-function CompletePastSessionsBtn({ onDone }: { onDone: () => void }) {
-  const confirm = useConfirm()
-  const alert = useAlert()
-  const [loading, setLoading] = useState(false)
-
-  const run = async () => {
-    const ok = await confirm({
-      title: 'Hoàn thành các buổi đã qua',
-      message: 'Đánh dấu hoàn thành tất cả buổi học đã qua còn ở trạng thái Dự kiến?',
-      confirmLabel: 'Hoàn thành',
-    })
-    if (!ok) return
-    setLoading(true)
-    try {
-      const res = await api.post('/sessions/complete-past')
-      onDone()
-      await alert(res.data.message)
-    } catch {
-      await alert('Có lỗi xảy ra')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <button onClick={run} disabled={loading} className="btn-secondary disabled:opacity-60 flex items-center gap-2">
-      <span className="material-symbols-outlined text-base">{loading ? 'hourglass_empty' : 'auto_fix_high'}</span>
-      {loading ? 'Đang xử lý...' : 'Hoàn thành buổi đã qua'}
-    </button>
-  )
-}
-
 // ─── Main Classes Page ───────────────────────────────────────────────────────
 
 export default function Classes() {
@@ -870,7 +843,7 @@ export default function Classes() {
 
   const sessionCounts = {
     total: sessions.length,
-    completed: sessions.filter((s) => s.status === 'COMPLETED').length,
+    completed: sessions.filter((s) => displayStatus(s) === 'COMPLETED').length,
     cancelled: sessions.filter((s) => s.status === 'CANCELLED').length,
   }
 
@@ -920,7 +893,6 @@ export default function Classes() {
             <h2 className="text-4xl font-black text-on-surface font-headline tracking-tight">Quản Lý Lịch & Lớp Học</h2>
           </div>
           <div className="responsive-toolbar flex gap-2">
-            {canManageClasses && <CompletePastSessionsBtn onDone={() => loadSessions(weekStart)} />}
             {canManageClasses && (
               <button onClick={() => setShowClassModal(true)} className="btn-primary">
                 <span className="material-symbols-outlined">add</span>Tạo lớp mới
@@ -986,7 +958,7 @@ export default function Classes() {
             </div>
 
             <MobileWeekAgenda days={weekDays} loading={loadingSessions}
-              items={sessions.map(s => ({ id: s.id, date: s.sessionDate, title: classNameById[s.classId] || s.className || 'Lớp học', startTime: s.startTime, endTime: s.endTime, subtitle: s.teacherName, status: s.status }))}
+              items={sessions.map(s => ({ id: s.id, date: s.sessionDate, title: classNameById[s.classId] || s.className || 'Lớp học', startTime: s.startTime, endTime: s.endTime, subtitle: s.teacherName, status: displayStatus(s) }))}
               onSelect={id => {
                 const session = sessions.find(s => s.id === id)
                 if (session) setSelectedSession({ ...session, className: classNameById[session.classId] || session.className })
@@ -1045,7 +1017,7 @@ export default function Classes() {
                                         <span className={`block text-xs font-bold leading-snug ${color.text} ${isCancelled ? 'line-through' : ''}`}>{classNameById[s.classId] || s.className}</span>
                                         <span className={`mt-1.5 flex items-center justify-between gap-1 text-[11px] ${color.badge}`}>
                                           <span>{s.startTime}–{s.endTime}</span>
-                                          {s.status === 'COMPLETED' && <span className="material-symbols-outlined text-sm text-secondary" title="Hoàn thành">check_circle</span>}
+                                          {displayStatus(s) === 'COMPLETED' && <span className="material-symbols-outlined text-sm text-secondary" title="Hoàn thành">check_circle</span>}
                                           {isCancelled && <span className="material-symbols-outlined text-sm text-error" title="Đã huỷ">cancel</span>}
                                         </span>
                                         {s.teacherName && <span className={`mt-1 block truncate text-[11px] ${color.badge}`}>{s.teacherName}</span>}

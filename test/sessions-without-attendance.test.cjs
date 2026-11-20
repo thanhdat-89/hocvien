@@ -20,10 +20,6 @@ test('completing sessions and changing teachers do not create attendance', async
   assert.equal(completed.body.session.className, 'Toán 6')
   assert.equal(completed.body.message, 'Đã hoàn thành buổi học')
 
-  await prisma.session.update({ where: { id: session.id }, data: { status: 'SCHEDULED' } })
-  const bulk = await routeHandler(router, '/complete-past', 'post')(auth)
-  assert.equal(bulk.body.count, 1)
-
   await routeHandler(router, '/:id', 'put')({ ...auth, params: { id: session.id }, body: { teacherId: newTeacher.id } })
   const detail = await routeHandler(router, '/:id', 'get')({ ...auth, params: { id: session.id } })
   assert.equal(detail.body.teacherName, 'Giáo viên mới')
@@ -31,4 +27,5 @@ test('completing sessions and changing teachers do not create attendance', async
   assert.equal(await prisma.studentAttendance.count(), 0)
   assert.equal(await prisma.teacherAttendance.count(), 0)
   assert.equal(router.stack.some(layer => layer.route?.path === '/auto-init-attendance'), false)
+  assert.equal(router.stack.some(layer => layer.route?.path === '/complete-past'), false)
 })
