@@ -58,7 +58,10 @@ export default function StudentModal({ student, onClose, onSaved }: Props) {
     selectedClassIds.has(cls.id) && !gradeClasses.some((visible) => visible.id === cls.id)
   )
 
+  // Lớp đang học không bỏ chọn ở đây: cho nghỉ lớp làm trong hồ sơ học viên (chọn ngày nghỉ, xem trước học phí).
+  const enrolledIds = new Set(student?.enrollments?.map((e) => e.classId) ?? [])
   const toggleClass = (classId: string) => {
+    if (enrolledIds.has(classId)) return
     setSelectedClassIds((prev) => {
       const next = new Set(prev)
       if (next.has(classId)) next.delete(classId)
@@ -99,14 +102,6 @@ export default function StudentModal({ student, onClose, onSaved }: Props) {
       await Promise.all(toEnroll.map((classId) =>
         api.post(`/students/${studentId}/enroll`, { classId, enrollmentDate: form.enrollmentDate || undefined })
       ))
-
-      // Drop lớp bị bỏ chọn (chỉ khi edit)
-      if (isEdit && student!.enrollments) {
-        const toDrop = student!.enrollments.filter((e) => !selectedClassIds.has(e.classId))
-        await Promise.all(toDrop.map((e) =>
-          api.put(`/students/${studentId}/enroll/${e.id}/drop`, {})
-        ))
-      }
 
       onSaved()
     } catch (err: any) {
@@ -168,7 +163,9 @@ export default function StudentModal({ student, onClose, onSaved }: Props) {
               <div className="mb-3 flex items-center justify-between gap-2">
                 <div>
                   <h4 className="text-sm font-semibold text-on-surface">Đăng ký lớp học</h4>
-                  <p className="mt-0.5 text-xs text-slate-500">Học viên mới học riêng chưa cần chọn lớp học. Có thể bổ sung sau trong hồ sơ học viên.</p>
+                  <p className="mt-0.5 text-xs text-slate-500">{isEdit
+                    ? 'Chỉ thêm lớp mới ở đây. Cho nghỉ lớp: vào hồ sơ học viên → mục Lớp học → nút lịch học → tab Nghỉ lớp.'
+                    : 'Học viên mới học riêng chưa cần chọn lớp học. Có thể bổ sung sau trong hồ sơ học viên.'}</p>
                 </div>
                 {selectedClassIds.size > 0 && <span className="shrink-0 rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-primary">Đã chọn {selectedClassIds.size}</span>}
               </div>
@@ -184,6 +181,16 @@ export default function StudentModal({ student, onClose, onSaved }: Props) {
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {gradeClasses.map((cls) => {
                     const selected = selectedClassIds.has(cls.id)
+                    const enrolled = enrolledIds.has(cls.id)
+                    if (enrolled) return (
+                      <div key={cls.id} title="Đang học — cho nghỉ lớp trong hồ sơ học viên"
+                        className="flex min-h-11 items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm font-medium text-slate-600">
+                        <span className="min-w-0 break-words">{cls.name}</span>
+                        <span className="flex shrink-0 items-center gap-1 text-xs text-slate-500">
+                          <span aria-hidden="true" className="material-symbols-outlined text-[16px]">lock</span>Đang học
+                        </span>
+                      </div>
+                    )
                     return (
                       <button key={cls.id} type="button" onClick={() => toggleClass(cls.id)} aria-pressed={selected}
                         className={`flex min-h-11 items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${selected ? 'border-primary bg-blue-50 text-primary' : 'border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-slate-50'}`}>
@@ -196,9 +203,13 @@ export default function StudentModal({ student, onClose, onSaved }: Props) {
               )}
               {isEdit && otherSelectedClasses.length > 0 && (
                 <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3">
-                  <p className="mb-2 text-xs font-medium text-amber-900">Đang đăng ký ở khối khác. Bỏ chọn nếu muốn ngừng học lớp đó.</p>
+                  <p className="mb-2 text-xs font-medium text-amber-900">Đang học lớp ở khối khác. Muốn ngừng học lớp đó thì cho nghỉ lớp trong hồ sơ học viên.</p>
                   <div className="flex flex-wrap gap-2">
-                    {otherSelectedClasses.map((cls) => (
+                    {otherSelectedClasses.map((cls) => enrolledIds.has(cls.id) ? (
+                      <span key={cls.id} className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-white px-2.5 py-1.5 text-xs font-medium text-amber-900">
+                        <span aria-hidden="true" className="material-symbols-outlined text-[14px]">lock</span>{cls.name}
+                      </span>
+                    ) : (
                       <button key={cls.id} type="button" onClick={() => toggleClass(cls.id)} aria-pressed="true"
                         className="rounded-lg border border-amber-300 bg-white px-2.5 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
                         {cls.name} <span aria-hidden="true">×</span>
