@@ -6,6 +6,7 @@ import {
 import type { TuitionRecord } from '../types/models'
 import { classRateForMonth } from './classChange'
 import { enrollmentCoversSession } from '../lib/enrollmentDays'
+import { applyAdjustments } from '../lib/tuitionAdjust'
 
 /** Dữ liệu đầu vào dạng tài liệu Firestore cũ — tách khỏi phép tính để test truyền thẳng mảng. */
 export interface TuitionScheduleData {
@@ -18,6 +19,8 @@ export interface TuitionScheduleData {
   privateSessions: any[]
   records: (TuitionRecord & { id: string })[]
   paidByRecord: Map<string, number>
+  /** Điều chỉnh học phí của tháng (+ thu thêm, − giảm) — { studentId, classId, amount, reason } */
+  adjustments?: { studentId: string; classId: string; amount: number; reason: string }[]
 }
 
 /** Đọc PostgreSQL cho một tháng, trả đúng hình dạng mà phép tính bên dưới mong đợi. */
@@ -25,7 +28,7 @@ export async function loadTuitionScheduleData(month: number, year: number): Prom
   const from = new Date(Date.UTC(year, month - 1, 1)), to = new Date(Date.UTC(year, month, 0))
   const enrollments = (await prisma.classEnrollment.findMany({ include: enrollmentInclude })).map(enrollmentDoc)
   const classIds = [...new Set(enrollments.map((e: any) => e.classId as string))]
-  const [classes, students, sessions, promotions, privateSessions, records, paid] = await Promise.all([
+  const [classes, students, sessions, promotions, privateSessions, records, paid, adjustments] = await Promise.all([
     prisma.class.findMany({ where: { id: { in: classIds } }, include: classInclude }).then(rows => rows.map(classDoc)),
     // Phụ huynh liên hệ chính (ưu tiên isPrimaryContact, nếu không có lấy người đầu tiên) — thay cho primaryParent* denorm cũ.
     prisma.student.findMany({
@@ -38,8 +41,10 @@ export async function loadTuitionScheduleData(month: number, year: number): Prom
     prisma.privateSession.findMany({ where: { sessionDate: { gte: from, lte: to } }, include: privateSessionInclude }).then(rows => rows.map(privateSessionDoc)),
     prisma.tuitionRecord.findMany({ where: { billingMonth: month, billingYear: year }, include: tuitionRecordInclude }).then(rows => rows.map(tuitionRecordDoc)),
     prisma.payment.groupBy({ by: ['tuitionRecordId'], where: { tuitionRecord: { billingMonth: month, billingYear: year } }, _sum: { amount: true } }),
+    prisma.tuitionAdjustment.findMany({ where: { billingMonth: month, billingYear: year }, orderBy: { createdAt: 'asc' },
+      select: { studentId: true, classId: true, amount: true, reason: true } }),
   ])
-  return { enrollments, classes, students, sessions, promotions, privateSessions, records,
+  return { enrollments, classes, students, sessions, promotions, privateSessions, records, adjustments,
     paidByRecord: new Map(paid.map(p => [p.tuitionRecordId, p._sum.amount ?? 0])) }
 }
 
@@ -130,6 +135,8 @@ export function buildTuitionScheduleSummary(data: TuitionScheduleData, month: nu
       else if (sp.promotionType === 'FREE_SESSIONS') discountAmount += sp.promotionValue * ratePerSession
     }
     discountAmount = Math.min(discountAmount, baseAmount)
+    const adjusted = applyAdjustments(baseAmount, discountAmount,
+      (data.adjustments ?? []).filter(a => a.studentId === enrollment.studentId && a.classId === enrollment.classId))
 
     rows.push({
       studentId: enrollment.studentId,
@@ -140,9 +147,11 @@ export function buildTuitionScheduleSummary(data: TuitionScheduleData, month: nu
       className: cls.name,
       totalSessions,
       ratePerSession,
-      discountAmount,
-      baseAmount,
-      finalAmount: baseAmount - discountAmount,
+      discountAmount: adjusted.discountAmount,
+      baseAmount: adjusted.baseAmount,
+      finalAmount: adjusted.baseAmount - adjusted.discountAmount,
+      adjustmentAmount: adjusted.adjustmentAmount,
+      adjustmentNote: adjusted.adjustmentNote,
     })
   }
 

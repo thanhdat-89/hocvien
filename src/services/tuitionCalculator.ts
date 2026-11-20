@@ -6,6 +6,7 @@ import {
 import type { ClassEnrollment, StudentPromotion, TuitionRecord } from '../types/models'
 import { classRateForMonth } from './classChange'
 import { enrollmentCoversSession } from '../lib/enrollmentDays'
+import { applyAdjustments, type AdjustmentLike } from '../lib/tuitionAdjust'
 
 type TuitionRecordDoc = TuitionRecord & { id: string; paidAmount?: number; remainingAmount?: number }
 
@@ -32,12 +33,14 @@ async function activePromotions(studentId: string, classId: string, fromDate: st
 async function saveRecord(existingId: string | null, data: {
   studentId: string; classId: string; className: string; month: number; year: number
   totalSessions: number; chargedSessions: number; baseAmount: number; discountAmount: number
+  adjustmentAmount?: number; adjustmentNote?: string | null
 }) {
   const discountAmount = Math.round(data.discountAmount)
   const fields = {
     className: data.className,
     totalSessions: data.totalSessions, chargedSessions: data.chargedSessions,
     baseAmount: Math.round(data.baseAmount), discountAmount, finalAmount: Math.round(data.baseAmount) - discountAmount,
+    adjustmentAmount: data.adjustmentAmount ?? 0, adjustmentNote: data.adjustmentNote ?? null,
     status: 'PENDING' as const,
     dueDate: toDay(`${data.year}-${String(data.month).padStart(2, '0')}-25`),
   }
@@ -66,6 +69,8 @@ export interface ClassTuitionEstimate {
   baseAmount: number
   discountAmount: number
   finalAmount: number
+  adjustmentAmount: number
+  adjustmentNote: string | null
 }
 
 /**
@@ -75,6 +80,8 @@ export interface ClassTuitionEstimate {
 export async function estimateClassTuition(
   studentId: string, classId: string, month: number, year: number,
   adjust?: (enrollments: ClassEnrollment[]) => ClassEnrollment[],
+  /** Khoản điều chỉnh giả định (chưa ghi) — dùng khi xem trước. */
+  extraAdjustments: AdjustmentLike[] = [],
 ): Promise<ClassTuitionEstimate> {
   const monthStr = `${year}-${String(month).padStart(2, '0')}`
   const fromDate = `${monthStr}-01`
@@ -127,8 +134,17 @@ export async function estimateClassTuition(
     }
   }
   discountAmount = Math.min(discountAmount, baseAmount)
-  const base = Math.round(baseAmount), discount = Math.round(discountAmount)
-  return { className: classRow?.name ?? '', totalSessions, baseAmount: base, discountAmount: discount, finalAmount: base - discount }
+
+  // Điều chỉnh học phí tháng này (vd chênh lệch khi chuyển lớp): + thu thêm, − giảm.
+  const adjustments = (await prisma.tuitionAdjustment.findMany({
+    where: { studentId, classId, billingMonth: month, billingYear: year }, orderBy: { createdAt: 'asc' },
+  })).concat(extraAdjustments.map(a => ({ ...a, billingMonth: month, billingYear: year } as any)))
+  const withAdjust = applyAdjustments(Math.round(baseAmount), Math.round(discountAmount), adjustments)
+  return {
+    className: classRow?.name ?? '', totalSessions,
+    baseAmount: withAdjust.baseAmount, discountAmount: withAdjust.discountAmount, finalAmount: withAdjust.baseAmount - withAdjust.discountAmount,
+    adjustmentAmount: withAdjust.adjustmentAmount, adjustmentNote: withAdjust.adjustmentNote,
+  }
 }
 
 /**
@@ -146,7 +162,7 @@ export async function calculateTuitionForStudent(
     return calculatePrivateTuition(studentId, month, year, fromDate, toDate)
   }
 
-  const { className, totalSessions, baseAmount, discountAmount } = await estimateClassTuition(studentId, classId, month, year)
+  const { className, totalSessions, baseAmount, discountAmount, adjustmentAmount, adjustmentNote } = await estimateClassTuition(studentId, classId, month, year)
 
   // Kiểm tra đã có phiếu chưa
   const existing = await findRecord(studentId, classId, month, year)
@@ -163,7 +179,7 @@ export async function calculateTuitionForStudent(
 
   return saveRecord(existing?.id ?? null, {
     studentId, classId, className, month, year,
-    totalSessions, chargedSessions: totalSessions, baseAmount, discountAmount,
+    totalSessions, chargedSessions: totalSessions, baseAmount, discountAmount, adjustmentAmount, adjustmentNote,
   })
 }
 

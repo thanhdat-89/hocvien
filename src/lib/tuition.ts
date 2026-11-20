@@ -6,6 +6,7 @@ import {
 import type { ClassEnrollment } from '../types/models'
 import { classRateForMonth } from '../services/classChange'
 import { enrollmentCoversSession } from './enrollmentDays'
+import { applyAdjustments } from './tuitionAdjust'
 
 // Đọc dạng tài liệu Firestore cũ (ngày là chuỗi, classId "private") để giữ nguyên phép tính bên dưới.
 const loadEnrollments = (studentId: string) =>
@@ -29,6 +30,9 @@ export interface TuitionSummaryRow {
   discountAmount: number
   baseAmount: number
   finalAmount: number
+  /** Điều chỉnh học phí tháng (+ thu thêm, − giảm), đã gồm trong baseAmount / discountAmount */
+  adjustmentAmount?: number
+  adjustmentNote?: string | null
 }
 
 export interface StudentPromoSummary {
@@ -55,6 +59,8 @@ export async function computeTuitionSummary(studentId: string): Promise<TuitionS
     totalSessions: number; ratePerSession: number
     discountAmount: number
   }> = {}
+  // Điều chỉnh học phí (+ thu thêm, − giảm) theo lớp × tháng
+  const adjustments = await prisma.tuitionAdjustment.findMany({ where: { studentId }, select: { classId: true, billingMonth: true, billingYear: true, amount: true, reason: true } })
 
   await Promise.all(enrollments.map(async (enroll) => {
     const fromDate = enroll.enrollmentDate ?? '2000-01-01'
@@ -147,10 +153,15 @@ export async function computeTuitionSummary(studentId: string): Promise<TuitionS
           .reduce((sum: number, ps: any) => sum + (ps.ratePerSession || 0), 0)
         return { ...r, baseAmount: base, finalAmount: Math.max(0, base - r.discountAmount) }
       }
+      const adjusted = applyAdjustments(r.totalSessions * r.ratePerSession, Math.min(r.discountAmount, r.totalSessions * r.ratePerSession),
+        adjustments.filter(a => a.classId === r.classId && a.billingMonth === r.month && a.billingYear === r.year))
       return {
         ...r,
-        baseAmount: r.totalSessions * r.ratePerSession,
-        finalAmount: Math.max(0, r.totalSessions * r.ratePerSession - r.discountAmount),
+        baseAmount: adjusted.baseAmount,
+        discountAmount: adjusted.discountAmount,
+        finalAmount: Math.max(0, adjusted.baseAmount - adjusted.discountAmount),
+        adjustmentAmount: adjusted.adjustmentAmount,
+        adjustmentNote: adjusted.adjustmentNote,
       }
     })
     .sort((a, b) => b.year !== a.year ? b.year - a.year : b.month - a.month)

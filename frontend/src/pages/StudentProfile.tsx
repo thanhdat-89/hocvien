@@ -502,12 +502,13 @@ function ImpactPreview({ preview, loading, error }: { preview: ChangePreview | n
 
 // ─── Chuyển lớp ──────────────────────────────────────────────────────────────
 
-interface TransferMonth extends Omit<MonthImpact, 'outcome'> { outcome: MonthImpact['outcome'] | 'create' }
+interface TransferMonth extends Omit<MonthImpact, 'outcome'> { outcome: MonthImpact['outcome'] | 'create' | 'covered' }
 interface TransferPreview {
   startDate: string; dropDate: string
   oldClass: { id: string; name: string; months: TransferMonth[] }
   newClass: { id: string; name: string; months: TransferMonth[] }
-  credit: { amount: number; sessions: number; month: number; year: number; nextMonthAmount: number } | null
+  /** Tháng lớp cũ đã thu: so số tiền trên phiếu với học phí thực tế sau khi chuyển; amount > 0 thu thêm, < 0 giảm. */
+  settlement: { months: { month: number; year: number; paid: number; actual: number }[]; amount: number; month: number; year: number; nextMonthBase: number } | null
 }
 
 const nextMonthFirst = () => {
@@ -554,7 +555,8 @@ const oldClassNote = (m: TransferMonth) =>
   : m.outcome === 'recalculate' ? { text: 'Phiếu chưa thu sẽ được tính lại', cls: 'text-primary' }
   : { text: 'Chưa lập phiếu', cls: 'text-outline' }
 const newClassNote = (m: TransferMonth) =>
-  m.outcome === 'create' ? { text: 'Lập phiếu lớp mới', cls: 'text-primary' }
+  m.outcome === 'covered' ? { text: 'Đã gồm trong phiếu lớp cũ đã thu — không thu riêng', cls: 'text-outline' }
+  : m.outcome === 'create' ? { text: 'Lập phiếu lớp mới', cls: 'text-primary' }
   : m.outcome === 'recalculate' ? { text: 'Phiếu chưa thu sẽ được tính lại', cls: 'text-primary' }
   : m.outcome === 'locked' ? { text: 'Đã thu/xuất HĐ — giữ nguyên phiếu', cls: 'text-outline' }
   : { text: 'Chưa lập phiếu — tính khi lập phiếu tháng', cls: 'text-outline' }
@@ -588,7 +590,7 @@ function TransferPanel({ studentId, enrollment, activeClassIds, onClose, onSaved
   const [preview, setPreview] = useState<TransferPreview | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState('')
-  const [applyCredit, setApplyCredit] = useState<boolean | null>(null)
+  const [applyAdjustment, setApplyAdjustment] = useState<boolean | null>(null)
   const ready = !!toClassId && !!startDate && !!slots?.length && days.length > 0
   const bodyKey = JSON.stringify({ action: 'transfer', toClassId, startDate, days })
   useEffect(() => {
@@ -604,19 +606,19 @@ function TransferPanel({ studentId, enrollment, activeClassIds, onClose, onSaved
     }, 300)
     return () => { cancelled = true; clearTimeout(timer) }
   }, [bodyKey, ready, studentId, enrollment.id])
-  // Khoản cấn trừ đổi (đổi lớp/ngày) → hỏi lại.
-  const creditAmount = preview?.credit?.amount ?? 0
-  useEffect(() => { setApplyCredit(null) }, [creditAmount])
+  // Khoản chênh lệch đổi (đổi lớp/ngày/buổi) → hỏi lại.
+  const adjustmentAmount = preview?.settlement?.amount ?? 0
+  useEffect(() => { setApplyAdjustment(null) }, [adjustmentAmount])
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const needsCreditChoice = !!preview?.credit && applyCredit === null
+  const needsChoice = adjustmentAmount !== 0 && applyAdjustment === null
   const handleSubmit = async () => {
-    if (!preview || needsCreditChoice) return
+    if (!preview || needsChoice) return
     setSaving(true); setError('')
     try {
       await api.post(`/students/${studentId}/enroll/${enrollment.id}/transfer`, {
-        toClassId, startDate, days, ...(preview.credit ? { applyCredit } : {}),
+        toClassId, startDate, days, ...(adjustmentAmount !== 0 ? { applyAdjustment } : {}),
       })
       onSaved()
     } catch (err: any) {
@@ -627,7 +629,7 @@ function TransferPanel({ studentId, enrollment, activeClassIds, onClose, onSaved
   }
 
   const inputCls = 'w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20'
-  const credit = preview?.credit
+  const settlement = preview?.settlement
   const target = candidates.find(c => c.id === toClassId)
 
   return (
@@ -689,32 +691,51 @@ function TransferPanel({ studentId, enrollment, activeClassIds, onClose, onSaved
         </Field>
       )}
 
-      {credit && (
-        <fieldset className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-          <legend className="sr-only">Cấn trừ học phí</legend>
-          <p className="text-sm text-amber-900">
-            Lớp cũ đã thu <strong>{fmtMoney(credit.amount)}</strong> cho {credit.sessions} buổi sau ngày chuyển (phiếu giữ nguyên).
-            Có cấn trừ khoản này vào học phí lớp mới <strong>tháng {credit.month}/{credit.year}</strong> không?
-          </p>
-          <div className="mt-2.5 flex flex-wrap gap-2">
-            {[{ v: true, label: `Có, trừ ${fmtMoney(credit.amount)}` }, { v: false, label: 'Không cấn trừ' }].map(o => (
-              <label key={String(o.v)} className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm ${applyCredit === o.v ? 'border-primary bg-white text-primary' : 'border-amber-200 bg-white/60 text-slate-700'}`}>
-                <input type="radio" name="applyCredit" checked={applyCredit === o.v} onChange={() => setApplyCredit(o.v)} className="accent-primary" />
-                {o.label}
-              </label>
+      {settlement && (
+        <fieldset className={`rounded-xl border px-4 py-3 ${settlement.amount === 0 ? 'border-slate-200 bg-slate-50' : 'border-amber-200 bg-amber-50'}`}>
+          <legend className="sr-only">Chênh lệch học phí</legend>
+          <p className="text-xs font-semibold text-slate-600">Tháng lớp cũ đã thu: so số tiền trên phiếu với học phí thực tế sau khi chuyển</p>
+          <div className="mt-1.5 space-y-0.5 text-sm tabular-nums">
+            {settlement.months.map(x => (
+              <p key={`${x.year}-${x.month}`} className="flex flex-wrap justify-between gap-x-3">
+                <span>Tháng {x.month}/{x.year}</span>
+                <span>Đã thu {fmtMoney(x.paid)} · Thực tế {fmtMoney(x.actual)}</span>
+              </p>
             ))}
           </div>
-          {applyCredit && credit.amount > credit.nextMonthAmount && (
-            <p className="mt-2 text-xs text-amber-800">Học phí lớp mới tháng {credit.month} ước tính {fmtMoney(credit.nextMonthAmount)}, ít hơn khoản cấn trừ: phần dư {fmtMoney(credit.amount - credit.nextMonthAmount)} không được trừ tự động.</p>
+          {settlement.amount === 0 ? (
+            <p className="mt-2 text-sm text-slate-700">Không chênh lệch — không cần điều chỉnh học phí.</p>
+          ) : (
+            <>
+              <p className="mt-2 text-sm text-amber-900">
+                {settlement.amount > 0
+                  ? <>Đã thu <strong>ít hơn {fmtMoney(settlement.amount)}</strong>. Thu thêm khoản này vào học phí lớp mới <strong>tháng {settlement.month}/{settlement.year}</strong>?</>
+                  : <>Đã thu <strong>nhiều hơn {fmtMoney(-settlement.amount)}</strong>. Giảm khoản này vào học phí lớp mới <strong>tháng {settlement.month}/{settlement.year}</strong>?</>}
+              </p>
+              <div className="mt-2.5 flex flex-wrap gap-2">
+                {[
+                  { v: true, label: settlement.amount > 0 ? `Có, thu thêm ${fmtMoney(settlement.amount)}` : `Có, giảm ${fmtMoney(-settlement.amount)}` },
+                  { v: false, label: 'Không điều chỉnh' },
+                ].map(o => (
+                  <label key={String(o.v)} className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm ${applyAdjustment === o.v ? 'border-primary bg-white text-primary' : 'border-amber-200 bg-white/60 text-slate-700'}`}>
+                    <input type="radio" name="applyAdjustment" checked={applyAdjustment === o.v} onChange={() => setApplyAdjustment(o.v)} className="accent-primary" />
+                    {o.label}
+                  </label>
+                ))}
+              </div>
+              {applyAdjustment && settlement.amount < 0 && -settlement.amount > settlement.nextMonthBase && (
+                <p className="mt-2 text-xs text-amber-800">Học phí lớp mới tháng {settlement.month} ước tính {fmtMoney(settlement.nextMonthBase)}, ít hơn khoản giảm: phần dư {fmtMoney(-settlement.amount - settlement.nextMonthBase)} không được trừ tự động.</p>
+              )}
+            </>
           )}
         </fieldset>
       )}
 
       <div className="flex gap-3 pt-1">
         <button type="button" onClick={onClose} className="flex-1 btn-secondary justify-center">Huỷ</button>
-        <button type="button" onClick={handleSubmit} disabled={saving || !preview || previewLoading || needsCreditChoice}
+        <button type="button" onClick={handleSubmit} disabled={saving || !preview || previewLoading || needsChoice}
           className="flex-1 btn-primary justify-center disabled:opacity-60">
-          {saving ? 'Đang chuyển...' : needsCreditChoice ? 'Chọn có cấn trừ không' : 'Xác nhận chuyển lớp'}
+          {saving ? 'Đang chuyển...' : needsChoice ? 'Chọn có điều chỉnh không' : 'Xác nhận chuyển lớp'}
         </button>
       </div>
     </>
@@ -1315,6 +1336,8 @@ interface TuitionRow {
   classId: string; className: string
   totalSessions: number; ratePerSession: number
   discountAmount: number; baseAmount: number; finalAmount: number
+  /** Điều chỉnh học phí tháng (+ thu thêm, − giảm), đã gồm trong baseAmount / discountAmount */
+  adjustmentAmount?: number; adjustmentNote?: string | null
   tuitionRecord: {
     id: string
     finalAmount: number
@@ -1555,6 +1578,7 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
   const now = new Date()
   const [rows, setRows] = useState<TuitionRow[]>([])
   const [promos, setPromos] = useState<StudentPromotion[]>([])
+  const [adjustments, setAdjustments] = useState<{ id: string; className: string; billingMonth: number; billingYear: number; amount: number; reason: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [showPromoModal, setShowPromoModal] = useState(false)
   const [filterMonth, setFilterMonth] = useState(now.getMonth() + 1)
@@ -1628,9 +1652,27 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
   const loadPromos = () => api.get(`/tuition/student-promotions?studentId=${studentId}`)
     .then(r => setPromos(r.data ?? [])).catch(() => setPromos([]))
 
+  const loadAdjustments = () => api.get(`/students/${studentId}/adjustments`)
+    .then(r => setAdjustments(r.data ?? [])).catch(() => setAdjustments([]))
+
   const load = () => {
     setLoading(true)
-    Promise.all([loadRows(), loadPromos()]).finally(() => setLoading(false))
+    Promise.all([loadRows(), loadPromos(), loadAdjustments()]).finally(() => setLoading(false))
+  }
+
+  const deleteAdjustment = async (a: { id: string; billingMonth: number; billingYear: number; amount: number }) => {
+    const ok = await confirm({
+      title: 'Xoá khoản điều chỉnh',
+      message: `Xoá khoản ${a.amount > 0 ? 'thu thêm' : 'giảm'} ${fmtMoney(Math.abs(a.amount))} tháng ${a.billingMonth}/${a.billingYear}? Phiếu học phí tháng đó (nếu chưa thu) sẽ được tính lại.`,
+      confirmLabel: 'Xoá',
+    })
+    if (!ok) return
+    try {
+      await api.delete(`/students/${studentId}/adjustments/${a.id}`)
+      load()
+    } catch (err: any) {
+      void showAlert(err.response?.data?.message ?? 'Không xoá được khoản điều chỉnh')
+    }
   }
 
   useEffect(() => { load() }, [studentId])
@@ -1724,6 +1766,31 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
         )}
       </div>
 
+      {adjustments.length > 0 && (
+        <div className="bg-surface-container-lowest rounded-xl p-6 shadow-sm">
+          <h3 className="font-headline text-base font-bold text-on-surface mb-1">Điều chỉnh học phí</h3>
+          <p className="mb-4 text-xs text-outline">Khoản thu thêm hoặc giảm vào một tháng, ví dụ chênh lệch khi chuyển lớp.</p>
+          <div className="space-y-2">
+            {adjustments.map(a => (
+              <div key={a.id} className="flex items-center justify-between gap-3 p-3 bg-surface-container-low rounded-xl">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm">
+                    <span className={`font-semibold ${a.amount > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>{a.amount > 0 ? '+' : '−'}{fmtMoney(Math.abs(a.amount))}</span>
+                    <span className="text-outline"> · </span>
+                    <span className="text-on-surface-variant">{a.className} · Tháng {a.billingMonth}/{a.billingYear}</span>
+                  </p>
+                  <p className="text-xs text-outline">{a.reason}</p>
+                </div>
+                <button onClick={() => deleteAdjustment(a)} title="Xoá khoản điều chỉnh"
+                  className="p-1.5 hover:bg-error/10 text-outline hover:text-error rounded-lg transition-colors flex-shrink-0">
+                  <span className="material-symbols-outlined text-sm">delete</span>
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="bg-surface-container-lowest rounded-xl p-6 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
           <h3 className="font-headline text-lg font-bold text-on-surface">Học phí cá nhân</h3>
@@ -1789,7 +1856,14 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
                           ? <span className="text-secondary font-medium">-{fmtMoney(r.discountAmount)}</span>
                           : <span className="text-outline">—</span>}
                       </td>
-                      <td data-label="Thành tiền" className="py-3 pr-6 text-sm font-bold text-right">{fmtMoney(r.finalAmount)}</td>
+                      <td data-label="Thành tiền" className="py-3 pr-6 text-sm font-bold text-right">
+                        {fmtMoney(r.finalAmount)}
+                        {!!r.adjustmentAmount && (
+                          <p className={`mt-0.5 text-[11px] font-medium ${r.adjustmentAmount > 0 ? 'text-amber-700' : 'text-emerald-700'}`} title={r.adjustmentNote ?? undefined}>
+                            Điều chỉnh {r.adjustmentAmount > 0 ? '+' : '−'}{fmtMoney(Math.abs(r.adjustmentAmount))}
+                          </p>
+                        )}
+                      </td>
                       <td data-label="Phiếu học phí" className="py-3 text-center">
                         {r.tuitionRecord ? (
                           <div className="flex items-center justify-center gap-2">

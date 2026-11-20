@@ -24,6 +24,7 @@ import { parseInvoiceInfo } from '../services/studentInvoiceInfo'
 import { getStudentInvoicePreview } from '../services/studentInvoicePreview'
 import { createInitialWeekdayPlan, dropEnrollment, previewEnrollmentChange, setEnrollmentWeekdays } from '../services/enrollmentWeekdays'
 import { previewTransfer, transferEnrollment } from '../services/enrollmentTransfer'
+import { calculateTuitionForStudent } from '../services/tuitionCalculator'
 import { importPrivateSchedule, privateScheduleSuggestions } from '../services/privateScheduleImport'
 
 const router = Router()
@@ -473,6 +474,41 @@ router.put('/:id/enroll/:enrollmentId/drop', requireRole('ADMIN', 'STAFF'), asyn
 router.post('/:id/enroll/:enrollmentId/transfer', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     res.json(await transferEnrollment(s(req.params.id), s(req.params.enrollmentId), req.body ?? {}, req.user?.userId))
+  } catch (err) {
+    next(err)
+  }
+})
+
+// GET /api/students/:id/adjustments — các khoản điều chỉnh học phí (+ thu thêm, − giảm) của học viên
+router.get('/:id/adjustments', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const rows = await prisma.tuitionAdjustment.findMany({
+      where: { studentId: s(req.params.id) }, include: { class: { select: { name: true } } },
+      orderBy: [{ billingYear: 'desc' }, { billingMonth: 'desc' }, { createdAt: 'asc' }],
+    })
+    res.json(rows.map(({ class: cls, ...a }) => ({ ...api(a), className: cls.name })))
+  } catch (err) {
+    next(err)
+  }
+})
+
+// DELETE /api/students/:id/adjustments/:adjustmentId — xoá khoản điều chỉnh; phiếu tháng đó chưa thu thì tính lại.
+router.delete('/:id/adjustments/:adjustmentId', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const studentId = s(req.params.id)
+    const adj = await prisma.tuitionAdjustment.findFirst({ where: { id: s(req.params.adjustmentId), studentId } })
+    if (!adj) { res.status(404).json({ message: 'Không tìm thấy khoản điều chỉnh' }); return }
+    const record = await prisma.tuitionRecord.findFirst({
+      where: { studentId, classId: adj.classId, billingMonth: adj.billingMonth, billingYear: adj.billingYear },
+      select: { id: true, status: true, paidAmount: true },
+    })
+    const invoiced = record ? await prisma.misaInvoice.findFirst({ where: { OR: [{ id: record.id }, { recordIds: { has: record.id } }] }, select: { id: true } }) : null
+    if (record && (record.status === 'PAID' || record.status === 'PARTIAL' || record.paidAmount > 0 || invoiced)) {
+      res.status(409).json({ message: `Phiếu học phí T${adj.billingMonth}/${adj.billingYear} đã thu hoặc đã xuất hoá đơn, không xoá được khoản điều chỉnh.` }); return
+    }
+    await prisma.tuitionAdjustment.delete({ where: { id: adj.id } })
+    if (record) await calculateTuitionForStudent(studentId, adj.classId, adj.billingMonth, adj.billingYear)
+    res.json({ message: 'Đã xoá khoản điều chỉnh' })
   } catch (err) {
     next(err)
   }

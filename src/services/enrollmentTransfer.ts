@@ -1,21 +1,24 @@
-import { prisma, newId, toDay, toClassId } from '../lib/db'
+import { prisma, newId, toDay } from '../lib/db'
 import { enrollmentDoc, enrollmentInclude } from '../lib/docs'
 import { recountClassActiveStudents } from '../lib/classSync'
 import type { ClassEnrollment } from '../types/models'
 import { calculateTuitionForStudent, estimateClassTuition } from './tuitionCalculator'
-import { isDate, lastDayOf, monthKey, normalizeDays, type MonthImpact } from './enrollmentWeekdays'
+import { isDate, monthKey, normalizeDays, type MonthImpact } from './enrollmentWeekdays'
 import { gradeOf } from './schoolYearRollover'
 
 // Chuyển lớp trong cùng khối = nghỉ lớp cũ (đến hết ngày liền trước) + đăng ký lớp mới (từ ngày bắt đầu), ghi trong một lần.
-// Học phí lớp cũ:
-//   - phiếu chưa thu/chưa xuất HĐ: tính lại theo ngày nghỉ (không còn buổi thì xoá);
-//   - phiếu đã thu/đã xuất HĐ: giữ nguyên; phần tiền các buổi lớp cũ không học nữa có thể cấn trừ
-//     vào học phí lớp mới tháng sau (người dùng chọn có/không) bằng một khoản giảm trừ số tiền cố định.
-// Học phí lớp mới: theo đơn giá lớp mới; tháng nào lớp cũ đã có phiếu thì lập luôn phiếu lớp mới.
+//
+// Tháng mà phiếu lớp cũ CHƯA thu/chưa xuất HĐ: tính lại phiếu lớp cũ (không còn buổi thì xoá) và lập phiếu lớp mới riêng.
+//
+// Tháng mà phiếu lớp cũ ĐÃ thu/đã xuất HĐ: phiếu lớp cũ giữ nguyên và "đại diện" cho cả tháng:
+//   - các buổi lớp mới trong tháng đó không thu riêng (phiếu lớp mới 0đ, ghi "đã gồm trong phiếu lớp cũ");
+//   - chênh lệch = học phí thực tế (lớp cũ đến ngày nghỉ + lớp mới từ ngày bắt đầu) − số tiền trên phiếu lớp cũ;
+//     ≠ 0 thì (nếu người dùng đồng ý) ghi vào phiếu lớp mới tháng kế tiếp: dương = thu thêm, âm = giảm.
 
 const fail = (message: string, status = 400): never => { throw Object.assign(new Error(message), { status }) }
 const dayBefore = (date: string) => { const d = new Date(`${date}T00:00:00Z`); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10) }
 const vnDate = (date: string) => date.split('-').reverse().join('/')
+const nextMonth = (month: number, year: number): [number, number] => month === 12 ? [1, year + 1] : [month + 1, year]
 
 export interface TransferInput {
   toClassId?: unknown
@@ -23,22 +26,24 @@ export interface TransferInput {
   startDate?: unknown
   /** Buổi học trong tuần ở lớp mới; bỏ trống/đủ = học đủ. */
   days?: unknown
-  /** Có cấn trừ phần đã thu của lớp cũ vào lớp mới không — bắt buộc khi có khoản cấn trừ. */
-  applyCredit?: unknown
+  /** Có ghi khoản chênh lệch vào học phí lớp mới tháng sau không — bắt buộc khi chênh lệch khác 0. */
+  applyAdjustment?: unknown
 }
 
-type Outcome = MonthImpact['outcome'] | 'create'
+/** covered: tháng lớp cũ đã thu — buổi lớp mới đã gồm trong phiếu lớp cũ (phiếu lớp mới 0đ). */
+type Outcome = MonthImpact['outcome'] | 'create' | 'covered'
 export interface TransferMonth extends Omit<MonthImpact, 'outcome'> { outcome: Outcome }
 
-export interface TransferCredit {
-  /** Số tiền lớp cũ đã thu/xuất HĐ cho các buổi sau ngày chuyển. */
+export interface TransferSettlement {
+  /** Từng tháng lớp cũ đã thu: số tiền trên phiếu và học phí thực tế sau khi chuyển. */
+  months: { month: number; year: number; paid: number; actual: number }[]
+  /** Chênh lệch = thực tế − đã thu: dương = thu thêm, âm = giảm, 0 = không điều chỉnh. */
   amount: number
-  sessions: number
-  /** Tháng cấn trừ vào học phí lớp mới. */
+  /** Tháng ghi điều chỉnh vào phiếu lớp mới. */
   month: number
   year: number
-  /** Ước tính học phí lớp mới tháng cấn trừ (trước cấn trừ) — để cảnh báo khi khoản cấn trừ lớn hơn. */
-  nextMonthAmount: number
+  /** Học phí gốc lớp mới tháng điều chỉnh (chưa gồm điều chỉnh) — để cảnh báo khi khoản giảm lớn hơn. */
+  nextMonthBase: number
 }
 
 async function prepareTransfer(studentId: string, enrollmentId: string, input: TransferInput) {
@@ -98,91 +103,109 @@ async function evaluateTransfer(studentId: string, p: Prepared) {
     classRecords(studentId, p.old.classId, fromMonth),
     classRecords(studentId, p.target.id, fromMonth),
   ])
+  const find = (list: typeof oldRecords, key: string) => list.find(x => monthKey(x.billingMonth, x.billingYear) === key)
 
-  // Lớp cũ: tháng bắt đầu chuyển + các tháng sau đã có phiếu.
-  const oldMonths = new Map<string, [number, number]>([[fromMonth, [m, y]]])
-  for (const r of oldRecords) oldMonths.set(monthKey(r.billingMonth, r.billingYear), [r.billingMonth, r.billingYear])
+  // Tháng bắt đầu chuyển + các tháng sau mà lớp cũ hoặc lớp mới đã có phiếu.
+  const months = new Map<string, [number, number]>([[fromMonth, [m, y]]])
+  for (const r of [...oldRecords, ...newRecords]) months.set(monthKey(r.billingMonth, r.billingYear), [r.billingMonth, r.billingYear])
 
-  const oldClass: (TransferMonth & { recordId?: string })[] = []
-  let creditAmount = 0, creditSessions = 0
-  for (const [key, [month, year]] of [...oldMonths].sort(([a], [b]) => a.localeCompare(b))) {
-    const [before, after] = await Promise.all([
+  type Row = TransferMonth & { recordId?: string }
+  const oldClass: Row[] = [], newClass: Row[] = []
+  const settled: TransferSettlement['months'] = []
+  /** Khoản giảm cho phiếu lớp mới ở tháng lớp cũ đã thu (buổi lớp mới đã gồm trong phiếu lớp cũ). */
+  const covered: { month: number; year: number; amount: number }[] = []
+
+  for (const [key, [month, year]] of [...months].sort(([a], [b]) => a.localeCompare(b))) {
+    const r = find(oldRecords, key), rNew = find(newRecords, key)
+    const [before, after, newBefore, newAfter] = await Promise.all([
       estimateClassTuition(studentId, p.old.classId, month, year),
       estimateClassTuition(studentId, p.old.classId, month, year, p.dropOld),
+      rNew ? estimateClassTuition(studentId, p.target.id, month, year) : Promise.resolve(null),
+      estimateClassTuition(studentId, p.target.id, month, year, p.addNew),
     ])
-    const r = oldRecords.find(x => monthKey(x.billingMonth, x.billingYear) === key)
-    const outcome: Outcome = !r ? 'none'
-      : r.locked ? 'locked'
-      : after.totalSessions === 0 && r._count.payments === 0 ? 'delete'
-      : 'recalculate'
-    if (r?.locked) {
-      creditAmount += Math.max(0, r.finalAmount - after.finalAmount)
-      creditSessions += Math.max(0, before.totalSessions - after.totalSessions)
-    }
-    oldClass.push({
-      month, year, recordId: r?.id, outcome,
+    const old: Row = {
+      month, year, recordId: r?.id, outcome: 'none',
       before: { sessions: before.totalSessions, amount: before.finalAmount },
       after: { sessions: after.totalSessions, amount: after.finalAmount },
       record: r ? { status: r.status, finalAmount: r.finalAmount, locked: r.locked } : null,
-    })
+    }
+    const neu: Row = {
+      month, year, recordId: rNew?.id, outcome: 'none',
+      before: { sessions: newBefore?.totalSessions ?? 0, amount: newBefore?.finalAmount ?? 0 },
+      after: { sessions: newAfter.totalSessions, amount: newAfter.finalAmount },
+      record: rNew ? { status: rNew.status, finalAmount: rNew.finalAmount, locked: rNew.locked } : null,
+    }
+    if (r?.locked) {
+      // Phiếu lớp cũ giữ nguyên, đại diện cho cả tháng; so với học phí thực tế sau khi chuyển.
+      old.outcome = 'locked'
+      const paid = r.finalAmount + (rNew?.locked ? rNew.finalAmount : 0)
+      settled.push({ month, year, paid, actual: after.finalAmount + newAfter.finalAmount })
+      if (rNew?.locked) neu.outcome = 'locked'
+      else {
+        neu.outcome = 'covered'
+        neu.after = { sessions: newAfter.totalSessions, amount: 0 }
+        if (newAfter.finalAmount > 0) covered.push({ month, year, amount: newAfter.finalAmount })
+      }
+    } else {
+      old.outcome = !r ? 'none' : after.totalSessions === 0 && r._count.payments === 0 ? 'delete' : 'recalculate'
+      neu.outcome = rNew ? (rNew.locked ? 'locked' : 'recalculate') : r && newAfter.totalSessions > 0 ? 'create' : 'none'
+    }
+    if (r || key === fromMonth) oldClass.push(old)
+    newClass.push(neu)
   }
 
-  const creditKey = monthKey(m === 12 ? 1 : m + 1, m === 12 ? y + 1 : y)
-  const [cy, cm] = creditKey.split('-').map(Number)
-
-  // Lớp mới: các tháng của lớp cũ ở trên (+ tháng cấn trừ nếu có) và các tháng lớp mới đã có phiếu (học lại lớp cũ từng học).
-  const newMonths = new Map(oldMonths)
-  for (const r of newRecords) newMonths.set(monthKey(r.billingMonth, r.billingYear), [r.billingMonth, r.billingYear])
-  if (creditAmount > 0) newMonths.set(creditKey, [cm, cy])
-  const newClass: (TransferMonth & { recordId?: string })[] = []
-  let nextMonthAmount = 0
-  for (const [key, [month, year]] of [...newMonths].sort(([a], [b]) => a.localeCompare(b))) {
-    const [before, after] = await Promise.all([
-      newRecords.length ? estimateClassTuition(studentId, p.target.id, month, year) : Promise.resolve(null),
-      estimateClassTuition(studentId, p.target.id, month, year, p.addNew),
-    ])
-    if (key === creditKey) nextMonthAmount = after.finalAmount
-    const r = newRecords.find(x => monthKey(x.billingMonth, x.billingYear) === key)
-    const oldHadRecord = oldRecords.some(x => monthKey(x.billingMonth, x.billingYear) === key)
-    const outcome: Outcome = r ? (r.locked ? 'locked' : 'recalculate')
-      : oldHadRecord && after.totalSessions > 0 ? 'create'
-      : 'none'
-    newClass.push({
-      month, year, recordId: r?.id, outcome,
-      before: { sessions: before?.totalSessions ?? 0, amount: before?.finalAmount ?? 0 },
-      after: { sessions: after.totalSessions, amount: after.finalAmount },
-      record: r ? { status: r.status, finalAmount: r.finalAmount, locked: r.locked } : null,
-    })
+  let settlement: TransferSettlement | null = null
+  if (settled.length) {
+    const last = settled[settled.length - 1]
+    const [am, ay] = nextMonth(last.month, last.year)
+    const amount = settled.reduce((sum, s) => sum + s.actual - s.paid, 0)
+    const adjKey = monthKey(am, ay)
+    const base = await estimateClassTuition(studentId, p.target.id, am, ay, p.addNew)
+    settlement = { months: settled, amount, month: am, year: ay, nextMonthBase: base.baseAmount }
+    if (amount !== 0) {
+      // Hiện tháng điều chỉnh của lớp mới với số tiền sau điều chỉnh.
+      const withAdj = await estimateClassTuition(studentId, p.target.id, am, ay, p.addNew, [{ amount, reason: 'Chênh lệch chuyển lớp' }])
+      const existing = newClass.find(n => n.month === am && n.year === ay)
+      if (existing) existing.after = { sessions: withAdj.totalSessions, amount: withAdj.finalAmount }
+      else {
+        const rNew = find(newRecords, adjKey)
+        newClass.push({
+          month: am, year: ay, recordId: rNew?.id, outcome: rNew ? (rNew.locked ? 'locked' : 'recalculate') : 'none',
+          before: { sessions: 0, amount: 0 }, after: { sessions: withAdj.totalSessions, amount: withAdj.finalAmount },
+          record: rNew ? { status: rNew.status, finalAmount: rNew.finalAmount, locked: rNew.locked } : null,
+        })
+      }
+    }
   }
-
-  const credit: TransferCredit | null = creditAmount > 0
-    ? { amount: creditAmount, sessions: creditSessions, month: cm, year: cy, nextMonthAmount }
-    : null
-  return { oldClass, newClass, credit }
+  return { oldClass, newClass, settlement, covered }
 }
 
 const strip = ({ recordId: _id, ...rest }: TransferMonth & { recordId?: string }): TransferMonth => rest
 
-/** Xem trước chuyển lớp: học phí hai lớp theo tháng và khoản cấn trừ (nếu có). Không ghi gì. */
+/** Xem trước chuyển lớp: học phí hai lớp theo tháng và khoản chênh lệch (nếu có). Không ghi gì. */
 export async function previewTransfer(studentId: string, enrollmentId: string, input: TransferInput) {
   const p = await prepareTransfer(studentId, enrollmentId, input)
-  const { oldClass, newClass, credit } = await evaluateTransfer(studentId, p)
+  const { oldClass, newClass, settlement } = await evaluateTransfer(studentId, p)
   return {
     startDate: p.startDate, dropDate: p.dropDate,
     oldClass: { id: p.old.classId, name: p.oldClassName, months: oldClass.map(strip) },
     newClass: { id: p.target.id, name: p.target.name, months: newClass.map(strip) },
-    credit,
+    settlement,
   }
 }
 
-/** Chuyển lớp: nghỉ lớp cũ + đăng ký lớp mới (+ cấn trừ nếu được chọn) trong một transaction, rồi tính lại học phí. */
+const money = (n: number) => `${Math.abs(n).toLocaleString('vi-VN')}đ`
+
+/** Chuyển lớp: nghỉ lớp cũ + đăng ký lớp mới (+ điều chỉnh nếu được chọn) trong một transaction, rồi tính lại học phí. */
 export async function transferEnrollment(studentId: string, enrollmentId: string, input: TransferInput, userId?: string) {
   const p = await prepareTransfer(studentId, enrollmentId, input)
-  const { oldClass, newClass, credit } = await evaluateTransfer(studentId, p)
-  if (credit && typeof input.applyCredit !== 'boolean') {
-    fail(`Lớp cũ đã thu ${credit.amount.toLocaleString('vi-VN')}đ cho các buổi sau ngày chuyển. Hãy chọn có cấn trừ vào học phí lớp mới hay không.`)
+  const { oldClass, newClass, settlement, covered } = await evaluateTransfer(studentId, p)
+  if (settlement?.amount && typeof input.applyAdjustment !== 'boolean') {
+    fail(settlement.amount > 0
+      ? `Học phí thực tế sau khi chuyển nhiều hơn số đã thu ${money(settlement.amount)}. Hãy chọn có thu thêm vào tháng ${settlement.month}/${settlement.year} hay không.`
+      : `Số đã thu nhiều hơn học phí thực tế sau khi chuyển ${money(settlement.amount)}. Hãy chọn có giảm vào tháng ${settlement.month}/${settlement.year} hay không.`)
   }
-  const applyCredit = !!credit && input.applyCredit === true
+  const applyAdjustment = !!settlement?.amount && input.applyAdjustment === true
   const note = `Chuyển từ lớp ${p.oldClassName} sang lớp ${p.target.name} từ ${vnDate(p.startDate)}`
 
   const created = await prisma.$transaction(async tx => {
@@ -194,19 +217,16 @@ export async function transferEnrollment(studentId: string, enrollmentId: string
     if (p.days.length) {
       await tx.enrollmentWeekdayPlan.create({ data: { id: newId(), enrollmentId: enrollment.id, effectiveFrom: toDay(p.startDate)!, days: p.days } })
     }
-    if (applyCredit && credit) {
-      const name = `Cấn trừ chuyển lớp từ ${p.oldClassName} - ${p.target.name}`
-      const promotionId = newId()
-      await tx.promotion.create({ data: { id: promotionId, name, type: 'FIXED_AMOUNT', value: credit.amount, isActive: false } })
-      await tx.studentPromotion.create({
-        data: {
-          id: newId(), studentId, classId: toClassId(p.target.id), className: p.target.name,
-          promotionId, promotionName: name, promotionType: 'FIXED_AMOUNT', promotionValue: credit.amount,
-          appliedFrom: toDay(`${monthKey(credit.month, credit.year)}-01`)!, appliedTo: toDay(lastDayOf(credit.month, credit.year))!,
-          approvedById: userId ?? null,
-          notes: `${credit.sessions} buổi lớp ${p.oldClassName} đã thu sau ngày chuyển ${vnDate(p.startDate)}`,
-        },
-      })
+    const adjust = (month: number, year: number, amount: number, reason: string) => tx.tuitionAdjustment.create({
+      data: { id: newId(), studentId, classId: p.target.id, billingMonth: month, billingYear: year, amount, reason, createdById: userId ?? null },
+    })
+    for (const c of covered) {
+      await adjust(c.month, c.year, -c.amount, `Đã gồm trong phiếu lớp ${p.oldClassName} T${c.month}/${c.year} (chuyển lớp từ ${vnDate(p.startDate)})`)
+    }
+    if (applyAdjustment && settlement) {
+      const months = settlement.months.map(s => `T${s.month}/${s.year}`).join(', ')
+      await adjust(settlement.month, settlement.year, settlement.amount,
+        `${settlement.amount > 0 ? 'Thu thêm' : 'Giảm'} chênh lệch chuyển lớp từ ${p.oldClassName} (${months})`)
     }
     await recountClassActiveStudents(p.old.classId, tx)
     await recountClassActiveStudents(p.target.id, tx)
@@ -219,10 +239,12 @@ export async function transferEnrollment(studentId: string, enrollmentId: string
     else if (i.outcome === 'recalculate') await calculateTuitionForStudent(studentId, p.old.classId, i.month, i.year)
   }
   for (const i of newClass) {
-    if (i.outcome === 'create' || i.outcome === 'recalculate') await calculateTuitionForStudent(studentId, p.target.id, i.month, i.year)
+    // Tháng "covered" cũng lập phiếu lớp mới (0đ) để thấy rõ buổi lớp mới đã gồm trong phiếu lớp cũ.
+    if (i.outcome === 'create' || i.outcome === 'recalculate' || (i.outcome === 'covered' && i.after.sessions > 0)) {
+      await calculateTuitionForStudent(studentId, p.target.id, i.month, i.year)
+    }
   }
 
   const enrollment = await prisma.classEnrollment.findUniqueOrThrow({ where: { id: created.id }, include: enrollmentInclude })
-  return { enrollment: enrollmentDoc(enrollment), creditApplied: applyCredit ? credit!.amount : 0 }
+  return { enrollment: enrollmentDoc(enrollment), adjustment: applyAdjustment ? settlement!.amount : 0 }
 }
-

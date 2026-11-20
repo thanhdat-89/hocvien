@@ -248,6 +248,9 @@ export interface TuitionRecord {
   chargedSessions: number
   baseAmount: number
   discountAmount: number
+  /** Điều chỉnh học phí tháng (+ thu thêm, − giảm), đã gồm trong baseAmount / discountAmount */
+  adjustmentAmount?: number
+  adjustmentNote?: string | null
   finalAmount: number
   status: TuitionStatus
   dueDate?: string

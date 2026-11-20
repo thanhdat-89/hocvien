@@ -31,7 +31,7 @@ const SCOPED: Record<string, (ids: string[]) => Where> = {
   ClassEnrollment: viaClass, Schedule: viaClass, Session: viaClass, ClassTuitionRate: viaClass,
   StudentAttendance: viaClass, TeacherAttendance: viaClass,
   Parent: viaStudent, StudentReview: viaStudent, PrivateSession: viaStudent, TuitionRecord: viaStudent,
-  Payment: viaStudent, MonthlyScore: viaStudent, StudentPromotion: viaStudent,
+  Payment: viaStudent, MonthlyScore: viaStudent, StudentPromotion: viaStudent, TuitionAdjustment: viaStudent,
 }
 /** Khoá ngoại tới bản ghi có cơ sở: không được trỏ sang cơ sở ngoài phạm vi khi tạo / sửa */
 const REFS: Record<string, string> = { classId: 'Class', studentId: 'Student', sessionId: 'Session', tuitionRecordId: 'TuitionRecord' }

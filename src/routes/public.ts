@@ -55,6 +55,9 @@ interface PublicTuition {
   billingYear: number
   baseAmount: number
   discountAmount: number
+  /** Điều chỉnh học phí tháng (+ thu thêm, − giảm), đã gồm trong baseAmount / discountAmount */
+  adjustmentAmount: number
+  adjustmentNote?: string | null
   finalAmount: number
   paidAmount: number
   remainingAmount: number
@@ -186,6 +189,8 @@ router.get('/student/:id', async (req: Request, res: Response, next: NextFunctio
           billingYear: t.billingYear,
           baseAmount: t.baseAmount,
           discountAmount: t.discountAmount,
+          adjustmentAmount: t.adjustmentAmount ?? 0,
+          adjustmentNote: t.adjustmentNote ?? null,
           finalAmount: t.finalAmount,
           paidAmount,
           remainingAmount: Math.max(0, t.finalAmount - paidAmount),

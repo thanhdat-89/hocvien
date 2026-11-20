@@ -137,7 +137,8 @@ model User {
   /// Cơ sở làm việc (Cài đặt → Tài khoản của tôi): mọi thao tác xem / thêm học viên, lớp... diễn ra ở cơ sở này.
   /// Trống hoặc không còn hợp lệ (bị gỡ phân công, cơ sở ngừng) thì dùng cơ sở đầu tiên được phép.
   defaultBranchId    String?
-  defaultBranch      Branch?            @relation("UserDefaultBranch", fields: [defaultBranchId], references: [id], onDelete: SetNull)
+  defaultBranch      Branch?             @relation("UserDefaultBranch", fields: [defaultBranchId], references: [id], onDelete: SetNull)
+  tuitionAdjustments TuitionAdjustment[]
 
   @@map("users")
 }
@@ -243,17 +244,17 @@ model HolidayBranch {
 // ─── Học viên & phụ huynh ────────────────────────────────────
 
 model Student {
-  id             String        @id
-  fullName       String
-  dateOfBirth    DateTime?     @db.Date
-  gender         Gender?
-  school         String?
-  gradeLevel     Int?
-  address        String?
-  enrollmentDate DateTime      @db.Date
-  status         StudentStatus @default(ACTIVE)
-  avatarUrl      String?
-  notes          String?
+  id               String        @id
+  fullName         String
+  dateOfBirth      DateTime?     @db.Date
+  gender           Gender?
+  school           String?
+  gradeLevel       Int?
+  address          String?
+  enrollmentDate   DateTime      @db.Date
+  status           StudentStatus @default(ACTIVE)
+  avatarUrl        String?
+  notes            String?
   /// Thông tin người mua trên hoá đơn điện tử (cá nhân); trống thì lùi về tên/địa chỉ học viên.
   invoiceFullName  String?
   invoiceCitizenId String?
@@ -261,20 +262,21 @@ model Student {
   invoiceEmail     String?
   invoicePhone     String?
   /// Mỗi học viên thuộc đúng một cơ sở; hồ sơ giữ qua các năm học.
-  branchId       String
-  createdAt      DateTime      @default(now()) @db.Timestamptz(3)
-  updatedAt      DateTime      @updatedAt @db.Timestamptz(3)
+  branchId         String
+  createdAt        DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime      @updatedAt @db.Timestamptz(3)
 
-  branch          Branch              @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  parents         Parent[]
-  enrollments     ClassEnrollment[]
-  privateSessions PrivateSession[]
-  attendances     StudentAttendance[]
-  promotions      StudentPromotion[]
-  tuitionRecords  TuitionRecord[]
-  payments        Payment[]
-  monthlyScores   MonthlyScore[]
-  reviews         StudentReview[]
+  branch             Branch              @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  parents            Parent[]
+  enrollments        ClassEnrollment[]
+  privateSessions    PrivateSession[]
+  attendances        StudentAttendance[]
+  promotions         StudentPromotion[]
+  tuitionRecords     TuitionRecord[]
+  payments           Payment[]
+  monthlyScores      MonthlyScore[]
+  reviews            StudentReview[]
+  tuitionAdjustments TuitionAdjustment[]
 
   @@index([branchId, status])
   @@index([status, gradeLevel])
@@ -360,20 +362,21 @@ model Class {
   createdAt          DateTime    @default(now()) @db.Timestamptz(3)
   updatedAt          DateTime    @updatedAt @db.Timestamptz(3)
 
-  branch            Branch              @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  schoolYear        SchoolYear          @relation(fields: [schoolYearId], references: [id], onDelete: Restrict)
-  promotedFrom      Class?              @relation("ClassPromotion", fields: [promotedFromId], references: [id], onDelete: SetNull)
-  promotedTo        Class?              @relation("ClassPromotion")
-  subject           Subject?            @relation(fields: [subjectId], references: [id], onDelete: SetNull)
-  teacher           Teacher?            @relation(fields: [teacherId], references: [id], onDelete: SetNull)
-  rateHistory       ClassTuitionRate[]
-  enrollments       ClassEnrollment[]
-  schedules         Schedule[]
-  sessions          Session[]
-  studentAttendance StudentAttendance[]
-  teacherAttendance TeacherAttendance[]
-  promotions        StudentPromotion[]
-  tuitionRecords    TuitionRecord[]
+  branch             Branch              @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  schoolYear         SchoolYear          @relation(fields: [schoolYearId], references: [id], onDelete: Restrict)
+  promotedFrom       Class?              @relation("ClassPromotion", fields: [promotedFromId], references: [id], onDelete: SetNull)
+  promotedTo         Class?              @relation("ClassPromotion")
+  subject            Subject?            @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  teacher            Teacher?            @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  rateHistory        ClassTuitionRate[]
+  enrollments        ClassEnrollment[]
+  schedules          Schedule[]
+  sessions           Session[]
+  studentAttendance  StudentAttendance[]
+  teacherAttendance  TeacherAttendance[]
+  promotions         StudentPromotion[]
+  tuitionRecords     TuitionRecord[]
+  tuitionAdjustments TuitionAdjustment[]
 
   @@index([branchId, schoolYearId, status])
   @@index([status])
@@ -599,27 +602,31 @@ model StudentPromotion {
 }
 
 model TuitionRecord {
-  id              String        @id
-  studentId       String
+  id               String        @id
+  studentId        String
   /// NULL = phiếu học riêng (Firestore classId "private").
-  classId         String?
+  classId          String?
   /// Tên lớp lúc lập phiếu (ảnh chụp, đi vào hoá đơn) — đổi tên lớp không làm đổi phiếu cũ. NULL → tên hiện tại.
-  className       String?
-  billingMonth    Int
-  billingYear     Int
-  totalSessions   Int
-  chargedSessions Int
-  baseAmount      Int
-  discountAmount  Int           @default(0)
-  finalAmount     Int
+  className        String?
+  billingMonth     Int
+  billingYear      Int
+  totalSessions    Int
+  chargedSessions  Int
+  baseAmount       Int
+  discountAmount   Int           @default(0)
+  /// Điều chỉnh học phí trong tháng (ảnh chụp lúc tính phiếu): + thu thêm (đã cộng vào baseAmount), − giảm (đã cộng vào discountAmount).
+  adjustmentAmount Int           @default(0)
+  /// Lý do điều chỉnh, vd "Chuyển lớp từ Toán 8 - CQT02 ngày 30/11/2026".
+  adjustmentNote   String?
+  finalAmount      Int
   /// Tổng đã thu — phải bằng SUM(payments.amount); kiểm bằng db/verify.sql.
-  paidAmount      Int           @default(0)
-  remainingAmount Int
-  status          TuitionStatus @default(PENDING)
-  dueDate         DateTime?     @db.Date
-  notes           String?
-  createdAt       DateTime      @default(now()) @db.Timestamptz(3)
-  updatedAt       DateTime      @updatedAt @db.Timestamptz(3)
+  paidAmount       Int           @default(0)
+  remainingAmount  Int
+  status           TuitionStatus @default(PENDING)
+  dueDate          DateTime?     @db.Date
+  notes            String?
+  createdAt        DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime      @updatedAt @db.Timestamptz(3)
 
   student  Student   @relation(fields: [studentId], references: [id], onDelete: Restrict)
   class    Class?    @relation(fields: [classId], references: [id], onDelete: Restrict)
@@ -885,17 +892,17 @@ model ZnsLog {
 }
 
 model AdminAlert {
-  id        String   @id
-  type      String
-  read      Boolean  @default(false)
-  message   String
+  id         String    @id
+  type       String
+  read       Boolean   @default(false)
+  message    String
   /// Chi tiết theo loại cảnh báo (invoiceId, studentId, billingMonth...).
-  data      Json
+  data       Json
   /// Cơ sở của học viên liên quan; NULL = chưa xác định được (hiện ở mọi cơ sở).
-  branchId  String?
+  branchId   String?
   /// Lúc việc cần xử lý đã được xử lý xong (khác với `read` = đã xem); NULL = còn cần xử lý.
   resolvedAt DateTime? @db.Timestamptz(3)
-  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
 
   @@index([read, createdAt])
   @@index([branchId, read, createdAt])
@@ -983,4 +990,25 @@ model ClassIntegrityAudit {
   createdAt      DateTime @db.Timestamptz(3)
 
   @@map("class_integrity_audits")
+}
+
+/// Khoản điều chỉnh học phí một tháng của học viên ở một lớp: + thu thêm, − giảm (vd chênh lệch khi chuyển lớp).
+/// Phiếu học phí tháng đó cộng khoản này khi tính: thu thêm vào học phí gốc, giảm vào phần giảm trừ.
+model TuitionAdjustment {
+  id           String   @id
+  studentId    String
+  classId      String
+  billingMonth Int
+  billingYear  Int
+  amount       Int
+  reason       String
+  createdById  String?
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  class     Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  createdBy User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([studentId, classId, billingYear, billingMonth])
+  @@map("tuition_adjustments")
 }

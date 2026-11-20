@@ -30,6 +30,9 @@ interface ScheduleRow {
   discountAmount: number
   baseAmount: number
   finalAmount: number
+  /** Điều chỉnh học phí tháng (+ thu thêm, − giảm), đã gồm trong baseAmount / discountAmount */
+  adjustmentAmount?: number
+  adjustmentNote?: string | null
   tuitionRecord: TuitionRecordSummary | null
 }
 
@@ -570,6 +573,7 @@ export default function Tuition() {
                           <td role="cell" data-label="Thành tiền" className="px-4 py-5 align-middle text-right tabular-nums">
                             <p className="font-semibold text-on-surface whitespace-nowrap">{r.finalAmount.toLocaleString('vi-VN')}đ</p>
                             {r.discountAmount > 0 && <p className="mt-1.5 text-xs text-emerald-700 whitespace-nowrap" title="Khuyến mãi đã áp dụng">Giảm {r.discountAmount.toLocaleString('vi-VN')}đ</p>}
+                            {!!r.adjustmentAmount && <p className={`mt-1 text-xs whitespace-nowrap ${r.adjustmentAmount > 0 ? 'text-amber-700' : 'text-emerald-700'}`} title={r.adjustmentNote ?? undefined}>Điều chỉnh {r.adjustmentAmount > 0 ? '+' : '−'}{Math.abs(r.adjustmentAmount).toLocaleString('vi-VN')}đ</p>}
                           </td>
                           <td role="cell" data-label="Phiếu học phí" className="px-3 py-5 align-middle text-center">
                             {r.tuitionRecord ? (
