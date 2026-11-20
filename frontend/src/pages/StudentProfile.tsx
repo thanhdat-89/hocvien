@@ -511,10 +511,6 @@ interface TransferPreview {
   settlement: { months: { month: number; year: number; paid: number; actual: number }[]; amount: number; month: number; year: number; nextMonthBase: number } | null
 }
 
-const nextMonthFirst = () => {
-  const [y, m] = vnToday().split('-').map(Number)
-  return m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`
-}
 const addDays = (date: string, n: number) => {
   const d = new Date(`${date}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10)
 }
@@ -577,22 +573,15 @@ function TransferPanel({ studentId, enrollment, activeClassIds, onClose, onSaved
   const candidates = (classes ?? []).filter(c => grade != null && gradeOfClass(c) === grade && c.id !== enrollment.classId && !activeClassIds.includes(c.id))
 
   const minStart = addDays(enrollment.enrollmentDate, 1)
-  const [startDate, setStartDate] = useState(() => { const d = nextMonthFirst(); return d < minStart ? minStart : d })
+  const [startDate, setStartDate] = useState(() => { const d = vnToday(); return d < minStart ? minStart : d })
   const [toClassId, setToClassId] = useState('')
-  const { slots, error: slotsError } = useClassSlots(toClassId || undefined, startDate)
-  const [days, setDays] = useState<string[]>([])
-  useEffect(() => {
-    if (!slots) return
-    const all = slots.map(s => s.dayOfWeek)
-    setDays(prev => { const kept = all.filter(d => prev.includes(d)); return kept.length ? kept : all })
-  }, [slots])
 
   const [preview, setPreview] = useState<TransferPreview | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState('')
   const [applyAdjustment, setApplyAdjustment] = useState<boolean | null>(null)
-  const ready = !!toClassId && !!startDate && !!slots?.length && days.length > 0
-  const bodyKey = JSON.stringify({ action: 'transfer', toClassId, startDate, days })
+  const ready = !!toClassId && !!startDate
+  const bodyKey = JSON.stringify({ action: 'transfer', toClassId, startDate })
   useEffect(() => {
     setPreview(null); setPreviewError('')
     if (!ready) return
@@ -618,7 +607,7 @@ function TransferPanel({ studentId, enrollment, activeClassIds, onClose, onSaved
     setSaving(true); setError('')
     try {
       await api.post(`/students/${studentId}/enroll/${enrollment.id}/transfer`, {
-        toClassId, startDate, days, ...(adjustmentAmount !== 0 ? { applyAdjustment } : {}),
+        toClassId, startDate, ...(adjustmentAmount !== 0 ? { applyAdjustment } : {}),
       })
       onSaved()
     } catch (err: any) {
@@ -662,14 +651,8 @@ function TransferPanel({ studentId, enrollment, activeClassIds, onClose, onSaved
 
       <Field label="Học lớp mới từ ngày">
         <input type="date" value={startDate} min={minStart} onChange={e => setStartDate(e.target.value)} className={inputCls} />
-        {startDate && <p className="mt-1.5 text-xs text-outline">Lớp {enrollment.className} học đến hết {fmt(addDays(startDate, -1))}. Lớp mới tính theo đơn giá của lớp mới.</p>}
+        {startDate && <p className="mt-1.5 text-xs text-outline">Lớp {enrollment.className} học đến hết {fmt(addDays(startDate, -1))}. Lớp mới học đủ các buổi, tính theo đơn giá của lớp mới.</p>}
       </Field>
-
-      {toClassId && (
-        <Field label={`Buổi học ở lớp ${target?.name ?? 'mới'}`}>
-          <WeekdayPicker slots={slots} error={slotsError} value={days} onChange={setDays} />
-        </Field>
-      )}
 
       {ready && (
         <Field label="Ảnh hưởng học phí">

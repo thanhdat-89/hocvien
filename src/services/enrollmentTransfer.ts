@@ -3,7 +3,7 @@ import { enrollmentDoc, enrollmentInclude } from '../lib/docs'
 import { recountClassActiveStudents } from '../lib/classSync'
 import type { ClassEnrollment } from '../types/models'
 import { calculateTuitionForStudent, estimateClassTuition } from './tuitionCalculator'
-import { isDate, monthKey, normalizeDays, type MonthImpact } from './enrollmentWeekdays'
+import { isDate, monthKey, type MonthImpact } from './enrollmentWeekdays'
 import { gradeOf } from './schoolYearRollover'
 
 // Chuyển lớp trong cùng khối = nghỉ lớp cũ (đến hết ngày liền trước) + đăng ký lớp mới (từ ngày bắt đầu), ghi trong một lần.
@@ -24,8 +24,6 @@ export interface TransferInput {
   toClassId?: unknown
   /** Ngày bắt đầu học lớp mới; lớp cũ học đến hết ngày liền trước. */
   startDate?: unknown
-  /** Buổi học trong tuần ở lớp mới; bỏ trống/đủ = học đủ. */
-  days?: unknown
   /** Có ghi khoản chênh lệch vào học phí lớp mới tháng sau không — bắt buộc khi chênh lệch khác 0. */
   applyAdjustment?: unknown
 }
@@ -68,14 +66,13 @@ async function prepareTransfer(studentId: string, enrollmentId: string, input: T
   const startDate = input.startDate as string
   if (startDate <= old.enrollmentDate) fail(`Ngày bắt đầu học lớp mới phải sau ngày đăng ký lớp cũ (${vnDate(old.enrollmentDate)})`)
   const dropDate = dayBefore(startDate)
-  const days = await normalizeDays(toClassId, startDate, input.days)
 
   const newEnrollment = {
     id: '__transfer__', classId: toClassId, studentId, enrollmentDate: startDate, status: 'ACTIVE',
-    createdAt: new Date().toISOString(), weekdayPlans: days.length ? [{ effectiveFrom: startDate, days }] : [],
+    createdAt: new Date().toISOString(), weekdayPlans: [], // chuyển lớp luôn học đủ các buổi của lớp mới
   } as unknown as ClassEnrollment
   return {
-    old, oldClassName: row.class.name, target, startDate, dropDate, days,
+    old, oldClassName: row.class.name, target, startDate, dropDate,
     dropOld: (list: ClassEnrollment[]) => list.map(e => e.id === enrollmentId ? { ...e, status: 'DROPPED', dropDate } as ClassEnrollment : e),
     addNew: (list: ClassEnrollment[]) => [...list, newEnrollment],
   }
@@ -214,9 +211,6 @@ export async function transferEnrollment(studentId: string, enrollmentId: string
     const enrollment = await tx.classEnrollment.create({
       data: { id: newId(), classId: p.target.id, studentId, enrollmentDate: toDay(p.startDate)!, status: 'ACTIVE', notes: note },
     })
-    if (p.days.length) {
-      await tx.enrollmentWeekdayPlan.create({ data: { id: newId(), enrollmentId: enrollment.id, effectiveFrom: toDay(p.startDate)!, days: p.days } })
-    }
     const adjust = (month: number, year: number, amount: number, reason: string) => tx.tuitionAdjustment.create({
       data: { id: newId(), studentId, classId: p.target.id, billingMonth: month, billingYear: year, amount, reason, createdById: userId ?? null },
     })

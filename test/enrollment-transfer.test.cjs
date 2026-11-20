@@ -27,6 +27,7 @@ test('setup lớp', async () => {
   await classWith('ca', 'Toán 8 - CQT02', 150000, ['FRIDAY', 'SUNDAY'], OLD_DATES)
   await classWith('cb', 'Toán 8 - CQT03', 180000, ['TUESDAY', 'SATURDAY'], NEW_DATES)
   await classWith('cd', 'Toán 8 - CQT04', 150000, ['TUESDAY', 'SATURDAY'], NEW_DATES)
+  await classWith('ce', 'Toán 8 - CQT05', 90000, ['TUESDAY', 'SATURDAY'], NEW_DATES)
   await classWith('cc', 'Toán 9 - CQT01', 150000, ['MONDAY'], [])
 })
 
@@ -59,7 +60,6 @@ test('cùng đơn giá, tổng buổi không đổi: chênh lệch 0, không h�
 
 test('lớp mới đắt hơn: thực tế nhiều hơn đã thu → thu thêm tháng sau khi được chọn', async () => {
   const { student, params } = await paidStudent('s1')
-  await assert.rejects(transfer({ params, body: { toClassId: 'cb', startDate: '2026-11-16', days: ['MONDAY'] } }), /không có buổi học vào T2/)
   const p = (await preview({ params, body: { action: 'transfer', toClassId: 'cb', startDate: '2026-11-16' } })).body
   assert.equal(p.dropDate, '2026-11-15')
   // Thực tế: 5 buổi × 150.000 + 4 buổi × 180.000 = 1.470.000; đã thu 1.350.000 → thu thêm 120.000.
@@ -88,21 +88,21 @@ test('lớp mới đắt hơn: thực tế nhiều hơn đã thu → thu thêm t
   assert.deepEqual(counts.map(c => c.activeStudentCount), [0, 1], 'sĩ số: lớp cũ hết học viên (s0, s1 đã chuyển), lớp mới có s1')
 })
 
-test('học ít buổi hơn ở lớp mới: đã thu nhiều hơn → giảm tháng sau; chọn không thì không ghi', async () => {
+test('lớp mới rẻ hơn: đã thu nhiều hơn → giảm tháng sau; chọn không thì không ghi', async () => {
   const { student, params } = await paidStudent('s2')
-  // Chỉ học T7 ở lớp mới: 21, 28 → thực tế 750.000 + 360.000 = 1.110.000; đã thu 1.350.000 → giảm 240.000.
-  const p = (await preview({ params, body: { action: 'transfer', toClassId: 'cb', startDate: '2026-11-16', days: ['SATURDAY'] } })).body
+  // Lớp mới 90.000đ: 17, 21, 24, 28 → thực tế 750.000 + 360.000 = 1.110.000; đã thu 1.350.000 → giảm 240.000.
+  const p = (await preview({ params, body: { action: 'transfer', toClassId: 'ce', startDate: '2026-11-16' } })).body
   assert.equal(p.settlement.amount, -240000)
-  await assert.rejects(transfer({ params, body: { toClassId: 'cb', startDate: '2026-11-16', days: ['SATURDAY'] } }), /giảm/)
-  await transfer({ params, body: { toClassId: 'cb', startDate: '2026-11-16', days: ['SATURDAY'], applyAdjustment: false } })
+  await assert.rejects(transfer({ params, body: { toClassId: 'ce', startDate: '2026-11-16' } }), /giảm/)
+  await transfer({ params, body: { toClassId: 'ce', startDate: '2026-11-16', applyAdjustment: false } })
   const adj = await prisma.tuitionAdjustment.findMany({ where: { studentId: student.id }, select: { billingMonth: true, amount: true } })
   assert.deepEqual(adj, [{ billingMonth: 11, amount: -360000 }], 'chỉ có khoản "đã gồm trong phiếu lớp cũ", không có khoản giảm tháng 12')
 })
 
 test('chọn giảm: phiếu tháng sau giảm đúng số chênh lệch', async () => {
   const { student, params } = await paidStudent('s3')
-  await transfer({ params, body: { toClassId: 'cb', startDate: '2026-11-16', days: ['SATURDAY'], applyAdjustment: true } })
-  const dec = await prisma.tuitionRecord.findFirst({ where: { studentId: student.id, classId: 'cb', billingMonth: 12 } })
-  // Tháng 12 chỉ T7: 5, 12 → 360.000 − 240.000 = 120.000
-  assert.deepEqual([dec.totalSessions, dec.baseAmount, dec.discountAmount, dec.finalAmount], [2, 360000, 240000, 120000])
+  await transfer({ params, body: { toClassId: 'ce', startDate: '2026-11-16', applyAdjustment: true } })
+  const dec = await prisma.tuitionRecord.findFirst({ where: { studentId: student.id, classId: 'ce', billingMonth: 12 } })
+  // Tháng 12: 1, 5, 8, 12 × 90.000 = 360.000 − 240.000 = 120.000
+  assert.deepEqual([dec.totalSessions, dec.baseAmount, dec.discountAmount, dec.finalAmount], [4, 360000, 240000, 120000])
 })
