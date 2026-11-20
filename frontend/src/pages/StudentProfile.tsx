@@ -500,9 +500,232 @@ function ImpactPreview({ preview, loading, error }: { preview: ChangePreview | n
   )
 }
 
-/** Lịch học của học viên ở một lớp: đổi buổi học cố định trong tuần hoặc cho nghỉ lớp. */
-function EnrollmentScheduleModal({ studentId, enrollment, onClose, onSaved }: { studentId: string; enrollment: ClassEnrollment; onClose: () => void; onSaved: () => void }) {
-  const [tab, setTab] = useState<'weekdays' | 'drop'>('weekdays')
+// ─── Chuyển lớp ──────────────────────────────────────────────────────────────
+
+interface TransferMonth extends Omit<MonthImpact, 'outcome'> { outcome: MonthImpact['outcome'] | 'create' }
+interface TransferPreview {
+  startDate: string; dropDate: string
+  oldClass: { id: string; name: string; months: TransferMonth[] }
+  newClass: { id: string; name: string; months: TransferMonth[] }
+  credit: { amount: number; sessions: number; month: number; year: number; nextMonthAmount: number } | null
+}
+
+const nextMonthFirst = () => {
+  const [y, m] = vnToday().split('-').map(Number)
+  return m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`
+}
+const addDays = (date: string, n: number) => {
+  const d = new Date(`${date}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10)
+}
+
+/** Danh sách tháng: số buổi / số tiền trước → sau, kèm ghi chú phiếu sẽ ra sao. */
+function MonthList({ months, note }: { months: TransferMonth[]; note: (m: TransferMonth) => { text: string; cls: string } }) {
+  return (
+    <div className="rounded-xl border border-slate-200 divide-y divide-slate-100">
+      {months.map(m => {
+        const same = m.before.sessions === m.after.sessions && m.before.amount === m.after.amount
+        const n = note(m)
+        return (
+          <div key={`${m.year}-${m.month}`} className="flex items-start justify-between gap-3 px-4 py-2.5 text-sm">
+            <div className="min-w-0">
+              <p className="font-semibold text-on-surface">Tháng {m.month}/{m.year}</p>
+              <p className={`text-xs ${n.cls}`}>{n.text}</p>
+            </div>
+            <div className="text-right tabular-nums">
+              {same ? (
+                <p className="text-on-surface">{m.after.sessions} buổi · {fmtMoney(m.after.amount)}</p>
+              ) : (
+                <>
+                  <p className="text-xs text-outline line-through">{m.before.sessions} buổi · {fmtMoney(m.before.amount)}</p>
+                  <p className="font-semibold text-on-surface">{m.after.sessions} buổi · {fmtMoney(m.after.amount)}</p>
+                </>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+const oldClassNote = (m: TransferMonth) =>
+  m.outcome === 'locked' ? { text: 'Đã thu/xuất HĐ — giữ nguyên phiếu', cls: 'text-outline' }
+  : m.outcome === 'delete' ? { text: 'Phiếu chưa thu sẽ bị xoá', cls: 'text-amber-700' }
+  : m.outcome === 'recalculate' ? { text: 'Phiếu chưa thu sẽ được tính lại', cls: 'text-primary' }
+  : { text: 'Chưa lập phiếu', cls: 'text-outline' }
+const newClassNote = (m: TransferMonth) =>
+  m.outcome === 'create' ? { text: 'Lập phiếu lớp mới', cls: 'text-primary' }
+  : m.outcome === 'recalculate' ? { text: 'Phiếu chưa thu sẽ được tính lại', cls: 'text-primary' }
+  : m.outcome === 'locked' ? { text: 'Đã thu/xuất HĐ — giữ nguyên phiếu', cls: 'text-outline' }
+  : { text: 'Chưa lập phiếu — tính khi lập phiếu tháng', cls: 'text-outline' }
+
+function TransferPanel({ studentId, enrollment, activeClassIds, onClose, onSaved }: {
+  studentId: string; enrollment: ClassEnrollment; activeClassIds: string[]; onClose: () => void; onSaved: () => void
+}) {
+  const [classes, setClasses] = useState<(Class & { activeStudentCount?: number; maxStudents?: number | null })[] | null>(null)
+  const [classesError, setClassesError] = useState(false)
+  useEffect(() => {
+    api.get('/classes', { params: { status: 'ACTIVE', limit: 200 } })
+      .then(r => setClasses([...(r.data?.data ?? r.data ?? [])].sort((a: Class, b: Class) =>
+        a.name.localeCompare(b.name, 'vi', { numeric: true, sensitivity: 'base' }))))
+      .catch(() => setClassesError(true))
+  }, [])
+  const current = classes?.find(c => c.id === enrollment.classId)
+  const grade = current ? gradeOfClass(current) : null
+  const candidates = (classes ?? []).filter(c => grade != null && gradeOfClass(c) === grade && c.id !== enrollment.classId && !activeClassIds.includes(c.id))
+
+  const minStart = addDays(enrollment.enrollmentDate, 1)
+  const [startDate, setStartDate] = useState(() => { const d = nextMonthFirst(); return d < minStart ? minStart : d })
+  const [toClassId, setToClassId] = useState('')
+  const { slots, error: slotsError } = useClassSlots(toClassId || undefined, startDate)
+  const [days, setDays] = useState<string[]>([])
+  useEffect(() => {
+    if (!slots) return
+    const all = slots.map(s => s.dayOfWeek)
+    setDays(prev => { const kept = all.filter(d => prev.includes(d)); return kept.length ? kept : all })
+  }, [slots])
+
+  const [preview, setPreview] = useState<TransferPreview | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState('')
+  const [applyCredit, setApplyCredit] = useState<boolean | null>(null)
+  const ready = !!toClassId && !!startDate && !!slots?.length && days.length > 0
+  const bodyKey = JSON.stringify({ action: 'transfer', toClassId, startDate, days })
+  useEffect(() => {
+    setPreview(null); setPreviewError('')
+    if (!ready) return
+    let cancelled = false
+    setPreviewLoading(true)
+    const timer = setTimeout(() => {
+      api.post(`/students/${studentId}/enroll/${enrollment.id}/preview`, JSON.parse(bodyKey))
+        .then(r => { if (!cancelled) setPreview(r.data) })
+        .catch(err => { if (!cancelled) setPreviewError(err.response?.data?.message ?? 'Không tính được học phí') })
+        .finally(() => { if (!cancelled) setPreviewLoading(false) })
+    }, 300)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [bodyKey, ready, studentId, enrollment.id])
+  // Khoản cấn trừ đổi (đổi lớp/ngày) → hỏi lại.
+  const creditAmount = preview?.credit?.amount ?? 0
+  useEffect(() => { setApplyCredit(null) }, [creditAmount])
+
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const needsCreditChoice = !!preview?.credit && applyCredit === null
+  const handleSubmit = async () => {
+    if (!preview || needsCreditChoice) return
+    setSaving(true); setError('')
+    try {
+      await api.post(`/students/${studentId}/enroll/${enrollment.id}/transfer`, {
+        toClassId, startDate, days, ...(preview.credit ? { applyCredit } : {}),
+      })
+      onSaved()
+    } catch (err: any) {
+      setError(err.response?.data?.message ?? 'Có lỗi xảy ra')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const inputCls = 'w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20'
+  const credit = preview?.credit
+  const target = candidates.find(c => c.id === toClassId)
+
+  return (
+    <>
+      {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
+      <Field label={`Chuyển sang lớp${grade ? ` (các lớp khối ${grade})` : ''}`}>
+        {classesError ? <p className="text-xs text-rose-600">Không tải được danh sách lớp.</p>
+          : !classes ? <p className="text-xs text-slate-500">Đang tải danh sách lớp...</p>
+          : grade == null ? <p className="text-xs text-slate-500">Không xác định được khối của lớp hiện tại.</p>
+          : !candidates.length ? <p className="text-xs text-slate-500">Không có lớp khối {grade} nào khác đang hoạt động.</p>
+          : (
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {candidates.map(c => {
+                const on = c.id === toClassId
+                const full = c.maxStudents != null && (c.activeStudentCount ?? 0) >= c.maxStudents
+                return (
+                  <button key={c.id} type="button" onClick={() => setToClassId(c.id)} aria-pressed={on}
+                    className={`flex flex-col items-start rounded-xl border px-3 py-2 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${on ? 'border-primary bg-blue-50' : 'border-slate-200 bg-white hover:border-blue-300'}`}>
+                    <span className={`font-semibold ${on ? 'text-primary' : 'text-on-surface'}`}>{c.name}</span>
+                    <span className="text-xs text-slate-500">
+                      {fmtMoney(Number(c.tuitionRate) || 0)}/buổi · {c.activeStudentCount ?? 0}{c.maxStudents ? `/${c.maxStudents}` : ''} học viên
+                      {full && <span className="ml-1 font-semibold text-amber-700">· đã đủ sĩ số</span>}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+      </Field>
+
+      <Field label="Học lớp mới từ ngày">
+        <input type="date" value={startDate} min={minStart} onChange={e => setStartDate(e.target.value)} className={inputCls} />
+        {startDate && <p className="mt-1.5 text-xs text-outline">Lớp {enrollment.className} học đến hết {fmt(addDays(startDate, -1))}. Lớp mới tính theo đơn giá của lớp mới.</p>}
+      </Field>
+
+      {toClassId && (
+        <Field label={`Buổi học ở lớp ${target?.name ?? 'mới'}`}>
+          <WeekdayPicker slots={slots} error={slotsError} value={days} onChange={setDays} />
+        </Field>
+      )}
+
+      {ready && (
+        <Field label="Ảnh hưởng học phí">
+          {previewError ? <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{previewError}</div>
+            : !preview ? <p className="text-xs text-outline">{previewLoading ? 'Đang tính học phí...' : ''}</p>
+            : (
+              <div className={`space-y-3 ${previewLoading ? 'opacity-60' : ''}`} aria-live="polite">
+                <div>
+                  <p className="mb-1.5 text-xs font-semibold text-slate-600">Lớp cũ · {preview.oldClass.name}</p>
+                  <MonthList months={preview.oldClass.months} note={oldClassNote} />
+                </div>
+                <div>
+                  <p className="mb-1.5 text-xs font-semibold text-slate-600">Lớp mới · {preview.newClass.name}</p>
+                  <MonthList months={preview.newClass.months} note={newClassNote} />
+                </div>
+                <p className="text-[11px] text-outline">Ước tính theo các buổi học đã lên lịch, đã trừ khuyến mãi.</p>
+              </div>
+            )}
+        </Field>
+      )}
+
+      {credit && (
+        <fieldset className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <legend className="sr-only">Cấn trừ học phí</legend>
+          <p className="text-sm text-amber-900">
+            Lớp cũ đã thu <strong>{fmtMoney(credit.amount)}</strong> cho {credit.sessions} buổi sau ngày chuyển (phiếu giữ nguyên).
+            Có cấn trừ khoản này vào học phí lớp mới <strong>tháng {credit.month}/{credit.year}</strong> không?
+          </p>
+          <div className="mt-2.5 flex flex-wrap gap-2">
+            {[{ v: true, label: `Có, trừ ${fmtMoney(credit.amount)}` }, { v: false, label: 'Không cấn trừ' }].map(o => (
+              <label key={String(o.v)} className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm ${applyCredit === o.v ? 'border-primary bg-white text-primary' : 'border-amber-200 bg-white/60 text-slate-700'}`}>
+                <input type="radio" name="applyCredit" checked={applyCredit === o.v} onChange={() => setApplyCredit(o.v)} className="accent-primary" />
+                {o.label}
+              </label>
+            ))}
+          </div>
+          {applyCredit && credit.amount > credit.nextMonthAmount && (
+            <p className="mt-2 text-xs text-amber-800">Học phí lớp mới tháng {credit.month} ước tính {fmtMoney(credit.nextMonthAmount)}, ít hơn khoản cấn trừ: phần dư {fmtMoney(credit.amount - credit.nextMonthAmount)} không được trừ tự động.</p>
+          )}
+        </fieldset>
+      )}
+
+      <div className="flex gap-3 pt-1">
+        <button type="button" onClick={onClose} className="flex-1 btn-secondary justify-center">Huỷ</button>
+        <button type="button" onClick={handleSubmit} disabled={saving || !preview || previewLoading || needsCreditChoice}
+          className="flex-1 btn-primary justify-center disabled:opacity-60">
+          {saving ? 'Đang chuyển...' : needsCreditChoice ? 'Chọn có cấn trừ không' : 'Xác nhận chuyển lớp'}
+        </button>
+      </div>
+    </>
+  )
+}
+
+/** Lịch học của học viên ở một lớp: đổi buổi học cố định trong tuần, chuyển lớp hoặc cho nghỉ lớp. */
+function EnrollmentScheduleModal({ studentId, enrollment, activeClassIds, onClose, onSaved }: {
+  studentId: string; enrollment: ClassEnrollment; activeClassIds: string[]; onClose: () => void; onSaved: () => void
+}) {
+  const [tab, setTab] = useState<'weekdays' | 'transfer' | 'drop'>('weekdays')
   const [effectiveFrom, setEffectiveFrom] = useState(() => {
     const firstOfMonth = vnToday().slice(0, 8) + '01'
     return enrollment.enrollmentDate > firstOfMonth ? enrollment.enrollmentDate : firstOfMonth
@@ -533,7 +756,7 @@ function EnrollmentScheduleModal({ studentId, enrollment, onClose, onSaved }: { 
   const [autoMoved, setAutoMoved] = useState<{ tab: 'weekdays' | 'drop'; from: string; to: string; months: string } | null>(null)
   const body = tab === 'drop' ? { action: 'drop', dropDate } : { action: 'weekdays', days, effectiveFrom }
   const bodyKey = JSON.stringify(body)
-  const ready = tab === 'drop' ? !!dropDate : !!effectiveFrom && !!slots?.length && days.length > 0
+  const ready = tab === 'transfer' ? false : tab === 'drop' ? !!dropDate : !!effectiveFrom && !!slots?.length && days.length > 0
   useEffect(() => {
     setPreview(null); setPreviewError('')
     if (!ready) return
@@ -589,11 +812,17 @@ function EnrollmentScheduleModal({ studentId, enrollment, onClose, onSaved }: { 
           <button type="button" role="tab" aria-selected={tab === 'weekdays'} onClick={() => { setTab('weekdays'); setError('') }} className={tabCls(tab === 'weekdays')}>
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">edit_calendar</span>Đổi buổi học
           </button>
+          <button type="button" role="tab" aria-selected={tab === 'transfer'} onClick={() => { setTab('transfer'); setError('') }} className={tabCls(tab === 'transfer')}>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">swap_horiz</span>Chuyển lớp
+          </button>
           <button type="button" role="tab" aria-selected={tab === 'drop'} onClick={() => { setTab('drop'); setError('') }} className={tabCls(tab === 'drop')}>
             <span aria-hidden="true" className="material-symbols-outlined text-[18px]">person_remove</span>Nghỉ lớp
           </button>
         </div>
 
+        {tab === 'transfer' ? (
+          <TransferPanel studentId={studentId} enrollment={enrollment} activeClassIds={activeClassIds} onClose={onClose} onSaved={onSaved} />
+        ) : (<>
         {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
 
         {tab === 'weekdays' ? (
@@ -642,6 +871,7 @@ function EnrollmentScheduleModal({ studentId, enrollment, onClose, onSaved }: { 
             </button>
           )}
         </div>
+        </>)}
       </form>
     </Modal>
   )
@@ -893,7 +1123,7 @@ function InfoTab({
                         <button
                           onClick={() => setWeekdaysFor(e)}
                           className="p-1.5 rounded-lg hover:bg-primary/10 text-outline hover:text-primary transition-colors"
-                          title="Lịch học: đổi buổi học hoặc cho nghỉ lớp"
+                          title="Lịch học: đổi buổi học, chuyển lớp hoặc cho nghỉ lớp"
                           aria-label={`Lịch học lớp ${e.className}`}
                         >
                           <span className="material-symbols-outlined text-base">edit_calendar</span>
@@ -1047,6 +1277,7 @@ function InfoTab({
         <EnrollmentScheduleModal
           studentId={student.id}
           enrollment={weekdaysFor}
+          activeClassIds={activeEnrollments.map(e => e.classId)}
           onClose={() => setWeekdaysFor(null)}
           onSaved={() => { setWeekdaysFor(null); onRefresh() }}
         />

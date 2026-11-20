@@ -6,10 +6,10 @@ import type { ClassEnrollment } from '../types/models'
 import { calculateTuitionForStudent, estimateClassTuition } from './tuitionCalculator'
 
 const fail = (message: string, status = 400): never => { throw Object.assign(new Error(message), { status }) }
-const isDate = (value: unknown): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+export const isDate = (value: unknown): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
   && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value
 const label = (days: string[]) => days.map(d => WEEKDAY_LABELS[d as Weekday] ?? d).join(', ')
-const monthKey = (month: number, year: number) => `${year}-${String(month).padStart(2, '0')}`
+export const monthKey = (month: number, year: number) => `${year}-${String(month).padStart(2, '0')}`
 
 /** Các thứ lớp có lịch học vào/sau ngày `from` — chỉ được chọn trong số này. */
 async function classWeekdaysFrom(classId: string, from: string, tx: Tx = prisma): Promise<Weekday[]> {
@@ -22,7 +22,7 @@ async function classWeekdaysFrom(classId: string, from: string, tx: Tx = prisma)
  * Chuẩn hoá danh sách thứ học viên chọn. Trả [] khi học đủ mọi buổi của lớp
  * (để lớp thêm buổi sau này thì học viên học đủ vẫn được tính đủ).
  */
-async function normalizeDays(classId: string, from: string, input: unknown, tx: Tx = prisma): Promise<Weekday[]> {
+export async function normalizeDays(classId: string, from: string, input: unknown, tx: Tx = prisma): Promise<Weekday[]> {
   if (input == null) return []
   if (!Array.isArray(input) || !input.every(isWeekday)) fail('Ngày học trong tuần không hợp lệ')
   const chosen = new Set(input as Weekday[])
@@ -185,8 +185,8 @@ export async function previewEnrollmentChange(studentId: string, enrollmentId: s
   return { fromDate: p.fromDate, months: impacts.map(publicImpact), blocked, suggestedDate }
 }
 
-const lastDayOf = (month: number, year: number) => `${monthKey(month, year)}-${String(new Date(Date.UTC(year, month, 0)).getUTCDate()).padStart(2, '0')}`
-const firstDayAfter = (month: number, year: number) => month === 12 ? `${year + 1}-01-01` : `${monthKey(month + 1, year)}-01`
+export const lastDayOf = (month: number, year: number) => `${monthKey(month, year)}-${String(new Date(Date.UTC(year, month, 0)).getUTCDate()).padStart(2, '0')}`
+export const firstDayAfter = (month: number, year: number) => month === 12 ? `${year + 1}-01-01` : `${monthKey(month + 1, year)}-01`
 
 /**
  * Ngày gợi ý khi bị chặn vì tháng đã thu/xuất hoá đơn: nghỉ lớp → ngày cuối của tháng bị chặn sau cùng

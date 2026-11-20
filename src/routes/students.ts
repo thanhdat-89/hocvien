@@ -23,6 +23,7 @@ import type { ClassEnrollment } from '../types/models'
 import { parseInvoiceInfo } from '../services/studentInvoiceInfo'
 import { getStudentInvoicePreview } from '../services/studentInvoicePreview'
 import { createInitialWeekdayPlan, dropEnrollment, previewEnrollmentChange, setEnrollmentWeekdays } from '../services/enrollmentWeekdays'
+import { previewTransfer, transferEnrollment } from '../services/enrollmentTransfer'
 import { importPrivateSchedule, privateScheduleSuggestions } from '../services/privateScheduleImport'
 
 const router = Router()
@@ -467,11 +468,22 @@ router.put('/:id/enroll/:enrollmentId/drop', requireRole('ADMIN', 'STAFF'), asyn
   }
 })
 
+// POST /api/students/:id/enroll/:enrollmentId/transfer — chuyển sang lớp khác cùng khối.
+// body: { toClassId, startDate: ngày bắt đầu học lớp mới, days?: thứ học ở lớp mới, applyCredit?: cấn trừ phần lớp cũ đã thu }
+router.post('/:id/enroll/:enrollmentId/transfer', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    res.json(await transferEnrollment(s(req.params.id), s(req.params.enrollmentId), req.body ?? {}, req.user?.userId))
+  } catch (err) {
+    next(err)
+  }
+})
+
 // POST /api/students/:id/enroll/:enrollmentId/preview — xem trước ảnh hưởng học phí, không ghi gì.
 // body: { action: 'weekdays', days, effectiveFrom } | { action: 'drop', dropDate }
 router.post('/:id/enroll/:enrollmentId/preview', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const body = req.body ?? {}
+    if (body.action === 'transfer') { res.json(await previewTransfer(s(req.params.id), s(req.params.enrollmentId), body)); return }
     if (body.action !== 'weekdays' && body.action !== 'drop') { res.status(400).json({ message: 'Thao tác không hợp lệ' }); return }
     res.json(await previewEnrollmentChange(s(req.params.id), s(req.params.enrollmentId), body))
   } catch (err) {

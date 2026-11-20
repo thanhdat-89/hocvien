@@ -86,8 +86,9 @@ export async function estimateClassTuition(
   // sau ngày nghỉ bị loại và phiếu ra 0 đồng.
   const loaded: ClassEnrollment[] = (await prisma.classEnrollment.findMany({ where: { classId, studentId }, include: enrollmentInclude }))
     .map(enrollmentDoc)
-  if (!loaded.length) throw new Error(`Học viên ${studentId} không đăng ký lớp ${classId}`)
-  const enrollments = (adjust ? adjust(loaded) : loaded)
+  const adjusted = adjust ? adjust(loaded) : loaded
+  if (!adjusted.length) throw new Error(`Học viên ${studentId} không đăng ký lớp ${classId}`)
+  const enrollments = adjusted
     .sort((a: any, b: any) => Number(b.status === 'ACTIVE') - Number(a.status === 'ACTIVE')
       || String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
       || String(a.id).localeCompare(String(b.id)))
