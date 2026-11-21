@@ -26,6 +26,7 @@ import { createInitialWeekdayPlan, dropEnrollment, previewEnrollmentChange, setE
 import { previewTransfer, transferEnrollment } from '../services/enrollmentTransfer'
 import { calculateTuitionForStudent } from '../services/tuitionCalculator'
 import { importPrivateSchedule, privateScheduleSuggestions } from '../services/privateScheduleImport'
+import { snapshotDelete, trackUndo } from '../lib/undo'
 
 const router = Router()
 router.use(authenticate)
@@ -361,6 +362,11 @@ router.delete('/:id', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, re
 router.delete('/:id/hard', requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const studentId = s(req.params.id)
+    const student = await prisma.student.findUnique({ where: { id: studentId }, select: { fullName: true } })
+    if (!student) { res.status(404).json({ message: 'Không tìm thấy học viên' }); return }
+    // Chụp toàn bộ dữ liệu sẽ mất để khôi phục được trong 30 ngày (Lịch sử hoạt động → Hoàn tác)
+    const undoId = await snapshotDelete('students', studentId, `Xoá hẳn học viên ${student.fullName}`, { userId: req.user!.userId, branchId: req.branchId })
+    trackUndo(req, res, undoId, false)
 
     await prisma.$transaction(async tx => {
       const active = await tx.classEnrollment.findMany({ where: { studentId, status: 'ACTIVE' }, select: { classId: true } })
@@ -382,6 +388,11 @@ router.delete('/:id/hard', requireRole('ADMIN'), async (req: AuthRequest, res: R
 // POST /api/students/bulk-delete — HARD DELETE xoá vĩnh viễn tất cả học viên (xác nhận bằng mật khẩu tài khoản admin đang đăng nhập)
 router.post('/bulk-delete', requireRole('ADMIN'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    // Tắt trên production: một cú bấm xoá sạch mọi học viên + học phí + thanh toán. Cần thì đặt ALLOW_BULK_DELETE_STUDENTS=true.
+    if (process.env.NODE_ENV === 'production' && process.env.ALLOW_BULK_DELETE_STUDENTS !== 'true') {
+      res.status(403).json({ message: 'Chức năng xoá toàn bộ học viên đã bị tắt để bảo vệ dữ liệu. Hãy xoá từng học viên (có thể khôi phục trong 30 ngày).' })
+      return
+    }
     const { password } = req.body as { password?: string }
     const user = await prisma.user.findUnique({ where: { id: req.user!.userId }, select: { passwordHash: true } })
     if (!password || !user || !(await bcrypt.compare(password, user.passwordHash))) {

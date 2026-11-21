@@ -45,6 +45,12 @@ const RESOURCE_OPTIONS: { value: string; label: string }[] = [
   { value: 'notifications', label: 'Thông báo' },
 ]
 
+/** Nhật ký của thao tác có ảnh chụp hoàn tác (xoá hẳn học viên, tính học phí hàng loạt, tạo buổi học) */
+const undoIdOf = (log: ActivityLog): string | null => {
+  const a = log.after as { undoId?: unknown } | null | undefined
+  return a && typeof a === 'object' && typeof a.undoId === 'string' ? a.undoId : null
+}
+
 const fmtDateTime = (iso: string): string => {
   if (!iso) return ''
   const d = new Date(iso)
@@ -243,6 +249,9 @@ export default function Activity({ embedded = false }: { embedded?: boolean }) {
                           {tone.label}
                         </span>
                         <p className="text-sm text-on-surface">{log.description}</p>
+                        {undoIdOf(log) && (
+                          <span title="Có thể hoàn tác — mở để xem" className="material-symbols-outlined text-[16px] text-primary shrink-0">settings_backup_restore</span>
+                        )}
                       </div>
                     </td>
                     <td className="table-cell">
@@ -273,12 +282,13 @@ export default function Activity({ embedded = false }: { embedded?: boolean }) {
         </nav>
       </div>
 
-      {detail && <ActivityDetailModal log={detail} onClose={() => setDetail(null)} />}
+      {detail && <ActivityDetailModal log={detail} onClose={() => setDetail(null)} onUndone={() => void loadPage(0, true)} />}
     </div>
   )
 }
 
-function ActivityDetailModal({ log, onClose }: { log: ActivityLog; onClose: () => void }) {
+function ActivityDetailModal({ log, onClose, onUndone }: { log: ActivityLog; onClose: () => void; onUndone: () => void }) {
+  const undoId = undoIdOf(log)
   const tone = ACTION_TONE[log.action]
   const fmtJson = (v: unknown): string => {
     if (v == null) return '—'
@@ -314,6 +324,8 @@ function ActivityDetailModal({ log, onClose }: { log: ActivityLog; onClose: () =
             {log.resourceId && <Field label="Resource ID" value={log.resourceId} mono />}
           </div>
 
+          {undoId && <UndoPanel undoId={undoId} onUndone={onUndone} />}
+
           {(log.before !== undefined || log.after !== undefined) && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
               <div>
@@ -343,6 +355,114 @@ function Field({ label, value, mono }: { label: string; value: string; mono?: bo
     <div>
       <p className="text-[10px] font-bold text-outline uppercase tracking-wider mb-0.5">{label}</p>
       <p className={`text-sm text-on-surface break-all ${mono ? 'font-mono' : ''}`}>{value}</p>
+    </div>
+  )
+}
+
+interface UndoResult { restored: number; reverted: number; deleted: number; skipped: { table: string; reason: string; count: number }[] }
+interface UndoInfo {
+  id: string; kind: 'delete' | 'batch'; label: string; createdAt: string; expiresAt: string
+  undoneAt: string | null; undoneBy: string | null; undoResult: UndoResult | null
+  allowed: boolean; preview: UndoResult | { error: string } | null
+}
+
+const TABLE_LABEL: Record<string, string> = {
+  students: 'học viên', class_enrollments: 'ghi danh', enrollment_weekday_plans: 'lịch học trong tuần', parents: 'phụ huynh',
+  payments: 'thanh toán', tuition_records: 'phiếu học phí', private_sessions: 'buổi học riêng', student_attendances: 'điểm danh',
+  student_promotions: 'khuyến mãi', student_reviews: 'nhận xét', monthly_scores: 'điểm tháng', tuition_adjustments: 'điều chỉnh học phí',
+  sessions: 'buổi học',
+}
+const tableLabel = (t: string) => TABLE_LABEL[t] ?? t
+const reasonLabel = (r: string) => r.replace(/ở ([a-z_]+)$/, (_, t) => `(${tableLabel(t)})`)
+
+function UndoSummary({ r, verb }: { r: UndoResult; verb: 'sẽ' | 'đã' }) {
+  const parts = [
+    r.restored ? `${verb === 'sẽ' ? 'Thêm lại' : 'Đã thêm lại'} ${r.restored} dòng` : '',
+    r.reverted ? `${verb === 'sẽ' ? 'Trả lại giá trị cũ cho' : 'Đã trả lại giá trị cũ cho'} ${r.reverted} dòng` : '',
+    r.deleted ? `${verb === 'sẽ' ? 'Xoá' : 'Đã xoá'} ${r.deleted} dòng do thao tác tạo ra` : '',
+  ].filter(Boolean)
+  return (
+    <div className="space-y-1 text-sm">
+      {parts.length ? parts.map(p => <p key={p}>• {p}</p>) : <p>Không còn gì để hoàn tác.</p>}
+      {r.skipped.map(x => (
+        <p key={x.table + x.reason} className="text-amber-700">• Bỏ qua {x.count} {tableLabel(x.table)}: {reasonLabel(x.reason)}</p>
+      ))}
+    </div>
+  )
+}
+
+/** Trạng thái + xem trước + nút Hoàn tác cho nhật ký có ảnh chụp (API /undo/:id) */
+function UndoPanel({ undoId, onUndone }: { undoId: string; onUndone: () => void }) {
+  const [info, setInfo] = useState<UndoInfo | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState<UndoResult | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    api.get(`/undo/${undoId}`).then(r => { if (alive) setInfo(r.data) })
+      .catch(e => { if (alive) setError(e?.response?.data?.message ?? 'Không tải được thông tin hoàn tác') })
+    return () => { alive = false }
+  }, [undoId])
+
+  const run = async () => {
+    setBusy(true); setError(null)
+    try {
+      const r = await api.post(`/undo/${undoId}`, {}, { timeout: 60_000 })
+      setDone(r.data); setConfirming(false); onUndone()
+    } catch (e: any) {
+      setError(e?.response?.data?.message ?? 'Hoàn tác không thành công. Dữ liệu chưa bị thay đổi.')
+    } finally { setBusy(false) }
+  }
+
+  const box = 'rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-3'
+  if (error && !info) return <div className={box}><p className="text-sm text-outline">{error}</p></div>
+  if (!info) return <div className={box}><p className="text-sm text-outline">Đang kiểm tra khả năng hoàn tác…</p></div>
+
+  const result = done ?? (info.undoneAt ? info.undoResult : null)
+  const preview = info.preview && !('error' in info.preview) ? info.preview : null
+  const previewError = info.preview && 'error' in info.preview ? info.preview.error : null
+  const nothing = preview && !preview.restored && !preview.reverted && !preview.deleted
+
+  return (
+    <div className={box}>
+      <div className="flex items-center gap-2">
+        <span className="material-symbols-outlined text-primary">settings_backup_restore</span>
+        <p className="font-semibold text-on-surface text-sm">Hoàn tác: {info.label}</p>
+      </div>
+      {result ? (
+        <>
+          <p className="text-sm text-emerald-700 font-semibold">
+            Đã hoàn tác{info.undoneAt && !done ? ` lúc ${fmtDateTime(info.undoneAt)}${info.undoneBy ? ` bởi ${info.undoneBy}` : ''}` : ''}.
+          </p>
+          <UndoSummary r={result} verb="đã" />
+        </>
+      ) : !info.allowed ? (
+        <p className="text-sm text-outline">Chỉ quản trị viên được khôi phục học viên đã xoá.</p>
+      ) : previewError ? (
+        <p className="text-sm text-outline">{previewError}</p>
+      ) : preview && (
+        <>
+          <p className="text-xs text-outline">Có thể hoàn tác đến {fmtDateTime(info.expiresAt)}. Chỉ những dòng chưa bị sửa sau thao tác mới được hoàn tác.</p>
+          <UndoSummary r={preview} verb="sẽ" />
+          {error && <p className="text-sm text-error">{error}</p>}
+          {!nothing && (confirming ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-semibold text-on-surface">Chắc chắn hoàn tác?</span>
+              <button onClick={() => void run()} disabled={busy}
+                className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-50">
+                {busy ? 'Đang hoàn tác…' : 'Hoàn tác'}
+              </button>
+              <button onClick={() => setConfirming(false)} disabled={busy}
+                className="rounded-xl px-3 py-2 text-sm font-semibold text-outline hover:bg-surface-container-low">Huỷ</button>
+            </div>
+          ) : (
+            <button onClick={() => setConfirming(true)}
+              className="rounded-xl bg-primary/10 px-4 py-2 text-sm font-semibold text-primary hover:bg-primary/20">Hoàn tác…</button>
+          ))}
+        </>
+      )}
     </div>
   )
 }

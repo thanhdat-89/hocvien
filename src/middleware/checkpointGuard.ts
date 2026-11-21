@@ -20,6 +20,7 @@ const RULES: Array<{ method: string; path: RegExp; reason: string }> = [
   { method: 'DELETE', path: /^\/api\/sessions\/scheduled$/, reason: 'xoa-buoi-hang-loat' },
   { method: 'POST', path: /^\/api\/tuition\/calculate-bulk$/, reason: 'tinh-hoc-phi-hang-loat' },
   { method: 'DELETE', path: /^\/api\/tuition\/payment\/([^/]+)$/, reason: 'xoa-thanh-toan' },
+  { method: 'POST', path: /^\/api\/undo\/([^/]+)$/, reason: 'hoan-tac' },
 ]
 
 export function matchCheckpointRule(method: string, path: string) {

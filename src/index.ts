@@ -31,6 +31,7 @@ import userRoutes from './routes/users'
 import branchRoutes from './routes/branches'
 import schoolYearRoutes from './routes/schoolYears'
 import alertRoutes from './routes/alerts'
+import undoRoutes from './routes/undo'
 
 import { errorHandler, notFound } from './middleware/errorHandler'
 import { prisma } from './lib/db'
@@ -120,6 +121,7 @@ app.use('/api/users',          userRoutes)
 app.use('/api/branches',       branchRoutes)
 app.use('/api/school-years',   schoolYearRoutes)
 app.use('/api/alerts',         alertRoutes)
+app.use('/api/undo',           undoRoutes)
 
 // ─── Error handlers ───────────────────────────────────────────
 app.use(notFound)

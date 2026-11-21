@@ -1012,3 +1012,23 @@ model TuitionAdjustment {
   @@index([studentId, classId, billingYear, billingMonth])
   @@map("tuition_adjustments")
 }
+
+/// Ảnh chụp dữ liệu để hoàn tác thao tác nguy hiểm: xoá hẳn học viên (kind "delete"), tính học phí hàng loạt / tạo
+/// buổi học (kind "batch": trước + sau thao tác). Giữ 30 ngày. Xem src/lib/undo.ts.
+model UndoSnapshot {
+  id          String    @id
+  kind        String
+  label       String
+  data        Json
+  branchId    String?
+  createdById String
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  afterAt     DateTime? @db.Timestamptz(3)
+  expiresAt   DateTime  @db.Timestamptz(3)
+  undoneAt    DateTime? @db.Timestamptz(3)
+  undoneById  String?
+  undoResult  Json?
+
+  @@index([expiresAt])
+  @@map("undo_snapshots")
+}

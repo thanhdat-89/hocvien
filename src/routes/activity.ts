@@ -4,6 +4,7 @@ import { prisma, api } from '../lib/db'
 import { createError } from '../middleware/errorHandler'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
+import { purgeUndoSnapshots } from '../lib/undo'
 
 const router = Router()
 
@@ -21,7 +22,8 @@ router.get('/cleanup', async (req: Request, res: Response, next: NextFunction) =
     cutoff.setMonth(cutoff.getMonth() - 12)
 
     const { count } = await prisma.activityLog.deleteMany({ where: { createdAt: { lt: cutoff } } })
-    res.json({ deleted: count, cutoff: cutoff.toISOString() })
+    const undoSnapshots = await purgeUndoSnapshots()   // ảnh chụp hoàn tác quá 30 ngày
+    res.json({ deleted: count, undoSnapshots, cutoff: cutoff.toISOString() })
   } catch (err) { next(err) }
 })
 

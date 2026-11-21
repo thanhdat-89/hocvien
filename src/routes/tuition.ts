@@ -5,6 +5,7 @@ import { retryMisaDraftForExistingRecord, tryCreateAutomaticMisaDraft } from '..
 import { activityContext } from '../middleware/activityContext'
 import { getTuitionWorkflowResult } from '../services/tuitionWorkflowResult'
 import { validPeriod } from '../services/readViews'
+import { snapshotBatch, trackUndo } from '../lib/undo'
 import { Router, Response, NextFunction } from 'express'
 import type { Prisma } from '@prisma/client'
 import { prisma, api, newId, toDay, toClassId, fromClassId } from '../lib/db'
@@ -226,6 +227,12 @@ router.post('/calculate-bulk', requireRole('ADMIN', 'STAFF'), async (req: AuthRe
       res.status(401).json({ message: 'Mật khẩu xác nhận không đúng' })
       return
     }
+
+    // Chụp phiếu học phí của các lớp trong tháng trước khi tính, để hoàn tác cả đợt (Lịch sử hoạt động)
+    const undoId = await snapshotBatch([{ table: 'tuition_records', where: {
+      billingMonth: Number(month), billingYear: Number(year), classId: classIds.map(id => toClassId(id)) } }],
+      `Tính học phí hàng loạt tháng ${month}/${year} (${classIds.length} lớp)`, { userId: req.user!.userId, branchId: req.branchId })
+    trackUndo(req, res, undoId, true)
 
     let created = 0, updated = 0, failed = 0
     const invoiceDrafts: any[] = []

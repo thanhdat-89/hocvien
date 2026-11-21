@@ -4,6 +4,9 @@ import { s } from '../lib/params'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
 import { generateSessionsFromSchedule, generateSessionsForClassMonth } from '../services/sessionGenerator'
+import { snapshotBatch, trackUndo } from '../lib/undo'
+
+const ymd = (d: Date) => d.toISOString().slice(0, 10)
 
 const router = Router()
 
@@ -102,6 +105,11 @@ router.post('/generate-month', requireRole('ADMIN', 'STAFF'), async (req: AuthRe
   try {
     const { classId, year, month } = req.body
     if (!classId || !year || !month) { res.status(400).json({ message: 'Cần classId, year, month' }); return }
+    const start = new Date(Date.UTC(Number(year), Number(month) - 1, 1)), end = new Date(Date.UTC(Number(year), Number(month), 1))
+    if (Number.isNaN(start.getTime())) { res.status(400).json({ message: 'Tháng không hợp lệ' }); return }
+    const undoId = await snapshotBatch([{ table: 'sessions', where: { classId: String(classId), sessionDate: { gte: ymd(start), lt: ymd(end) } } }],
+      `Tạo buổi học tháng ${month}/${year}`, { userId: req.user!.userId, branchId: req.branchId })
+    trackUndo(req, res, undoId, true)
     const count = await generateSessionsForClassMonth(classId, Number(year), Number(month))
     res.json({ message: `Đã tạo ${count} buổi cho tháng ${month}/${year}`, count })
   } catch (err) { next(err) }
@@ -112,6 +120,12 @@ router.post('/:id/generate', requireRole('ADMIN', 'STAFF'), async (req: AuthRequ
   try {
     const { fromDate, toDate } = req.body
     if (!fromDate || !toDate) { res.status(400).json({ message: 'Cần fromDate và toDate' }); return }
+    const from = toDay(fromDate), to = toDay(toDate)
+    if (!from || !to) { res.status(400).json({ message: 'Ngày không hợp lệ' }); return }
+    const undoId = await snapshotBatch([{ table: 'sessions', where: { scheduleId: s(req.params.id),
+      sessionDate: { gte: ymd(from), lt: ymd(new Date(to.getTime() + 86400_000)) } } }],
+      `Tạo buổi học từ lịch ${ymd(from)} → ${ymd(to)}`, { userId: req.user!.userId, branchId: req.branchId })
+    trackUndo(req, res, undoId, true)
     const count = await generateSessionsFromSchedule(s(req.params.id), new Date(fromDate), new Date(toDate))
     res.json({ message: `Đã tạo ${count} buổi học`, count })
   } catch (err) { next(err) }

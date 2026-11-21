@@ -60,7 +60,7 @@ function routeHandler(router, routePath, method) {
   const handle = layer.route.stack[layer.route.stack.length - 1].handle
   return async req => {
     let body, status = 200, failure
-    const res = { status(code) { status = code; return this }, json(value) { body = value; return this }, setHeader() {} }
+    const res = { status(code) { status = code; return this }, json(value) { body = value; return this }, setHeader() {}, on() { return this } }
     await handle({ params: {}, query: {}, body: {}, headers: {}, ...req }, res, err => { failure = err })
     if (failure) throw failure
     return { status, body }
