@@ -35,6 +35,7 @@ import alertRoutes from './routes/alerts'
 import { errorHandler, notFound } from './middleware/errorHandler'
 import { prisma } from './lib/db'
 import { activityLogMiddleware } from './middleware/activityLog'
+import { checkpointGuard } from './middleware/checkpointGuard'
 import { readViewInvalidation } from './middleware/readViewInvalidation'
 
 const app = express()
@@ -64,6 +65,8 @@ app.use((req, res, next) => {
 
 app.use(activityLogMiddleware)
 app.use(readViewInvalidation)
+// Điểm khôi phục (pg_dump) trước thao tác xoá / ghi đè hàng loạt — xem middleware/checkpointGuard.ts
+app.use(checkpointGuard)
 
 // ─── Health check ─────────────────────────────────────────────
 app.get('/health', async (_req, res) => {

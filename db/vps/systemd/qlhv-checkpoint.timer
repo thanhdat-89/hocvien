@@ -1,0 +1,9 @@
+[Unit]
+Description=Điểm khôi phục database qlhv mỗi 15 phút (chỉ khi có dữ liệu mới)
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+
+[Install]
+WantedBy=timers.target

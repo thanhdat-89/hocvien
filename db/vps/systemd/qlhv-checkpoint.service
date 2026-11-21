@@ -1,0 +1,8 @@
+[Unit]
+Description=Điểm khôi phục database qlhv (khi có chỉnh sửa)
+After=postgresql.service
+OnFailure=theodoi-alert@%n.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/qlhv-checkpoint

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Sao lưu database qlhv mỗi đêm (systemd timer qlhv-backup.timer), giữ 30 bản trên VPS.
 # Tách khỏi sao lưu của hocthemtoan (/var/backups/htt). Cài đặt: xem db/vps/README.md.
+# --max-depth 1: chỉ dọn bản qlhv-*.dump ở gốc — thư mục con (theodoi/, checkpoints/, pre-op/) có hạn giữ riêng.
+# KetoanCQT/ (bản ketoan, ketoan-backup không tự dọn) giữ 30 ngày như trước, dọn ở đây.
 # Có remote rclone "qlhv-gdrive-crypt" (Google Drive, mã hoá) thì đẩy thêm bản mới lên Drive, giữ 30 ngày;
 # đẩy lỗi thì ghi cảnh báo vào chuông thông báo của QLHV (bản trên VPS vẫn giữ).
 set -euo pipefail
@@ -16,7 +18,8 @@ echo "$(date '+%F %T') qlhv backup: $(du -h "$FILE" | cut -f1)"
 
 if rclone listremotes 2>/dev/null | grep -qx "$REMOTE"; then
   if rclone copyto "$FILE" "${REMOTE}$(basename "$FILE")" --retries 5 2>/tmp/qlhv-backup-upload.err \
-    && rclone delete "$REMOTE" --min-age 30d 2>>/tmp/qlhv-backup-upload.err; then
+    && rclone delete "$REMOTE" --min-age 30d --max-depth 1 2>>/tmp/qlhv-backup-upload.err \
+    && rclone delete "${REMOTE}KetoanCQT" --min-age 30d 2>>/tmp/qlhv-backup-upload.err; then
     echo "$(date '+%F %T') qlhv backup: đã đẩy lên Google Drive"
   else
     echo "$(date '+%F %T') qlhv backup: LỖI đẩy lên Google Drive: $(tail -c 300 /tmp/qlhv-backup-upload.err)" >&2
