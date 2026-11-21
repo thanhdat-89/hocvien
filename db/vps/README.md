@@ -120,3 +120,7 @@ qlhv-restore-rows close
 `--apply` chỉ thêm dòng thiếu; `--overwrite` ghi đè dòng khác; `--delete-extra` xoá dòng không có trong điểm khôi phục
 (xoá theo CASCADE — luôn xem trước). Xong tự đếm lại sĩ số lớp (nếu đụng ghi danh) và `pm2 reload qlhv-api` (xoá cache).
 Điểm khôi phục khác migration với database thật → script từ chối, phải chép tay.
+
+**Tài liệu (Cloudinary).** 21/11/2026: bảng `materials` trống, tài khoản Cloudinary chỉ có file mẫu của Cloudinary
+(`samples/`, `sample*`) và một file thử — chưa có gì cần sao lưu. Diễn tập hằng tuần (`theodoi-restore-check`) báo ⚠️ qua
+Telegram khi có file tài liệu đầu tiên; lúc đó làm sao lưu: đọc `materials` (type FILE) → tải về Drive `qlhv-gdrive-crypt:tai-lieu/`.
