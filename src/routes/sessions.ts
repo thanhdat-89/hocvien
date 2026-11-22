@@ -5,6 +5,7 @@ import { sessionDoc, sessionInclude } from '../lib/docs'
 import { s } from '../lib/params'
 import { authenticate, requireRole } from '../middleware/auth'
 import { AuthRequest } from '../types'
+import { sessionChangeImpact, toggleSession } from '../services/sessionCancel'
 
 const router = Router()
 router.use(authenticate)
@@ -126,18 +127,29 @@ router.put('/:id/complete', requireRole('ADMIN', 'STAFF', 'TEACHER'), async (req
   }
 })
 
-// PUT /api/sessions/:id/cancel
+// GET /api/sessions/:id/cancel-preview?action=cancel|restore — ảnh hưởng học phí trước khi huỷ/khôi phục
+router.get('/:id/cancel-preview', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const action = req.query.action === 'restore' ? 'restore' : 'cancel'
+    const { recalcStudentIds, ...impact } = await sessionChangeImpact(s(req.params.id), action)
+    res.json({ ...impact, recalcRecords: recalcStudentIds.length })
+  } catch (err) { next(err) }
+})
+
+// PUT /api/sessions/:id/cancel — huỷ buổi (không tính học phí), tính lại phiếu chưa thu của tháng đó
 router.put('/:id/cancel', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { cancelReason } = req.body
-    await prisma.session.update({
-      where: { id: s(req.params.id) },
-      data: { status: 'CANCELLED', cancelReason: cancelReason || null },
-    })
-    res.json({ message: 'Đã huỷ buổi học' })
-  } catch (err) {
-    next(err)
-  }
+    const result = await toggleSession(s(req.params.id), 'cancel', req.body?.cancelReason)
+    res.json({ message: 'Đã huỷ buổi học', recalculated: result.recalculated, failedStudents: result.failedStudents })
+  } catch (err) { next(err) }
+})
+
+// PUT /api/sessions/:id/restore — khôi phục buổi đã huỷ, tính lại phiếu chưa thu của tháng đó
+router.put('/:id/restore', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const result = await toggleSession(s(req.params.id), 'restore')
+    res.json({ message: 'Đã khôi phục buổi học', recalculated: result.recalculated, failedStudents: result.failedStudents })
+  } catch (err) { next(err) }
 })
 
 export default router

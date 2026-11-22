@@ -62,6 +62,15 @@ const CLASS_COLORS = [
 
 // ─── Session details ───────────────────────────────────────────────────────
 
+interface SessionChangeImpact {
+  month: number
+  year: number
+  studentCount: number
+  amount: number
+  lockedRecords: number
+  recalcRecords: number
+}
+
 function SessionModal({ session, onClose, onDone, onSessionUpdate }: {
   session: Session
   onClose: () => void
@@ -74,6 +83,9 @@ function SessionModal({ session, onClose, onDone, onSessionUpdate }: {
   const [savingTeacher, setSavingTeacher] = useState(false)
   const [savingStatus, setSavingStatus] = useState(false)
   const [error, setError] = useState('')
+  // Bước xác nhận huỷ/khôi phục: xem trước ảnh hưởng học phí trước khi ghi
+  const [confirming, setConfirming] = useState<null | { action: 'cancel' | 'restore'; impact: SessionChangeImpact | null }>(null)
+  const [cancelReason, setCancelReason] = useState('')
   const { canManageClasses } = useAuth()
   const todayLocal = toISO(new Date())
   const isPast = session.sessionDate <= todayLocal
@@ -115,19 +127,39 @@ function SessionModal({ session, onClose, onDone, onSessionUpdate }: {
     }
   }
 
-  const handleCancel = async () => {
-    const reason = prompt('Lý do huỷ buổi học:')
-    if (reason === null) return
+  const startConfirm = async (action: 'cancel' | 'restore') => {
+    setError('')
+    setCancelReason('')
+    setConfirming({ action, impact: null })
+    try {
+      const res = await api.get(`/sessions/${session.id}/cancel-preview`, { params: { action } })
+      setConfirming({ action, impact: res.data })
+    } catch (err: any) {
+      setConfirming(null)
+      setError(err.response?.data?.message ?? 'Không tải được ảnh hưởng học phí. Vui lòng thử lại.')
+    }
+  }
+
+  const handleConfirm = async () => {
+    if (!confirming) return
     setSavingStatus(true)
     setError('')
     try {
-      await api.put(`/sessions/${session.id}/cancel`, { cancelReason: reason })
+      const res = confirming.action === 'cancel'
+        ? await api.put(`/sessions/${session.id}/cancel`, { cancelReason })
+        : await api.put(`/sessions/${session.id}/restore`, {})
+      if (res.data.failedStudents?.length) {
+        window.alert(`${res.data.message}, nhưng chưa tính lại được ${res.data.failedStudents.length} phiếu học phí. Hãy tính lại học phí tháng này ở trang Học phí.`)
+      }
       onDone()
-    } catch {
-      setError('Không thể huỷ buổi học. Vui lòng thử lại.')
+    } catch (err: any) {
+      setError(err.response?.data?.message ?? 'Không thể cập nhật buổi học. Vui lòng thử lại.')
       setSavingStatus(false)
     }
   }
+
+  const impact = confirming?.impact
+  const isHolidayCancel = isCancelled && session.cancelReason?.startsWith('Nghỉ lễ')
 
   return (
     <div className="responsive-dialog fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -168,12 +200,61 @@ function SessionModal({ session, onClose, onDone, onSessionUpdate }: {
               {savingTeacher && <p className="mt-1 text-xs text-outline">Đang lưu giáo viên...</p>}
             </div>
           )}
+          {confirming && (
+            <div className={`space-y-3 rounded-xl p-4 text-sm ${confirming.action === 'cancel' ? 'bg-error/5' : 'bg-primary/5'}`}>
+              <p className="font-semibold text-on-surface">{confirming.action === 'cancel' ? 'Xác nhận huỷ buổi học' : 'Xác nhận khôi phục buổi học'}</p>
+              {!impact ? (
+                <p className="text-outline">Đang tính ảnh hưởng học phí...</p>
+              ) : (
+                <>
+                  <p className="text-on-surface-variant">
+                    {impact.studentCount === 0
+                      ? 'Buổi này không nằm trong học phí của học viên nào.'
+                      : <>{confirming.action === 'cancel' ? 'Buổi này sẽ không được tính học phí' : 'Buổi này sẽ được tính học phí trở lại'} cho <b className="text-on-surface">{impact.studentCount} học viên</b>
+                        {' '}({confirming.action === 'cancel' ? 'giảm' : 'tăng'} tổng <b className="text-on-surface">{impact.amount.toLocaleString('vi-VN')}đ</b> trước giảm giá, tháng {impact.month}/{impact.year}).</>}
+                  </p>
+                  {impact.recalcRecords > 0 && !impact.lockedRecords && (
+                    <p className="text-on-surface-variant">{impact.recalcRecords} phiếu học phí tháng {impact.month} chưa thu tiền sẽ được tính lại tự động.</p>
+                  )}
+                  {impact.lockedRecords > 0 && (
+                    <p role="alert" className="rounded-lg bg-error/10 p-2.5 text-error">
+                      Không thể {confirming.action === 'cancel' ? 'huỷ' : 'khôi phục'}: tháng {impact.month}/{impact.year} đã có {impact.lockedRecords} phiếu học phí đã thu tiền hoặc đã xuất hoá đơn. Cần đối chiếu các phiếu đó trước.
+                    </p>
+                  )}
+                  {confirming.action === 'cancel' && !impact.lockedRecords && (
+                    <div>
+                      <label htmlFor="cancel-reason" className="mb-1.5 block text-xs font-medium text-on-surface">Lý do huỷ</label>
+                      <input id="cancel-reason" value={cancelReason} onChange={e => setCancelReason(e.target.value)} placeholder="VD: Giáo viên ốm" autoFocus
+                        className="w-full rounded-xl border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
+                    </div>
+                  )}
+                  {confirming.action === 'restore' && isHolidayCancel && !impact.lockedRecords && (
+                    <p className="text-on-surface-variant">Buổi này bị huỷ do ngày nghỉ lễ. Khôi phục sẽ cho lớp học vào ngày đó.</p>
+                  )}
+                </>
+              )}
+            </div>
+          )}
           {error && <p role="alert" className="text-sm text-error">{error}</p>}
         </div>
 
-        {!isCancelled && (
+        {confirming ? (
           <div className="flex flex-wrap justify-end gap-2 border-t border-outline-variant/15 px-6 py-4">
-            {canManageClasses && <button type="button" onClick={handleCancel} disabled={savingStatus} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-error hover:bg-error/10 disabled:opacity-50">Huỷ buổi học</button>}
+            <button type="button" onClick={() => setConfirming(null)} disabled={savingStatus} className="btn-secondary disabled:opacity-50">Quay lại</button>
+            {impact && !impact.lockedRecords && (
+              <button type="button" onClick={handleConfirm} disabled={savingStatus}
+                className={`rounded-xl px-4 py-2.5 text-sm font-semibold disabled:opacity-50 ${confirming.action === 'cancel' ? 'bg-error text-on-error hover:bg-error/90' : 'btn-primary'}`}>
+                {savingStatus ? 'Đang lưu...' : confirming.action === 'cancel' ? 'Huỷ buổi học' : 'Khôi phục buổi học'}
+              </button>
+            )}
+          </div>
+        ) : canManageClasses && isCancelled ? (
+          <div className="flex flex-wrap justify-end gap-2 border-t border-outline-variant/15 px-6 py-4">
+            <button type="button" onClick={() => startConfirm('restore')} className="btn-primary">Khôi phục buổi học</button>
+          </div>
+        ) : !isCancelled && (
+          <div className="flex flex-wrap justify-end gap-2 border-t border-outline-variant/15 px-6 py-4">
+            {canManageClasses && <button type="button" onClick={() => startConfirm('cancel')} disabled={savingStatus} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-error hover:bg-error/10 disabled:opacity-50">Huỷ buổi học</button>}
             {shownStatus === 'SCHEDULED' && isPast && <button type="button" onClick={handleComplete} disabled={savingStatus} className="btn-primary disabled:opacity-50">{savingStatus ? 'Đang lưu...' : 'Đánh dấu hoàn thành'}</button>}
           </div>
         )}
