@@ -59,28 +59,27 @@ test('send failure returns a safe result without raw provider error or token', a
   assert.equal(JSON.stringify(result).includes('fixture'), false)
 }))
 
-test('notification runs in Vercel background and sends once for a grouped invoice', async () => config(async () => {
-  const originalFetch = global.fetch
-  const contextSymbol = Symbol.for('@vercel/request-context')
-  const oldContext = global[contextSymbol]
-  const tasks = []; let sends = 0
-  global[contextSymbol] = { get: () => ({ waitUntil: task => tasks.push(task) }) }
-  const first = { studentName: 'Student', className: 'Math', month: 7, year: 2026, finalAmount: 100000 }
-  const invoice = { source: first, sources: [first, first], invoiceDate: '2026-10-14', refId: 'ref-1', status: 'DRAFT_CREATED' }
-  let resolveSend
-  global.fetch = async () => { sends++; return new Promise(resolve => { resolveSend = resolve }) }
-  try {
-    service.notifyInvoiceCreated({ ...invoice, status: 'FAILED' })
-    assert.equal(sends, 0)
-    service.notifyInvoiceCreated(invoice)
-    assert.equal(sends, 1)
-    assert.equal(tasks.length, 1)
-    resolveSend(Response.json({ ok: true, result: { message_id: 1 } }))
-    await Promise.all(tasks)
-  } finally {
-    global.fetch = originalFetch
-    if (oldContext === undefined) delete global[contextSymbol]; else global[contextSymbol] = oldContext
-  }
+test('hóa đơn mới được gom: một hóa đơn → tin chi tiết như cũ; nhiều hóa đơn → MỘT tin tổng hợp', async () => config(async () => {
+  const src = (name, amount, className = 'Toán 9') => ({ studentName: name, className, month: 11, year: 2026, finalAmount: amount })
+  const invoice = (name, amount, extra = {}) => ({ source: src(name, amount), sources: [src(name, amount)], invoiceDate: '2026-11-22',
+    refId: `ref-${name}`, status: 'DRAFT_CREATED', ...extra })
+  const messages = []
+  const telegram = async (_url, init) => { messages.push(JSON.parse(init.body).text); return Response.json({ ok: true, result: { message_id: 1 } }) }
+
+  service.notifyInvoiceCreated(invoice('Lỗi', 1, { status: 'FAILED' }))
+  assert.deepEqual(await service.flushInvoiceCreatedNotifications(telegram), { sent: false, count: 0 }, 'chỉ báo hóa đơn đã tạo')
+
+  service.notifyInvoiceCreated(invoice('An', 100000))
+  await service.flushInvoiceCreatedNotifications(telegram)
+  assert.match(messages[0], /^🧾 HÓA ĐƠN MỚI — CHƯA PHÁT HÀNH\nHọc viên: An[\s\S]*RefID: ref-An/)
+
+  for (let i = 0; i < 41; i++) service.notifyInvoiceCreated(invoice(`Học viên ${i}`, 2000000))
+  service.notifyInvoiceCreated({ ...invoice('Gộp', 0), sources: [src('Gộp', 1000000, 'Toán 8'), src('Gộp', 680000, 'Học riêng')] })
+  assert.deepEqual(await service.flushInvoiceCreatedNotifications(telegram), { sent: true, count: 42 })
+  assert.equal(messages.length, 2)
+  const text = messages[1]
+  assert.match(text, /^🧾 42 HÓA ĐƠN MỚI — CHƯA PHÁT HÀNH\nTổng tiền: 83\.680\.000 đ\n• Học viên 0 — Toán 9 kỳ 11\/2026: 2\.000\.000 đ/)
+  assert.match(text, /… và 12 hóa đơn khác\nSố hóa đơn, RefID: https:\/\/qlhv\.cqt\.vn\/tuition\/invoices$/)
 }))
 
 test('giờ tự tạo lại: mốc 15 phút đầu tiên sau ít nhất 10 phút', () => {

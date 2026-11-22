@@ -1,4 +1,3 @@
-import { waitUntil } from '@vercel/functions'
 import type { MisaInvoiceRecord, InvoiceSource } from './misaInvoicePreview'
 
 export function telegramConfigStatus() {
@@ -40,9 +39,10 @@ export async function sendTelegramMessage(text: string, request: typeof fetch = 
   return { sent: result.ok, errorCode: result.errorCode, messageId: result.result?.message_id }
 }
 
+const money = (amount: number) => amount.toLocaleString('vi-VN') + ' đ'
+
 export function invoiceTelegramMessage(invoice: MisaInvoiceRecord) {
   const sources = invoice.sources?.length ? invoice.sources : [invoice.source]
-  const money = (amount: number) => amount.toLocaleString('vi-VN') + ' đ'
   return [
     '🧾 HÓA ĐƠN MỚI — CHƯA PHÁT HÀNH',
     `Học viên: ${invoice.source.studentName.slice(0, 100)}`,
@@ -55,22 +55,59 @@ export function invoiceTelegramMessage(invoice: MisaInvoiceRecord) {
   ].join('\n')
 }
 
-function scheduleNotification(text: string | Promise<string>, refId?: string) {
-  if (!telegramConfigStatus().configured) return
-  try {
-    const send = typeof text === 'string' ? sendTelegramMessage(text) : text.then(message => sendTelegramMessage(message))
-    const task = send.then(result => {
-      if (!result.sent) console.warn('[Telegram] invoice notification failed', { refId, code: result.errorCode })
-    }).catch(() => { console.warn('[Telegram] invoice notification failed') })
-    // Preserve background delivery on Vercel without delaying the API response.
-    waitUntil(task)
-  } catch { console.warn('[Telegram] could not schedule invoice notification') }
+/**
+ * Gom tin trong BATCH_MS rồi gửi MỘT tin: tick / tính học phí hàng loạt không còn ra hàng chục tin lẻ.
+ * Tiến trình khởi động lại trong lúc đang gom thì mất tin đó (hoá đơn và cảnh báo trên chuông vẫn còn).
+ */
+const BATCH_MS = 60_000
+function batcher<T>(format: (items: T[]) => string, label: string) {
+  let items: T[] = []
+  let loads: Promise<void>[] = []
+  let timer: NodeJS.Timeout | null = null
+  const flush = async (request: typeof fetch = fetch) => {
+    if (timer) { clearTimeout(timer); timer = null }
+    await Promise.all(loads)
+    const batch = items
+    items = []; loads = []
+    if (!batch.length) return { sent: false, count: 0 }
+    const result = await sendTelegramMessage(format(batch), request)
+    if (!result.sent) console.warn(`[Telegram] ${label} notification failed`, { count: batch.length, code: result.errorCode })
+    return { sent: result.sent, count: batch.length }
+  }
+  const add = (item: T | Promise<T>) => {
+    if (item instanceof Promise) loads.push(item.then(value => { items.push(value) }, () => undefined))
+    else items.push(item)
+    if (!timer) {
+      timer = setTimeout(() => { timer = null; flush().catch(() => console.warn(`[Telegram] ${label} notification failed`)) }, BATCH_MS)
+      timer.unref?.()
+    }
+  }
+  return { add, flush }
 }
+
+export function invoiceCreatedBatchMessage(invoices: MisaInvoiceRecord[]) {
+  if (invoices.length === 1) return invoiceTelegramMessage(invoices[0])
+  const sourcesOf = (invoice: MisaInvoiceRecord) => invoice.sources?.length ? invoice.sources : [invoice.source]
+  const total = (invoice: MisaInvoiceRecord) => sourcesOf(invoice).reduce((sum, s) => sum + s.finalAmount, 0)
+  const line = (invoice: MisaInvoiceRecord) => `• ${invoice.source.studentName.slice(0, 60)} — `
+    + `${sourcesOf(invoice).map(s => `${s.className.slice(0, 40)} kỳ ${s.month}/${s.year}`).join(' + ')}: ${money(total(invoice))}`
+  const shown = 30
+  return [
+    `🧾 ${invoices.length} HÓA ĐƠN MỚI — CHƯA PHÁT HÀNH`,
+    `Tổng tiền: ${money(invoices.reduce((sum, invoice) => sum + total(invoice), 0))}`,
+    ...invoices.slice(0, shown).map(line),
+    ...(invoices.length > shown ? [`… và ${invoices.length - shown} hóa đơn khác`] : []),
+    'Số hóa đơn, RefID: https://qlhv.cqt.vn/tuition/invoices',
+  ].join('\n').slice(0, 4000)
+}
+
+const createdBatch = batcher<MisaInvoiceRecord>(invoiceCreatedBatchMessage, 'invoice created')
+/** Gửi ngay các tin hóa đơn mới đang gom (cũng dùng trong kiểm thử). */
+export const flushInvoiceCreatedNotifications = (request: typeof fetch = fetch) => createdBatch.flush(request)
 
 export function notifyInvoiceCreated(invoice: MisaInvoiceRecord) {
   if (invoice.status !== 'DRAFT_CREATED' || !telegramConfigStatus().configured) return
-  try { scheduleNotification(invoiceTelegramMessage(invoice), invoice.refId) }
-  catch { console.warn('[Telegram] could not format invoice notification') }
+  try { createdBatch.add(invoice) } catch { console.warn('[Telegram] could not queue invoice notification') }
 }
 
 type FailureSource = Pick<InvoiceSource, 'studentName' | 'className' | 'month' | 'year' | 'finalAmount'>
@@ -103,15 +140,6 @@ export function invoiceFailureTelegramMessage(failure: InvoiceCreationFailure) {
     'https://qlhv.cqt.vn/tuition/invoices',
   ].join('\n').slice(0, 4000)
 }
-
-/**
- * Lỗi tạo hóa đơn được gom trong FAILURE_BATCH_MS rồi gửi MỘT tin: tick / tính học phí hàng loạt khi MISA lỗi không còn
- * ra hàng chục tin lẻ. Chỉ một lỗi trong khoảng đó thì gửi tin chi tiết như cũ.
- */
-const FAILURE_BATCH_MS = 60_000
-let pendingFailures: InvoiceCreationFailure[] = []
-let pendingLoads: Promise<void>[] = []
-let failureTimer: NodeJS.Timeout | null = null
 
 /** Giờ cron tự tạo lại (mỗi 15 phút, sau khi lỗi được ít nhất 10 phút) — dạng HH:MM giờ Việt Nam. */
 export function nextAutoRetryTime(now = Date.now()) {
@@ -158,29 +186,13 @@ export function invoiceFailureBatchMessage(failures: InvoiceCreationFailure[], n
   ].join('\n').slice(0, 4000)
 }
 
+const failureBatch = batcher<InvoiceCreationFailure>(failures => invoiceFailureBatchMessage(failures), 'invoice failure')
 /** Gửi ngay các lỗi đang gom (cũng dùng trong kiểm thử). */
-export async function flushInvoiceFailureNotifications(request: typeof fetch = fetch) {
-  if (failureTimer) { clearTimeout(failureTimer); failureTimer = null }
-  await Promise.all(pendingLoads)
-  const failures = pendingFailures
-  pendingFailures = []; pendingLoads = []
-  if (!failures.length) return { sent: false, count: 0 }
-  const result = await sendTelegramMessage(invoiceFailureBatchMessage(failures), request)
-  if (!result.sent) console.warn('[Telegram] invoice failure notification failed', { count: failures.length, code: result.errorCode })
-  return { sent: result.sent, count: failures.length }
-}
+export const flushInvoiceFailureNotifications = (request: typeof fetch = fetch) => failureBatch.flush(request)
 
 export function notifyInvoiceCreationFailed(failure: InvoiceCreationFailure, loadSources?: () => Promise<FailureSource[]>) {
   if (!telegramConfigStatus().configured) return
   try {
-    if (loadSources) {
-      pendingLoads.push(loadSources().catch(() => []).then(sources => { pendingFailures.push({ ...failure, sources }) }))
-    } else pendingFailures.push(failure)
-    if (!failureTimer) {
-      failureTimer = setTimeout(() => {
-        failureTimer = null
-        flushInvoiceFailureNotifications().catch(() => console.warn('[Telegram] invoice failure notification failed'))
-      }, FAILURE_BATCH_MS)
-    }
+    failureBatch.add(loadSources ? loadSources().catch(() => []).then(sources => ({ ...failure, sources })) : failure)
   } catch { console.warn('[Telegram] could not queue invoice failure notification') }
 }
