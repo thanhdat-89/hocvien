@@ -79,6 +79,8 @@ export interface InvoiceCreationFailure {
   refId?: string
   reason: string
   outcomeUnknown?: boolean
+  /** Lỗi tạm thời của MISA, hoá đơn lưu FAILED → cron tự tạo lại (services/misaInvoiceRetry.ts) */
+  autoRetry?: boolean
   sources?: FailureSource[]
 }
 
@@ -102,12 +104,83 @@ export function invoiceFailureTelegramMessage(failure: InvoiceCreationFailure) {
   ].join('\n').slice(0, 4000)
 }
 
+/**
+ * Lỗi tạo hóa đơn được gom trong FAILURE_BATCH_MS rồi gửi MỘT tin: tick / tính học phí hàng loạt khi MISA lỗi không còn
+ * ra hàng chục tin lẻ. Chỉ một lỗi trong khoảng đó thì gửi tin chi tiết như cũ.
+ */
+const FAILURE_BATCH_MS = 60_000
+let pendingFailures: InvoiceCreationFailure[] = []
+let pendingLoads: Promise<void>[] = []
+let failureTimer: NodeJS.Timeout | null = null
+
+/** Giờ cron tự tạo lại (mỗi 15 phút, sau khi lỗi được ít nhất 10 phút) — dạng HH:MM giờ Việt Nam. */
+export function nextAutoRetryTime(now = Date.now()) {
+  const quarter = 15 * 60_000
+  const at = Math.ceil((now + 10 * 60_000) / quarter) * quarter
+  return new Intl.DateTimeFormat('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(at))
+}
+
+function redactReason(reason: string) {
+  for (const [key, value] of Object.entries(process.env)) {
+    if (/password|secret|token/i.test(key) && value && value.trim().length >= 4) reason = reason.split(value.trim()).join('[ẩn]')
+  }
+  return reason.replace(/[\x00-\x1f]/g, ' ').slice(0, 300)
+}
+
+export function invoiceFailureBatchMessage(failures: InvoiceCreationFailure[], now = Date.now()) {
+  if (failures.length === 1) {
+    const [only] = failures
+    const text = invoiceFailureTelegramMessage(only)
+    return only.autoRetry ? text.replace('\nhttps://qlhv.cqt.vn/tuition/invoices', `\nHệ thống sẽ tự tạo lại lúc ${nextAutoRetryTime(now)}.\nhttps://qlhv.cqt.vn/tuition/invoices`) : text
+  }
+  const line = (f: InvoiceCreationFailure) => {
+    const s = f.sources?.[0]
+    const who = s ? `${s.studentName.slice(0, 60)} — ${s.className.slice(0, 60)} — kỳ ${s.month}/${s.year}: ${s.finalAmount.toLocaleString('vi-VN')} đ`
+      : `Phiếu ${f.recordIds.slice(0, 3).join(', ')}`
+    return `• ${who}${f.refId && f.outcomeUnknown ? ` (RefID ${f.refId})` : ''}`
+  }
+  const unknown = failures.filter(f => f.outcomeUnknown)
+  const failed = failures.filter(f => !f.outcomeUnknown)
+  const auto = failed.filter(f => f.autoRetry), manual = failed.filter(f => !f.autoRetry)
+  // Gom theo lý do: thường cả loạt cùng một lỗi (vd. MISA quá tải).
+  const reasons = new Map<string, number>()
+  for (const f of failures) { const r = redactReason(f.reason); reasons.set(r, (reasons.get(r) || 0) + 1) }
+  const section = (title: string, list: InvoiceCreationFailure[]) => list.length
+    ? ['', title, ...list.slice(0, 15).map(line), ...(list.length > 15 ? [`… và ${list.length - 15} phiếu khác`] : [])] : []
+  return [
+    `❌ ${failures.length} HÓA ĐƠN CHƯA TẠO ĐƯỢC`,
+    ...[...reasons].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([reason, count]) => `Lý do (${count}): ${reason}`),
+    ...section(`🔁 Sẽ tự tạo lại lúc ${nextAutoRetryTime(now)}: ${auto.length}`, auto),
+    ...section(`✋ Cần kiểm tra và tạo lại bằng tay: ${manual.length}`, manual),
+    ...section(`⚠️ Chưa xác định kết quả — đối chiếu RefID trên MISA trước khi tạo lại: ${unknown.length}`, unknown),
+    '',
+    'https://qlhv.cqt.vn/tuition/invoices',
+  ].join('\n').slice(0, 4000)
+}
+
+/** Gửi ngay các lỗi đang gom (cũng dùng trong kiểm thử). */
+export async function flushInvoiceFailureNotifications(request: typeof fetch = fetch) {
+  if (failureTimer) { clearTimeout(failureTimer); failureTimer = null }
+  await Promise.all(pendingLoads)
+  const failures = pendingFailures
+  pendingFailures = []; pendingLoads = []
+  if (!failures.length) return { sent: false, count: 0 }
+  const result = await sendTelegramMessage(invoiceFailureBatchMessage(failures), request)
+  if (!result.sent) console.warn('[Telegram] invoice failure notification failed', { count: failures.length, code: result.errorCode })
+  return { sent: result.sent, count: failures.length }
+}
+
 export function notifyInvoiceCreationFailed(failure: InvoiceCreationFailure, loadSources?: () => Promise<FailureSource[]>) {
   if (!telegramConfigStatus().configured) return
   try {
-    const text = loadSources
-      ? loadSources().catch(() => []).then(sources => invoiceFailureTelegramMessage({ ...failure, sources }))
-      : invoiceFailureTelegramMessage(failure)
-    scheduleNotification(text, failure.refId)
-  } catch { console.warn('[Telegram] could not format invoice failure notification') }
+    if (loadSources) {
+      pendingLoads.push(loadSources().catch(() => []).then(sources => { pendingFailures.push({ ...failure, sources }) }))
+    } else pendingFailures.push(failure)
+    if (!failureTimer) {
+      failureTimer = setTimeout(() => {
+        failureTimer = null
+        flushInvoiceFailureNotifications().catch(() => console.warn('[Telegram] invoice failure notification failed'))
+      }, FAILURE_BATCH_MS)
+    }
+  } catch { console.warn('[Telegram] could not queue invoice failure notification') }
 }

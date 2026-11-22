@@ -9,6 +9,7 @@ import { notifyInvoiceCreated, notifyInvoiceCreationFailed } from './telegramSer
 import { raiseAlertSafely, resolveInvoiceAlertsSafely } from './adminAlerts'
 import { invalidateReadView, invoiceBillingPeriods } from './readViews'
 import { withMisaDeadline } from './misaRequestDeadline'
+import { isTransientMisaFailure } from './misaRateLimit'
 import { assertInvoicePeriod, InvoicePeriodError } from './invoiceEligibility'
 import { buyerFromStudent, invoiceInfoSelect } from './studentInvoiceInfo'
 
@@ -42,7 +43,8 @@ export async function createTuitionMisaInvoice(recordIds: string[], actorId: str
       const invoice = result.invoice as MisaInvoiceRecord
       notifyInvoiceCreationFailed({ recordIds, refId: invoice.refId,
         reason: invoice.lastErrorMessage || 'Chưa tạo được hóa đơn MISA.',
-        outcomeUnknown: invoice.status === 'OUTCOME_UNKNOWN', sources: invoice.sources || [invoice.source] })
+        outcomeUnknown: invoice.status === 'OUTCOME_UNKNOWN', sources: invoice.sources || [invoice.source],
+        autoRetry: invoice.status === 'FAILED' && isTransientMisaFailure(invoice.lastErrorMessage) })
       alertInvoiceFailed(recordIds, invoice.lastErrorMessage || 'Chưa tạo được hóa đơn MISA.', invoice.status === 'OUTCOME_UNKNOWN', invoice.refId)
     }
     return result

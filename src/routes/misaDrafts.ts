@@ -13,10 +13,15 @@ import { monthlyInvoiceReconciler } from '../services/monthlyInvoiceReconciliati
 import { invoiceDoc, readInvoice, saveInvoiceCopies } from '../services/misaInvoiceStore'
 import { resolveInvoiceAlertsSafely } from '../services/adminAlerts'
 import { buyerFromStudent, invoiceInfoSelect } from '../services/studentInvoiceInfo'
+import { misaHealthReport } from '../services/misaHealth'
 
 const router = Router()
 router.use(requireRole('ADMIN'))
 router.use((_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next() })
+// Sức khỏe kết nối MISA: tỉ lệ lỗi 5 phút gần nhất + số lần gọi theo ngày (7 ngày).
+router.get('/health', async (_req, res, next) => {
+  try { res.json(await misaHealthReport()) } catch (error) { next(error) }
+})
 router.get('/monthly-reconciliation/preview', async (req, res, next) => {
   try {
     const month = Number(req.query.month), year = Number(req.query.year)

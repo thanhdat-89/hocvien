@@ -82,3 +82,37 @@ test('notification runs in Vercel background and sends once for a grouped invoic
     if (oldContext === undefined) delete global[contextSymbol]; else global[contextSymbol] = oldContext
   }
 }))
+
+test('giờ tự tạo lại: mốc 15 phút đầu tiên sau ít nhất 10 phút', () => {
+  const vn = (hhmm) => Date.parse(`2026-11-22T${hhmm}:00+07:00`)
+  assert.equal(service.nextAutoRetryTime(vn('18:23')), '18:45')
+  assert.equal(service.nextAutoRetryTime(vn('18:05')), '18:15')
+  assert.equal(service.nextAutoRetryTime(vn('23:55')), '00:15')
+})
+
+test('nhiều lỗi tạo hóa đơn trong 1 phút → MỘT tin tổng hợp, chia theo cách xử lý', async () => config(async () => {
+  const source = name => [{ studentName: name, className: 'Toán 9', month: 11, year: 2026, finalAmount: 1350000 }]
+  for (let i = 0; i < 31; i++) service.notifyInvoiceCreationFailed({ recordIds: [`fee-${i}`], reason: 'MISA trả lỗi HTTP 429 ở bước xác thực.', autoRetry: true, sources: source(`Học viên ${i}`) })
+  service.notifyInvoiceCreationFailed({ recordIds: ['fee-x'], reason: 'Email người mua không hợp lệ.', sources: source('Người mua sai') })
+  service.notifyInvoiceCreationFailed({ recordIds: ['fee-u'], refId: 'ref-u', reason: 'Không nhận được kết quả từ MISA.', outcomeUnknown: true },
+    async () => source('Chưa rõ'))
+  const messages = []
+  const result = await service.flushInvoiceFailureNotifications(async (_url, init) => { messages.push(JSON.parse(init.body).text); return Response.json({ ok: true, result: { message_id: 1 } }) })
+  assert.deepEqual(result, { sent: true, count: 33 })
+  assert.equal(messages.length, 1)
+  const [text] = messages
+  assert.match(text, /^❌ 33 HÓA ĐƠN CHƯA TẠO ĐƯỢC/)
+  assert.match(text, /Lý do \(31\): MISA trả lỗi HTTP 429/)
+  assert.match(text, /🔁 Sẽ tự tạo lại lúc \d\d:\d\d: 31/)
+  assert.match(text, /… và 16 phiếu khác/)
+  assert.match(text, /✋ Cần kiểm tra và tạo lại bằng tay: 1\n• Người mua sai/)
+  assert.match(text, /⚠️ Chưa xác định kết quả[^\n]*: 1\n• Chưa rõ[^\n]*RefID ref-u/)
+  assert.equal((await service.flushInvoiceFailureNotifications(async () => { throw Error('không gửi lại') })).count, 0)
+}))
+
+test('chỉ một lỗi → tin chi tiết như cũ, kèm giờ tự tạo lại', () => {
+  const text = service.invoiceFailureBatchMessage([{ recordIds: ['fee-1'], reason: 'MISA trả lỗi HTTP 429 ở bước xác thực.', autoRetry: true,
+    sources: [{ studentName: 'An', className: 'Toán 8', month: 11, year: 2026, finalAmount: 100000 }] }], Date.parse('2026-11-22T18:23:00+07:00'))
+  assert.match(text, /^❌ TẠO HÓA ĐƠN KHÔNG THÀNH CÔNG/)
+  assert.match(text, /Hệ thống sẽ tự tạo lại lúc 18:45\.\nhttps:\/\/qlhv\.cqt\.vn\/tuition\/invoices$/)
+})

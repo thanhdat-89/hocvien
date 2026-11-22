@@ -4,6 +4,8 @@
  * cùng đi qua đây nên MISA không bị dồn yêu cầu (HTTP 429), dù frontend gửi bao nhiêu phiếu.
  */
 
+import { outcomeOfStatus, recordMisaCall } from './misaHealth'
+
 /** Yêu cầu chưa được gửi tới MISA (hết thời gian khi còn xếp hàng): chắc chắn chưa tạo gì, tạo lại an toàn. */
 export class MisaNotSentError extends Error {
   constructor(message = 'Yêu cầu MISA chưa được gửi đi (hết thời gian chờ).') {
@@ -65,10 +67,15 @@ function release() {
 
 /** Gọi MISA qua hàng đợi chung. Lỗi khi còn đang chờ là MisaNotSentError (chưa gửi gì). */
 export async function misaFetch(request: typeof fetch, url: string, init: RequestInit = {}): Promise<Response> {
-  await acquire(init.signal)
+  try { await acquire(init.signal) } catch (error) { recordMisaCall('not_sent'); throw error }
   try {
     if (init.signal?.aborted) throw new MisaNotSentError()
-    return await request(url, init)
+    const response = await request(url, init)
+    recordMisaCall(typeof response?.status === 'number' ? outcomeOfStatus(response.status) : 'ok')
+    return response
+  } catch (error) {
+    recordMisaCall(error instanceof MisaNotSentError ? 'not_sent' : 'network')
+    throw error
   } finally {
     release()
   }

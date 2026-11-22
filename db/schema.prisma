@@ -1034,3 +1034,15 @@ model UndoSnapshot {
   @@index([expiresAt])
   @@map("undo_snapshots")
 }
+
+/// Số lần gọi MISA theo ngày (giờ Việt Nam) và kết quả: ok, http_429, http_401, http_5xx, http_4xx, network, not_sent.
+/// Ghi gộp mỗi phút từ services/misaHealth.ts; dùng để theo dõi MISA quá tải / lỗi và chỉnh giới hạn tốc độ.
+model MisaCallStat {
+  day       DateTime @db.Date
+  outcome   String
+  count     Int      @default(0)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  @@id([day, outcome])
+  @@map("misa_call_stats")
+}
