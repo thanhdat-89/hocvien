@@ -35,6 +35,27 @@ export interface MisaInvoiceRecord {
   invoiceNumber?: string; transactionId?: string; lastErrorMessage?: string
 }
 
+/**
+ * Token / danh sách mẫu MISA dùng chung trong một khoảng ngắn. Tick "đã đóng" hàng loạt từng gọi /token cho mỗi phiếu
+ * cùng lúc → MISA trả 429 ở bước xác thực. Yêu cầu đồng thời cùng khoá chờ chung một lần gọi; chỉ lưu kết quả thành công.
+ */
+const AUTH_CACHE_MS = 10 * 60_000
+const TEMPLATE_CACHE_MS = 5 * 60_000
+const authCache = new Map<string, { expires: number; value: Promise<unknown> }>()
+function cached<T>(key: string, ttl: number, load: () => Promise<T>): Promise<T> {
+  const hit = authCache.get(key)
+  if (hit && hit.expires > Date.now()) return hit.value as Promise<T>
+  const value = load()
+  authCache.set(key, { expires: Date.now() + ttl, value })
+  value.catch(() => { if (authCache.get(key)?.value === value) authCache.delete(key) })
+  return value
+}
+function forget(prefix: string) {
+  for (const key of authCache.keys()) if (key.startsWith(prefix)) authCache.delete(key)
+}
+/** Chỉ cho kiểm thử: bỏ token / mẫu đã lưu */
+export function resetMisaAuthCache() { authCache.clear() }
+
 const decode = (value: any) => {
   if (typeof value !== 'string') return value
   try { return JSON.parse(value) } catch { return value }
@@ -43,6 +64,7 @@ export async function invoiceApi(request: typeof fetch = fetch) {
   const { fields, missing } = misaConnectionConfig('meinvoice')
   if (missing.length) throw new InvoicePreviewError(503, 'Chưa đủ cấu hình meInvoice trên backend.')
   const headers = { 'Content-Type': 'application/json', ClientID: fields.MEINVOICE_CLIENT_ID!, ClientSecret: fields.MEINVOICE_CLIENT_SECRET! }
+  const devKey = `dev|${fields.MEINVOICE_CLIENT_ID}|${fields.MEINVOICE_TAXCODE}|${fields.MEINVOICE_USERNAME}`
   const deadline = Date.now() + 20000
   const call = async (path: string, init: RequestInit) => {
     const step = path === '/token' ? 'xác thực' : 'lấy mẫu hóa đơn'
@@ -61,6 +83,7 @@ export async function invoiceApi(request: typeof fetch = fetch) {
         } catch {
           throw new InvoicePreviewError(502, `MISA trả phản hồi không đọc được ở bước ${path === '/token' ? 'xác thực' : 'lấy mẫu hóa đơn'}.`)
         }
+        if (response.status === 401) forget(devKey)
         if (!response.ok) throw new InvoicePreviewError(502, `MISA trả lỗi HTTP ${response.status} ở bước ${path === '/token' ? 'xác thực' : 'lấy mẫu hóa đơn'}.`)
         if ((result?.Success ?? result?.success) !== true) {
           const code = result?.ErrorCode ?? result?.errorCode
@@ -83,14 +106,23 @@ export async function invoiceApi(request: typeof fetch = fetch) {
     }
     throw new InvoicePreviewError(502, `Không kết nối được MISA ở bước ${step}.`)
   }
-  const token = await call('/token', { method: 'POST', headers, body: JSON.stringify({
-    taxcode: fields.MEINVOICE_TAXCODE, username: fields.MEINVOICE_USERNAME, password: fields.MEINVOICE_PASSWORD,
-  }) })
-  if (typeof token !== 'string' || !token) throw new InvoicePreviewError(502, 'Không xác thực được meInvoice.')
-  return { call, headers: { ...headers, Authorization: `Bearer ${token}` } }
+  const token = await cached(`${devKey}|token`, AUTH_CACHE_MS, async () => {
+    const value = await call('/token', { method: 'POST', headers, body: JSON.stringify({
+      taxcode: fields.MEINVOICE_TAXCODE, username: fields.MEINVOICE_USERNAME, password: fields.MEINVOICE_PASSWORD,
+    }) })
+    if (typeof value !== 'string' || !value) throw new InvoicePreviewError(502, 'Không xác thực được meInvoice.')
+    return value
+  })
+  return { call, devKey, headers: { ...headers, Authorization: `Bearer ${token}` } }
 }
 
 export async function listInvoiceTemplates(year: number, request: typeof fetch = fetch): Promise<InvoiceTemplate[]> {
+  const { fields } = misaConnectionConfig('meinvoice')
+  const key = `dev|${fields.MEINVOICE_CLIENT_ID}|${fields.MEINVOICE_TAXCODE}|${fields.MEINVOICE_USERNAME}|templates|${year}`
+  return cached(key, TEMPLATE_CACHE_MS, () => loadInvoiceTemplates(year, request))
+}
+
+async function loadInvoiceTemplates(year: number, request: typeof fetch): Promise<InvoiceTemplate[]> {
   const api = await invoiceApi(request)
   const list = await api.call(`/templates?invoiceWithCode=true&ticket=false&year=${year}`, { method: 'GET', headers: api.headers })
   if (!Array.isArray(list)) throw new InvoicePreviewError(502, 'Danh sách mẫu hóa đơn từ MISA không hợp lệ.')
@@ -123,6 +155,7 @@ const providerRejected = (value: any) => value?.success === false || value?.Succ
 async function legacyCall(url: string, init: RequestInit, request: typeof fetch, writesInvoice = false) {
   try {
     const response = await request(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(20000) })
+    if (response.status === 401) forget('legacy|')   // token đã lưu hết hạn → lần sau lấy token mới
     let body: any = null
     try {
       if (typeof (response as any).text === 'function') {
@@ -154,6 +187,12 @@ function legacyHeaders(token: string, taxCode: string, organizationUnitId: strin
 
 async function legacyToken(request: typeof fetch) {
   const fields = legacyConfig()
+  const session = await cached(legacyKey(fields), AUTH_CACHE_MS, () => loadLegacyToken(fields, request))
+  return { ...session, fields }
+}
+const legacyKey = (fields: Record<string, string | undefined>) => `legacy|${fields.MEINVOICE_TAXCODE}|${fields.MEINVOICE_USERNAME}`
+
+async function loadLegacyToken(fields: ReturnType<typeof legacyConfig>, request: typeof fetch) {
   const auth = await legacyCall('https://app.meinvoice.vn/api/v2/oauth', {
     method: 'POST', headers: { taxcode: fields.MEINVOICE_TAXCODE!, 'Content-Type': 'text/plain' },
     body: new URLSearchParams({ grant_type: 'password', username: fields.MEINVOICE_USERNAME!, password: fields.MEINVOICE_PASSWORD! }).toString(),

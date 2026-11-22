@@ -1,6 +1,8 @@
-const { test } = require('node:test')
+const { test, beforeEach } = require('node:test')
 const assert = require('node:assert/strict')
-const { listInvoiceTemplates, invoiceApi, InvoicePreviewError } = require('../dist/services/misaInvoicePreview')
+const { listInvoiceTemplates, invoiceApi, InvoicePreviewError, resetMisaAuthCache } = require('../dist/services/misaInvoicePreview')
+
+beforeEach(() => resetMisaAuthCache())
 
 const template = { IPTemplateID: 'template-1', InvSeries: '2C26MHP', InvTemplateNo: '2', TemplateName: 'Sales' }
 const response = data => Response.json({ Success: true, Data: data })
@@ -54,4 +56,29 @@ test('lookup retry policy never repeats an invoice write', async () => configure
   })
   await assert.rejects(api.call('/invoices', { method: 'POST' }), InvoicePreviewError)
   assert.equal(writes, 1)
+}))
+
+test('many invoices at once share one token and one template lookup (MISA 429 on bulk mark-paid)', async () => configured(async () => {
+  let tokens = 0, lookups = 0
+  const request = async url => {
+    if (url.endsWith('/token')) { tokens++; await new Promise(r => setTimeout(r, 20)); return response('token') }
+    lookups++
+    return response([template])
+  }
+  const results = await Promise.all(Array.from({ length: 40 }, () => listInvoiceTemplates(2026, request)))
+  assert.equal(results.length, 40)
+  assert.equal(tokens, 1)
+  assert.equal(lookups, 1)
+}))
+
+test('a failed authentication is not cached', async () => configured(async () => {
+  let tokens = 0
+  const request = async url => {
+    if (url.endsWith('/token')) return ++tokens === 1 ? new Response('{}', { status: 429 }) : response('token')
+    return response([template])
+  }
+  await assert.rejects(listInvoiceTemplates(2026, request), /HTTP 429 ở bước xác thực/)
+  const templates = await listInvoiceTemplates(2026, request)
+  assert.equal(templates[0].id, 'template-1')
+  assert.equal(tokens, 2)
 }))
