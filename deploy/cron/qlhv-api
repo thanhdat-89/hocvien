@@ -6,6 +6,8 @@ QLHV=/srv/qlhv-api/deploy/run-cron.sh
 
 # 07:00  đối soát hoá đơn cuối tháng (chỉ chạy thật vào ngày cuối tháng)
 0 7 * * *   qlhv $QLHV /api/tuition/cron/reconcile-monthly-invoices
+# mỗi 15 phút  tạo lại hoá đơn MISA lỗi do MISA quá tải / mất kết nối (tối đa 5 lần mỗi hoá đơn)
+*/15 * * * *  qlhv $QLHV /api/tuition/cron/retry-failed-invoices
 # 06:00  kiểm tra lớp/học phí
 0 6 * * *   qlhv $QLHV /api/classes/cron/audit
 # 10:00 Chủ nhật  dọn nhật ký hoạt động > 12 tháng

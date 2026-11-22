@@ -1,5 +1,6 @@
 // Developer Portal gateway, verified 11/10/2026. No signing/publishing endpoints.
 import { X509Certificate } from 'node:crypto'
+import { misaFetch } from './misaRateLimit'
 
 export function certificateSummary(item: any) {
   const metadata = {
@@ -65,7 +66,7 @@ export async function checkMisaConnection(product: Product, request: typeof fetc
     ClientSecret: fields[invoice ? 'MEINVOICE_CLIENT_SECRET' : 'ESIGN_CLIENT_SECRET']!,
   }
   const call = async (path: string, init: RequestInit) => {
-    const response = await request(`${GATEWAY}${path}`, { ...init, redirect: 'error', signal: AbortSignal.timeout(15000) })
+    const response = await misaFetch(request, `${GATEWAY}${path}`, { ...init, redirect: 'error', signal: AbortSignal.timeout(15000) })
     if (!response.ok) throw new Error(`HTTP_${response.status}`)
     const body = await response.json() as any
     if (!body || typeof body !== 'object') throw new Error('INVALID_RESPONSE')

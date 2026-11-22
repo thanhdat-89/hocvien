@@ -74,10 +74,10 @@ test('many invoices at once share one token and one template lookup (MISA 429 on
 test('a failed authentication is not cached', async () => configured(async () => {
   let tokens = 0
   const request = async url => {
-    if (url.endsWith('/token')) return ++tokens === 1 ? new Response('{}', { status: 429 }) : response('token')
+    if (url.endsWith('/token')) return ++tokens === 1 ? new Response('{}', { status: 400 }) : response('token')
     return response([template])
   }
-  await assert.rejects(listInvoiceTemplates(2026, request), /HTTP 429 ở bước xác thực/)
+  await assert.rejects(listInvoiceTemplates(2026, request), /HTTP 400 ở bước xác thực/)
   const templates = await listInvoiceTemplates(2026, request)
   assert.equal(templates[0].id, 'template-1')
   assert.equal(tokens, 2)

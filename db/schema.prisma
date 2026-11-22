@@ -748,6 +748,8 @@ model MisaInvoice {
   /// Link xem hoá đơn trên meinvoice.vn sau khi phát hành.
   invoiceUrl       String?
   lastErrorMessage String?
+  /// Số lần cron tự tạo lại sau lỗi tạm thời của MISA (429, mất kết nối…); đủ 5 lần thì dừng, chờ xử lý tay.
+  autoRetryCount   Int       @default(0)
   /// Phiếu học phí được gộp vào hoá đơn này.
   recordIds        String[]
   billingPeriods   String[]

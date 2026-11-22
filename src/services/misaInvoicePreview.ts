@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { misaConnectionConfig } from './misaConnection'
+import { misaFetch, MisaNotSentError, retryDelayMs, sleep } from './misaRateLimit'
 import type { Payment, TuitionRecord } from '../types/models'
 
 // Handles MISA template lookup and draft creation. It has no signing/publishing operation.
@@ -70,41 +71,51 @@ export async function invoiceApi(request: typeof fetch = fetch) {
     const step = path === '/token' ? 'xác thực' : 'lấy mẫu hóa đơn'
     const startedAt = Date.now()
     // These endpoints only authenticate/read. Never retry the invoice write here.
-    const attempts = (path === '/token' && init.method === 'POST')
-      || (path.startsWith('/templates?') && init.method === 'GET') ? 2 : 1
-    for (let attempt = 1; attempt <= attempts; attempt++) {
+    const readOnly = (path === '/token' && init.method === 'POST') || (path.startsWith('/templates?') && init.method === 'GET')
+    let networkFailures = 0, busyResponses = 0
+    for (;;) {
+      let response: Response
       try {
-        const response = await request(BASE + path, { ...init, redirect: 'error', signal: AbortSignal.timeout(Math.max(1, Math.min(8000, deadline - Date.now()))) })
-        let result: any
-        try {
-          result = typeof (response as any).text === 'function'
-            ? JSON.parse(await response.text())
-            : await response.json()
-        } catch {
-          throw new InvoicePreviewError(502, `MISA trả phản hồi không đọc được ở bước ${path === '/token' ? 'xác thực' : 'lấy mẫu hóa đơn'}.`)
-        }
-        if (response.status === 401) forget(devKey)
-        if (!response.ok) throw new InvoicePreviewError(502, `MISA trả lỗi HTTP ${response.status} ở bước ${path === '/token' ? 'xác thực' : 'lấy mẫu hóa đơn'}.`)
-        if ((result?.Success ?? result?.success) !== true) {
-          const code = result?.ErrorCode ?? result?.errorCode
-          const safeCode = typeof code === 'string' && /^[A-Z0-9_-]{1,60}$/i.test(code) ? ` (${code})` : ''
-          throw new InvoicePreviewError(502, `MISA chưa xử lý được yêu cầu ở bước ${path === '/token' ? 'xác thực' : 'lấy mẫu hóa đơn'}${safeCode}.`)
-        }
-        return decode(result.Data ?? result.data)
+        response = await misaFetch(request, BASE + path, { ...init, redirect: 'error', signal: AbortSignal.timeout(Math.max(1, Math.min(8000, deadline - Date.now()))) })
       } catch (error: any) {
-        if (error instanceof InvoicePreviewError) throw error
+        if (error instanceof MisaNotSentError) throw new InvoicePreviewError(503, `MISA đang bận, chưa gửi được yêu cầu ở bước ${step}. Vui lòng thử lại sau.`)
         const networkCode = error?.cause?.code ?? error?.code
         const code = typeof networkCode === 'string' ? networkCode : error?.name
         console.warn('[MISA lookup] network failure', {
-          step: path === '/token' ? 'token' : 'templates', attempt,
+          step: path === '/token' ? 'token' : 'templates', attempt: networkFailures + busyResponses + 1,
           elapsedMs: Date.now() - startedAt,
           code: typeof code === 'string' && /^[A-Z0-9_]{1,60}$/i.test(code) ? code : 'NETWORK_ERROR',
         })
-        if (attempt < attempts && deadline - Date.now() > 1000) continue
+        if (readOnly && ++networkFailures < 2 && deadline - Date.now() > 1000) continue
         throw new InvoicePreviewError(502, `Không kết nối được MISA ở bước ${step}. Vui lòng thử lại sau.`)
       }
+      // 429: MISA từ chối vì quá nhiều yêu cầu — bước chỉ đọc thì chờ rồi thử lại (tối đa 3 lần gọi).
+      if (response.status === 429 && readOnly && busyResponses < 2) {
+        const wait = retryDelayMs(response, ++busyResponses)
+        if (deadline - Date.now() > wait + 1000) {
+          console.warn('[MISA lookup] HTTP 429, retrying', { step: path === '/token' ? 'token' : 'templates', waitMs: wait })
+          await sleep(wait)
+          continue
+        }
+      }
+      let result: any
+      try {
+        result = typeof (response as any).text === 'function'
+          ? JSON.parse(await response.text())
+          : await response.json()
+      } catch {
+        if (!response.ok) throw new InvoicePreviewError(502, `MISA trả lỗi HTTP ${response.status} ở bước ${step}.`)
+        throw new InvoicePreviewError(502, `MISA trả phản hồi không đọc được ở bước ${step}.`)
+      }
+      if (response.status === 401) forget(devKey)
+      if (!response.ok) throw new InvoicePreviewError(502, `MISA trả lỗi HTTP ${response.status} ở bước ${step}.`)
+      if ((result?.Success ?? result?.success) !== true) {
+        const code = result?.ErrorCode ?? result?.errorCode
+        const safeCode = typeof code === 'string' && /^[A-Z0-9_-]{1,60}$/i.test(code) ? ` (${code})` : ''
+        throw new InvoicePreviewError(502, `MISA chưa xử lý được yêu cầu ở bước ${step}${safeCode}.`)
+      }
+      return decode(result.Data ?? result.data)
     }
-    throw new InvoicePreviewError(502, `Không kết nối được MISA ở bước ${step}.`)
   }
   const token = await cached(`${devKey}|token`, AUTH_CACHE_MS, async () => {
     const value = await call('/token', { method: 'POST', headers, body: JSON.stringify({
@@ -152,28 +163,42 @@ function providerFailureMessage(value: any) {
 const providerRejected = (value: any) => value?.success === false || value?.Success === false
   || value?.IsValid === false || !!value?.error || !!value?.ErrorMessage || !!value?.ErrorCode?.length
 
+/** HTTP 429 khi ghi hóa đơn: MISA từ chối trước khi xử lý → chưa tạo, tạo lại an toàn. */
+export const MISA_BUSY_WRITE_MESSAGE = 'MISA đang bận (HTTP 429), chưa tạo hóa đơn. Có thể tạo lại an toàn.'
+const MISA_NOT_SENT_MESSAGE = 'MISA đang bận, hóa đơn chưa được gửi đi. Có thể tạo lại an toàn.'
+
 async function legacyCall(url: string, init: RequestInit, request: typeof fetch, writesInvoice = false) {
+  let busyResponses = 0
   try {
-    const response = await request(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(20000) })
-    if (response.status === 401) forget('legacy|')   // token đã lưu hết hạn → lần sau lấy token mới
-    let body: any = null
-    try {
-      if (typeof (response as any).text === 'function') {
-        const text = await response.text()
-        body = text ? JSON.parse(text) : null
-      } else {
-        body = await response.json()
+    for (;;) {
+      const response = await misaFetch(request, url, { ...init, redirect: 'error', signal: AbortSignal.timeout(20000) })
+      if (response.status === 401) forget('legacy|')   // token đã lưu hết hạn → lần sau lấy token mới
+      if (response.status === 429) {
+        if (writesInvoice) throw new InvoicePreviewError(503, MISA_BUSY_WRITE_MESSAGE)
+        // Đăng nhập / đọc: chờ rồi thử lại, tối đa 3 lần gọi.
+        if (busyResponses < 2) { await sleep(retryDelayMs(response, ++busyResponses)); continue }
       }
-    } catch {
+      let body: any = null
+      try {
+        if (typeof (response as any).text === 'function') {
+          const text = await response.text()
+          body = text ? JSON.parse(text) : null
+        } else {
+          body = await response.json()
+        }
+      } catch {
+        if (!response.ok) throw new InvoicePreviewError(502, `MISA trả lỗi HTTP ${response.status}; cần đối chiếu kết quả trước khi gửi lại.`, writesInvoice)
+        throw new InvoicePreviewError(502, 'MISA trả phản hồi không đọc được; cần đối chiếu RefID trước khi gửi lại.', writesInvoice)
+      }
+      if (providerRejected(body)) throw new InvoicePreviewError(502, providerFailureMessage(body))
       if (!response.ok) throw new InvoicePreviewError(502, `MISA trả lỗi HTTP ${response.status}; cần đối chiếu kết quả trước khi gửi lại.`, writesInvoice)
-      throw new InvoicePreviewError(502, 'MISA trả phản hồi không đọc được; cần đối chiếu RefID trước khi gửi lại.', writesInvoice)
+      if (body == null) throw new InvoicePreviewError(502, 'MISA không trả nội dung xác nhận; cần đối chiếu RefID trước khi gửi lại.', writesInvoice)
+      return body
     }
-    if (providerRejected(body)) throw new InvoicePreviewError(502, providerFailureMessage(body))
-    if (!response.ok) throw new InvoicePreviewError(502, `MISA trả lỗi HTTP ${response.status}; cần đối chiếu kết quả trước khi gửi lại.`, writesInvoice)
-    if (body == null) throw new InvoicePreviewError(502, 'MISA không trả nội dung xác nhận; cần đối chiếu RefID trước khi gửi lại.', writesInvoice)
-    return body
   } catch (error) {
     if (error instanceof InvoicePreviewError) throw error
+    // Còn đang xếp hàng khi hết giờ: chưa gửi gì tới MISA, không phải "không rõ kết quả".
+    if (error instanceof MisaNotSentError) throw new InvoicePreviewError(503, MISA_NOT_SENT_MESSAGE)
     throw new InvoicePreviewError(502, 'Không nhận được kết quả từ MISA. Kiểm tra danh sách hóa đơn trước khi thử lại.', writesInvoice)
   }
 }
@@ -217,7 +242,7 @@ export async function readMisaInvoiceStatus(refId: string, request: typeof fetch
   const { fields, token, organizationUnitId, databaseId, companyId, userId } = await legacyToken(request)
   let response: Response
   try {
-    response = await request(`https://app.meinvoice.vn/api/v2/v3sainvoice/code/?refID=${encodeURIComponent(refId)}`, {
+    response = await misaFetch(request, `https://app.meinvoice.vn/api/v2/v3sainvoice/code/?refID=${encodeURIComponent(refId)}`, {
       method: 'GET', headers: legacyHeaders(token, fields.MEINVOICE_TAXCODE!, organizationUnitId, databaseId),
       redirect: 'error', signal: AbortSignal.timeout(20000),
     })

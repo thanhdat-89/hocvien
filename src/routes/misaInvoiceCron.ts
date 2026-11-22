@@ -7,6 +7,7 @@ import { checkTelegramConnection } from '../services/telegramService'
 import { listInvoiceTemplates } from '../services/misaInvoicePreview'
 import { chooseDefaultInvoiceTemplate } from '../services/misaAutoDraft'
 import { monthlyInvoiceSchedule } from '../services/monthlyInvoiceReconciliation'
+import { retryFailedMisaInvoices } from '../services/misaInvoiceRetry'
 
 export async function dispatchMonthlyInvoiceWorker(request: typeof fetch = fetch) {
   const secret = process.env.CRON_SECRET
@@ -48,6 +49,13 @@ router.get('/cron/reconcile-monthly-invoices', authorizeCron, async (_req, res, 
     if (active) await dispatchMonthlyInvoiceWorker()
     res.json({ ...result, workerDispatched: active })
   } catch (error) { next(error) }
+})
+// Mỗi 15 phút: tạo lại hoá đơn lỗi do MISA quá tải / mất kết nối (xem services/misaInvoiceRetry.ts).
+let retryRunning = false
+router.get('/cron/retry-failed-invoices', authorizeCron, async (_req, res, next) => {
+  if (retryRunning) { res.json({ skipped: 'ALREADY_RUNNING' }); return }
+  retryRunning = true
+  try { res.json(await retryFailedMisaInvoices()) } catch (error) { next(error) } finally { retryRunning = false }
 })
 router.get('/cron/monthly-invoice-readiness', authorizeCron, async (_req, res, next) => {
   try {
