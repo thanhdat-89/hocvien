@@ -1137,8 +1137,8 @@ export default function Classes() {
                   <h3 className="font-headline text-lg font-bold text-on-surface">Danh sách lớp học</h3>
                   <p className="mt-0.5 text-sm text-on-surface-variant">{visibleClasses.length} lớp phù hợp</p>
                 </div>
-                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                  <label className="relative min-w-0 sm:w-60">
+                <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:flex-wrap">
+                  <label className="relative col-span-2 min-w-0 sm:w-60">
                     <span className="sr-only">Tìm tên hoặc ID lớp</span>
                     <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-lg text-outline">search</span>
                     <input value={classSearch} onChange={e => setClassSearch(e.target.value)} placeholder="Tìm tên hoặc ID lớp..." className="h-10 w-full rounded-xl border border-outline-variant/25 bg-white pl-10 pr-3 text-sm text-on-surface outline-none placeholder:text-outline focus:border-primary focus:ring-2 focus:ring-primary/10" />
@@ -1161,7 +1161,35 @@ export default function Classes() {
                 </div>
               </div>
 
-              <div className="overflow-x-auto">
+              {/* Điện thoại: thẻ chỉ xem; sửa tên, lịch, học phí và xoá lớp làm trên máy tính */}
+              <ul className="divide-y divide-outline-variant/15 md:hidden" aria-label="Danh sách lớp học">
+                {visibleClasses.map(cls => {
+                  const days = [...(schedulesByClass[cls.id] ?? [])].sort((a, b) => SCHEDULE_DAY_ORDER.indexOf(a) - SCHEDULE_DAY_ORDER.indexOf(b))
+                  const grade = gradeOfClass(cls)
+                  return (
+                    <li key={cls.id} className="px-4 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="min-w-0 font-semibold leading-5 text-on-surface">{cls.name}</p>
+                        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${cls.status === 'ACTIVE' ? 'bg-secondary-container/25 text-secondary' : 'bg-surface-container-high text-outline'}`}>
+                          {cls.status === 'ACTIVE' ? 'Đang học' : 'Đã đóng'}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-xs text-outline">
+                        {[grade ? `Khối ${grade}` : 'Chưa có khối', cls.room ? `Phòng ${cls.room}` : '', cls.teacherName].filter(Boolean).join(' · ')}
+                      </p>
+                      <div className="mt-2 flex items-center justify-between gap-3 text-sm">
+                        <span className={`min-w-0 ${days.length ? 'font-medium text-primary' : 'text-outline'}`}>
+                          {days.length ? days.map(day => SCHEDULE_DAY_LABELS[day] ?? day).join(', ') : 'Chưa có lịch'}
+                          {!!cls.sessionsPerMonth && <span className="font-normal text-outline"> · {cls.sessionsPerMonth} buổi/tháng</span>}
+                        </span>
+                        <span className="shrink-0 font-semibold tabular-nums text-on-surface">{displayedClassRate(cls).toLocaleString('vi-VN')}đ<span className="text-xs font-normal text-outline">/buổi</span></span>
+                      </div>
+                    </li>
+                  )
+                })}
+                {visibleClasses.length === 0 && <li className="px-4 py-10 text-center text-sm text-outline">{classes.length ? 'Không tìm thấy lớp phù hợp' : 'Chưa có lớp học nào'}</li>}
+              </ul>
+              <div className="overflow-x-auto max-md:hidden">
                 <table role="table" aria-label="Danh sách lớp học" className="class-mobile-table w-full min-w-[950px] table-fixed text-left text-sm">
                   <colgroup>
                     <col className="w-[22%]" /><col className="w-[18%]" /><col className="w-[22%]" />

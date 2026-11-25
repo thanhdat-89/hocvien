@@ -1,11 +1,12 @@
 import React, { useState, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import TopBar from '../components/TopBar'
 import { useConfirm, useAlert, usePrompt } from '../components/ConfirmDialog'
 import api from '../services/api'
 import { Student } from '../types'
 import { useAuth } from '../hooks/useAuth'
+import { useIsPhone } from '../hooks/useMediaQuery'
 import StudentModal from './StudentModal'
 import { PrivateScheduleModal } from './StudentProfile'
 import * as XLSX from 'xlsx'
@@ -362,6 +363,7 @@ export default function Students() {
   const [editStudent, setEditStudent] = useState<Student | null>(null)
   const [privateModalStudent, setPrivateModalStudent] = useState<Student | null>(null)
   const { canManageStudents, canImportStudents } = useAuth()
+  const isPhone = useIsPhone()
 
   const searchRef = useRef<ReturnType<typeof setTimeout>>()
   const pageCursors = useRef(new Map<string, string>())
@@ -498,7 +500,7 @@ export default function Students() {
   return (
     <div>
       <TopBar title="Quản lý Học viên" onSearch={handleSearch} />
-      <div className="page-content px-8 py-8 space-y-8 max-md:space-y-4 max-md:pb-24">
+      <div className="page-content px-8 py-8 space-y-8 max-md:space-y-4">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 max-md:contents">
           <div className="max-md:hidden">
@@ -575,6 +577,10 @@ export default function Students() {
             </div>
             <span className="text-xs text-slate-500">{totalPages > 1 ? `Trang ${page}/${totalPages}` : `${total} học viên`}</span>
           </div>
+          {isPhone ? (
+            <StudentCards students={students}
+              emptyText={studentsQuery.isError ? 'Không tải được danh sách học viên. Vui lòng thử lại.' : 'Không tìm thấy học viên nào.'} />
+          ) : (
           <div className="overflow-x-auto">
             <table role="table" className="student-mobile-table w-full min-w-[860px] table-fixed border-collapse text-left text-sm" aria-label="Danh sách học viên">
               <colgroup>
@@ -715,6 +721,7 @@ export default function Students() {
               </tbody>
             </table>
           </div>
+          )}
 
           {/* Pagination */}
           {totalPages > 1 && (
@@ -759,6 +766,9 @@ export default function Students() {
         </div>
       </div>
 
+      {/* Chừa chỗ để nút "Thêm học viên" nổi không che học viên cuối trên điện thoại */}
+      <div className="h-20 md:hidden" aria-hidden="true" />
+
       {showModal && (
         <StudentModal
           student={editStudent}
@@ -783,5 +793,52 @@ export default function Students() {
         />
       )}
     </div>
+  )
+}
+
+// ─── Thẻ học viên trên điện thoại ────────────────────────────────────────────
+
+/** Cả thẻ mở hồ sơ; gọi và nhắn Zalo phụ huynh ngay trên thẻ. Thao tác sửa/xoá để ở máy tính và trong hồ sơ. */
+function StudentCards({ students, emptyText }: { students: Student[]; emptyText: string }) {
+  if (!students.length) return (
+    <p className="px-6 py-16 text-center text-sm text-slate-500">
+      <span className="material-symbols-outlined mb-2 block text-4xl text-slate-300" aria-hidden="true">search_off</span>
+      {emptyText}
+    </p>
+  )
+  return (
+    <ul className="divide-y divide-slate-100" aria-label="Danh sách học viên">
+      {students.map(student => {
+        const parent = student.primaryParent
+        const phone = parent?.phone || parent?.zalo
+        const zaloUrl = buildZaloUrl(parent?.zalo || parent?.phone)
+        const classes = (student.enrollments ?? []).filter(e => e.status !== 'DROPPED')
+        return (
+          <li key={student.id} className="flex items-center gap-2 py-1 pl-4 pr-2">
+            <Link to={`/students/${student.id}`} className="flex min-w-0 flex-1 items-center gap-3 py-2.5">
+              <Avatar name={student.fullName} />
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-2">
+                  <span className="truncate font-semibold text-on-surface">{student.fullName}</span>
+                  {student.status !== 'ACTIVE' && <StatusBadge status={student.status} />}
+                </span>
+                <span className="mt-0.5 block truncate text-xs text-slate-500">
+                  {[student.gradeLevel ? `Khối ${student.gradeLevel}` : '', classes.length ? classes.map(e => e.className).join(', ') : 'Học riêng']
+                    .filter(Boolean).join(' · ')}
+                </span>
+              </span>
+            </Link>
+            {phone && <a href={`tel:${phone}`} aria-label={`Gọi phụ huynh ${student.fullName}`}
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-blue-50 hover:text-primary">
+              <span className="material-symbols-outlined text-[20px]" aria-hidden="true">call</span>
+            </a>}
+            {zaloUrl && <a href={zaloUrl} target="_blank" rel="noopener noreferrer" aria-label={`Nhắn Zalo phụ huynh ${student.fullName}`}
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-blue-50 hover:text-primary">
+              <span className="material-symbols-outlined text-[20px]" aria-hidden="true">chat</span>
+            </a>}
+          </li>
+        )
+      })}
+    </ul>
   )
 }

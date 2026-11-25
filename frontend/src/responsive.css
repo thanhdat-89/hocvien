@@ -83,31 +83,31 @@
   .responsive-dialog :where(input:not([type='checkbox']):not([type='radio']), select, textarea),
   .login-page input { font-size: 16px; }
 
-  /* Reflow existing rows rather than duplicate payment/student actions. */
-  :is(.student-mobile-table, .tuition-mobile-table, .class-mobile-table) { display: block; min-width: 0; width: 100%; }
-  :is(.student-mobile-table, .tuition-mobile-table, .class-mobile-table) colgroup { display: none; }
-  :is(.student-mobile-table, .tuition-mobile-table, .class-mobile-table) thead {
+  /* Bảng học phí trong hồ sơ học viên: dàn hàng thành thẻ. Danh sách học viên, học phí, lớp có thẻ riêng cho điện thoại. */
+  .tuition-mobile-table { display: block; min-width: 0; width: 100%; }
+  .tuition-mobile-table colgroup { display: none; }
+  .tuition-mobile-table thead {
     position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
     overflow: hidden; clip-path: inset(50%); white-space: nowrap;
   }
-  :is(.student-mobile-table, .tuition-mobile-table, .class-mobile-table) tbody { display: block; }
-  :is(.student-mobile-table, .tuition-mobile-table, .class-mobile-table) tbody tr {
+  .tuition-mobile-table tbody { display: block; }
+  .tuition-mobile-table tbody tr {
     display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px; padding: 16px;
   }
-  :is(.student-mobile-table, .tuition-mobile-table, .class-mobile-table) td {
+  .tuition-mobile-table td {
     display: block; min-width: 0; padding: 0; text-align: left; overflow-wrap: anywhere;
   }
-  :is(.student-mobile-table, .tuition-mobile-table, .class-mobile-table) td[data-label]::before {
+  .tuition-mobile-table td[data-label]::before {
     content: attr(data-label); display: block; margin-bottom: 6px;
     font-size: 11px; line-height: 16px; font-weight: 500; color: #71749e;
   }
-  :is(.student-mobile-table, .tuition-mobile-table, .class-mobile-table) td[data-label='STT'] {
+  .tuition-mobile-table td[data-label='STT'] {
     position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%);
   }
-  :is(.student-mobile-table, .tuition-mobile-table, .class-mobile-table) td:is([data-label='Học viên'], [data-label='Tên lớp'], [data-label='ID lớp'], [data-label='Lớp học'], [data-label='Thao tác'], [colspan]) { grid-column: 1 / -1; }
-  :is(.student-mobile-table, .tuition-mobile-table, .class-mobile-table) td[data-label='Học viên']::before { display: none; }
-  :is(.student-mobile-table, .tuition-mobile-table, .class-mobile-table) td[data-label='Thao tác'] > div { justify-content: flex-start; flex-wrap: wrap; }
+  .tuition-mobile-table td:is([data-label='Học viên'], [data-label='Tên lớp'], [data-label='ID lớp'], [data-label='Lớp học'], [data-label='Thao tác'], [colspan]) { grid-column: 1 / -1; }
+  .tuition-mobile-table td[data-label='Học viên']::before { display: none; }
+  .tuition-mobile-table td[data-label='Thao tác'] > div { justify-content: flex-start; flex-wrap: wrap; }
   .tuition-mobile-table tbody + tbody { border-top: 4px solid #f1efff; }
   .tuition-mobile-table tfoot { display: block; padding: 16px; }
   .tuition-mobile-table tfoot tr { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
@@ -119,7 +119,7 @@
   .profile-table-container > .profile-session-table { min-width: 0; }
   .profile-session-table td { overflow-wrap: normal; }
   .profile-session-table tfoot td[colspan] { padding: 0; }
-  :is(.student-mobile-table, .tuition-mobile-table, .class-mobile-table) td[colspan] { padding: 24px 0; }
+  .tuition-mobile-table td[colspan] { padding: 24px 0; }
 }
 
 @media (prefers-reduced-motion: reduce) and (max-width: 1023px) {

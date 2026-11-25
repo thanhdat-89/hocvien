@@ -338,10 +338,11 @@ export default function PrivateSchedule() {
   return (
     <div>
       <TopBar title="Lịch học riêng" />
-      <div className="page-content px-8 py-8 space-y-6">
+      {/* Điện thoại: lịch tuần lên trước, danh sách chưa xếp lịch xuống sau; import Excel làm trên máy tính */}
+      <div className="page-content px-8 py-8 space-y-6 max-md:flex max-md:flex-col max-md:gap-4 max-md:space-y-0">
 
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 max-md:hidden">
           <div>
             <span className="text-[11px] font-bold text-primary tracking-[0.2em] uppercase mb-2 block">Lịch Đào Tạo</span>
             <h2 className="text-4xl font-black text-on-surface font-headline tracking-tight">Lịch Học Riêng</h2>
@@ -355,24 +356,24 @@ export default function PrivateSchedule() {
         </div>
 
         {/* Học viên chưa có lịch học riêng trong tháng */}
-        <section className="bg-surface-container-lowest rounded-3xl overflow-hidden shadow-sm border border-outline-variant/10">
-          <div className="p-6 flex flex-wrap items-center justify-between gap-3">
+        <section className="bg-surface-container-lowest rounded-3xl overflow-hidden shadow-sm border border-outline-variant/10 max-md:order-last max-md:rounded-2xl">
+          <div className="p-6 flex flex-wrap items-center justify-between gap-3 max-md:p-4">
             <div>
               <h3 className="text-lg font-headline font-bold text-on-surface">Học viên chưa có lịch học riêng — tháng {monthNumber}/{monthYear}</h3>
               <p className="text-sm text-outline mt-1">Học viên có lớp “Học riêng” và chưa có buổi nào trong toàn bộ tháng hiện tại.</p>
             </div>
             {!missingLoading && !missingError && <span className="text-sm font-semibold text-primary">{filteredMissingStudents.length} học viên</span>}
           </div>
-          <div className="px-6 pb-5">
+          <div className="px-6 pb-5 max-md:px-4 max-md:pb-3">
             <p id="missing-grade-label" className="text-[10px] font-bold text-outline uppercase mb-2">Khối lớp</p>
-            <div role="group" aria-labelledby="missing-grade-label" className="flex flex-wrap gap-2">
+            <div role="group" aria-labelledby="missing-grade-label" className="flex flex-wrap gap-2 max-md:flex-nowrap max-md:overflow-x-auto max-md:pb-1">
               {[null, 6, 7, 8, 9, 10, 11, 12].map(grade => (
                 <button
                   key={grade ?? 'all'}
                   type="button"
                   aria-pressed={missingGrade === grade}
                   onClick={() => setMissingGrade(grade)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all max-md:shrink-0 max-md:whitespace-nowrap ${
                     missingGrade === grade
                       ? 'bg-primary text-on-primary border-primary shadow-sm'
                       : 'bg-surface text-on-surface-variant border-outline-variant/30 hover:border-primary/40 hover:text-primary'
@@ -383,7 +384,19 @@ export default function PrivateSchedule() {
               ))}
             </div>
           </div>
-          <div className="overflow-x-auto">
+          <ul className="divide-y divide-outline-variant/10 border-t border-outline-variant/10 md:hidden" aria-label="Học viên chưa có lịch học riêng">
+            {missingLoading ? <li className="p-4 text-center text-sm text-outline" role="status">Đang tải danh sách...</li>
+              : missingError ? <li className="p-4 text-center text-sm text-error" role="alert">{missingError}</li>
+              : filteredMissingStudents.length === 0 ? <li className="p-4 text-center text-sm text-outline">Không có học viên nào chưa được xếp lịch</li>
+              : filteredMissingStudents.map(student => <li key={student.id}>
+                <Link to={`/students/${student.id}`} className="flex items-center gap-3 px-4 py-3">
+                  <span className="min-w-0 flex-1 truncate text-sm font-semibold text-on-surface">{student.fullName}</span>
+                  {student.gradeLevel && <span className="shrink-0 text-xs text-outline">Khối {student.gradeLevel}</span>}
+                  <span className="material-symbols-outlined shrink-0 text-lg text-outline" aria-hidden="true">chevron_right</span>
+                </Link>
+              </li>)}
+          </ul>
+          <div className="overflow-x-auto max-md:hidden">
             <table className="w-full text-left border-collapse min-w-[650px]">
               <thead><tr className="bg-surface-container-low/50">
                 <th className="table-header w-12 text-center">STT</th>

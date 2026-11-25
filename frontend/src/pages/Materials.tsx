@@ -147,8 +147,9 @@ export default function Materials() {
   return (
     <div>
       <TopBar title="Tài liệu học tập" />
-      <div className="page-content px-8 py-8 space-y-6">
-        <div className="flex items-end justify-between gap-3 flex-wrap">
+      <div className="page-content px-8 py-8 space-y-6 max-md:space-y-4">
+        {/* Điện thoại chỉ tra cứu và mở tài liệu; tải lên làm trên máy tính */}
+        <div className="flex items-end justify-between gap-3 flex-wrap max-md:hidden">
           <div>
             <span className="text-[11px] font-bold text-primary tracking-[0.2em] uppercase mb-2 block">Kho học liệu</span>
             <h2 className="text-4xl font-black text-on-surface font-headline tracking-tight">Tài liệu học tập</h2>
@@ -161,7 +162,7 @@ export default function Materials() {
 
         <div className="bg-surface-container-low/60 rounded-2xl p-4 space-y-3">
           <div className="flex items-start gap-3 flex-wrap">
-            <span className="text-[10px] font-bold text-outline uppercase tracking-wider w-20 pt-2 shrink-0">Loại</span>
+            <span className="text-[10px] font-bold text-outline uppercase tracking-wider w-20 pt-2 shrink-0 max-md:w-full max-md:pt-0">Loại</span>
             <div className="flex flex-wrap gap-2 flex-1">
               {([
                 { v: 'all', label: 'Tất cả' },
@@ -178,7 +179,7 @@ export default function Materials() {
             </div>
           </div>
           <div className="flex items-start gap-3 flex-wrap">
-            <span className="text-[10px] font-bold text-outline uppercase tracking-wider w-20 pt-2 shrink-0">Phạm vi</span>
+            <span className="text-[10px] font-bold text-outline uppercase tracking-wider w-20 pt-2 shrink-0 max-md:w-full max-md:pt-0">Phạm vi</span>
             <div className="flex flex-wrap gap-2 flex-1">
               {([
                 { v: 'all', label: 'Tất cả' },
@@ -195,7 +196,7 @@ export default function Materials() {
             </div>
           </div>
           <div className="flex items-start gap-3 flex-wrap">
-            <span className="text-[10px] font-bold text-outline uppercase tracking-wider w-20 pt-2 shrink-0">Tìm</span>
+            <span className="text-[10px] font-bold text-outline uppercase tracking-wider w-20 pt-2 shrink-0 max-md:w-full max-md:pt-0">Tìm</span>
             <div className="relative flex-1 max-w-sm">
               <span className="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-base text-outline pointer-events-none">search</span>
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Tiêu đề, tên file..."
@@ -204,8 +205,29 @@ export default function Materials() {
           </div>
         </div>
 
-        <div className="bg-surface-container-lowest rounded-3xl overflow-hidden shadow-sm border border-outline-variant/10">
-          <div className="overflow-x-auto">
+        <div className="bg-surface-container-lowest rounded-3xl overflow-hidden shadow-sm border border-outline-variant/10 max-md:rounded-2xl">
+          <ul className="divide-y divide-outline-variant/10 md:hidden" aria-label="Danh sách tài liệu">
+            {loading ? <li className="py-12 text-center text-sm text-outline" role="status">Đang tải…</li>
+              : visible.length === 0 ? <li className="py-12 text-center text-sm text-outline">Chưa có tài liệu nào</li>
+              : visible.map(m => (
+                <li key={m.id}>
+                  <button type="button" onClick={() => handleDownload(m)} className="flex w-full items-center gap-3 px-4 py-3 text-left">
+                    <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${m.type === 'FILE' ? 'bg-primary/10 text-primary' : 'bg-amber-50 text-amber-700'}`}>
+                      <span className="material-symbols-outlined text-[20px]" aria-hidden="true">{m.type === 'FILE' ? 'attachment' : 'link'}</span>
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold text-on-surface">{m.title}</span>
+                      <span className="mt-0.5 block truncate text-xs text-outline">
+                        {[m.type === 'FILE' && m.fileName ? `${m.fileName} · ${fmtSize(m.fileSize)}` : '', fmtDate(m.createdAt)].filter(Boolean).join(' · ')}
+                      </span>
+                      <span className="mt-1 block text-xs">{renderAudience(m)}</span>
+                    </span>
+                    <span className="material-symbols-outlined shrink-0 text-outline" aria-label={m.type === 'FILE' ? 'Tải về' : 'Mở đường dẫn'}>{m.type === 'FILE' ? 'download' : 'open_in_new'}</span>
+                  </button>
+                </li>
+              ))}
+          </ul>
+          <div className="overflow-x-auto max-md:hidden">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-surface-container-low/50">

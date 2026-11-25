@@ -141,7 +141,8 @@ export default function Holidays() {
       
       <main className="flex-1 overflow-auto p-4 lg:p-8">
         <div className="max-w-4xl mx-auto space-y-6">
-          <div className="flex justify-between items-center">
+          {/* Điện thoại chỉ xem lịch nghỉ; thêm ngày nghỉ làm trên máy tính */}
+          <div className="flex justify-between items-center max-md:hidden">
             <div>
               <h2 className="text-xl font-bold font-headline text-on-surface">Danh sách ngày nghỉ lễ</h2>
               <p className="text-sm text-on-surface-variant">Cấu hình các ngày hoặc giai đoạn nghỉ lễ, Tết của trung tâm</p>

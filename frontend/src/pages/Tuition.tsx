@@ -9,6 +9,7 @@ import * as XLSX from 'xlsx'
 import { buildInvoiceWorkbook } from '../lib/invoiceExport'
 import { buildParentUrl } from '../lib/parentUrl'
 import { useAlert, useConfirm } from '../components/ConfirmDialog'
+import { useIsPhone } from '../hooks/useMediaQuery'
 
 interface TuitionRecordSummary {
   id: string
@@ -67,6 +68,7 @@ export default function Tuition() {
   const [gradeFilter, setGradeFilter] = useState<number | null>(null)
   const [unpaidOnly, setUnpaidOnly] = useState(false)
   const [search, setSearch] = useState('')
+  const isPhone = useIsPhone()
 
   const loadData = (force = false) => {
     const request = ++latestRequest.current
@@ -543,6 +545,14 @@ export default function Tuition() {
               <span className="material-symbols-outlined text-5xl block mb-3 opacity-30 animate-pulse">sync</span>
               Đang tải...
             </div>
+          ) : isPhone ? (
+            <TuitionCards groups={studentGroups} month={month} year={year} pendingToggles={pendingToggles}
+              onToggle={handleTogglePaid} creatingRow={creatingRow} onCreate={createRecordForRow}
+              emptyText={query
+                ? `Không tìm thấy học viên "${search.trim()}"`
+                : classFilter || gradeFilter != null || unpaidOnly
+                ? 'Không có dữ liệu cho bộ lọc đang chọn'
+                : `Không có dữ liệu học phí tháng ${month}/${year}`} />
           ) : (
             <div className="overflow-x-auto">
               <table role="table" aria-labelledby="tuition-table-title" className="tuition-mobile-table w-full min-w-[1020px] table-fixed text-left border-collapse text-sm text-slate-700">
@@ -724,6 +734,8 @@ export default function Tuition() {
 
         </div>
       </div>
+      {/* Chừa chỗ để thanh lưu không che thẻ cuối trên điện thoại */}
+      {Object.keys(pendingToggles).length > 0 && <div className="h-32 md:hidden" aria-hidden="true" />}
       {Object.keys(pendingToggles).length > 0 && (
         <div className="tuition-save-bar fixed bottom-6 left-1/2 -translate-x-1/2 bg-surface-container-highest shadow-xl border border-outline-variant/30 px-6 py-4 rounded-2xl z-50 flex items-center gap-6 animate-in slide-in-from-bottom-5">
           <div className="flex items-center gap-2">
@@ -761,5 +773,104 @@ export default function Tuition() {
         </div>
       )}
     </div>
+  )
+}
+
+// ─── Thẻ học phí trên điện thoại ─────────────────────────────────────────────
+
+const isRowPaid = (row: ScheduleRow) => !!(row.tuitionRecord && (row.tuitionRecord.status === 'PAID' || row.tuitionRecord.remainingAmount === 0))
+const money = (n: number) => `${n.toLocaleString('vi-VN')}đ`
+
+/** Mỗi học viên một thẻ; mỗi lớp có nút đánh dấu đã đóng lớn, dùng chung hàng chờ "Áp dụng thay đổi" như bảng. */
+function TuitionCards({ groups, month, year, pendingToggles, onToggle, creatingRow, onCreate, emptyText }: {
+  groups: [string, ScheduleRow[]][]
+  month: number
+  year: number
+  pendingToggles: Record<string, boolean>
+  onToggle: (row: ScheduleRow, currentPaid: boolean) => void
+  creatingRow: string | null
+  onCreate: (row: ScheduleRow) => void
+  emptyText: string
+}) {
+  if (!groups.length) return (
+    <div className="py-16 text-center text-outline">
+      <span className="material-symbols-outlined mb-3 block text-5xl opacity-30" aria-hidden="true">payments</span>
+      {emptyText}
+    </div>
+  )
+  return (
+    <ul className="divide-y-4 divide-surface-container-low" aria-label={`Học phí tháng ${month}/${year}`}>
+      {groups.map(([studentId, rows]) => {
+        const first = rows[0]
+        const phone = first.primaryParent?.phone || first.primaryParent?.zalo
+        const zaloUrl = buildZaloUrl(first.primaryParent?.zalo || first.primaryParent?.phone)
+        return (
+          <li key={studentId} className="px-4 py-3">
+            <div className="flex items-center gap-2">
+              <Link to={`/students/${studentId}`} className="min-w-0 flex-1 py-1">
+                <span className="block truncate text-[15px] font-semibold text-on-surface">{first.studentName}</span>
+                <span className="block truncate text-xs text-slate-500">
+                  {first.gradeLevel != null ? `Khối ${first.gradeLevel}` : 'Chưa có khối'}
+                  {first.primaryParent && ` · ${first.primaryParent.fullName}`}
+                </span>
+              </Link>
+              {phone && <a href={`tel:${phone}`} aria-label={`Gọi phụ huynh ${first.studentName}`}
+                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-blue-50 hover:text-primary">
+                <span className="material-symbols-outlined text-[20px]" aria-hidden="true">call</span>
+              </a>}
+              {zaloUrl && <a href={zaloUrl} target="_blank" rel="noopener noreferrer" aria-label={`Nhắn Zalo phụ huynh ${first.studentName}`}
+                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-blue-50 hover:text-primary">
+                <span className="material-symbols-outlined text-[20px]" aria-hidden="true">chat</span>
+              </a>}
+            </div>
+            <div className="mt-2 space-y-2">
+              {rows.map(row => {
+                const key = `${row.studentId}___${row.classId}`
+                const originalPaid = isRowPaid(row)
+                const changed = pendingToggles[key] !== undefined
+                const paid = changed ? pendingToggles[key] : originalPaid
+                const creating = creatingRow === `${row.studentId}-${row.classId}`
+                return (
+                  <div key={row.classId} className="rounded-xl bg-slate-50 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="break-words text-sm font-medium text-slate-700">{row.className}</p>
+                        <p className="mt-0.5 text-xs tabular-nums text-slate-500">
+                          {row.totalSessions} buổi{row.ratePerSession > 0 && ` × ${money(row.ratePerSession)}`}
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right tabular-nums">
+                        <p className="font-semibold text-on-surface">{money(row.finalAmount)}</p>
+                        {row.discountAmount > 0 && <p className="text-xs text-emerald-700">Giảm {money(row.discountAmount)}</p>}
+                        {!!row.adjustmentAmount && <p className={`text-xs ${row.adjustmentAmount > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                          Điều chỉnh {row.adjustmentAmount > 0 ? '+' : '−'}{money(Math.abs(row.adjustmentAmount))}</p>}
+                      </div>
+                    </div>
+                    <div className="mt-2.5 flex items-center gap-2">
+                      <button type="button" onClick={() => onToggle(row, originalPaid)} aria-pressed={paid}
+                        aria-label={`Thanh toán học phí ${row.studentName} (${row.className})`}
+                        className={`flex h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-xl border text-sm font-bold transition-colors ${
+                          paid
+                            ? changed ? 'border-primary bg-primary text-on-primary' : 'border-emerald-600 bg-emerald-600 text-white'
+                            : changed ? 'border-primary bg-white text-primary' : 'border-rose-200 bg-white text-rose-700'}`}>
+                        <span className="material-symbols-outlined text-[20px]" aria-hidden="true">{paid ? 'check_circle' : 'radio_button_unchecked'}</span>
+                        {paid ? 'Đã đóng' : 'Chưa nộp học phí'}
+                        {changed && <span className="text-xs font-semibold opacity-80">(chưa lưu)</span>}
+                      </button>
+                      {!row.tuitionRecord && (
+                        <button type="button" onClick={() => onCreate(row)} disabled={creating}
+                          className="h-11 shrink-0 rounded-xl border border-blue-100 bg-blue-50/60 px-3 text-xs font-semibold text-primary disabled:opacity-40">
+                          {creating ? 'Đang tạo…' : 'Tạo phiếu'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </li>
+        )
+      })}
+    </ul>
   )
 }
