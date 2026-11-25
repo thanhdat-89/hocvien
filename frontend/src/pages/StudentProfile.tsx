@@ -10,6 +10,7 @@ import { buildParentUrl } from '../lib/parentUrl'
 import InvoicePreviewModal from '../components/InvoicePreviewModal'
 import WeekdayPicker, { useClassSlots, weekdayLabel } from '../components/WeekdayPicker'
 import { TheodoiNotice } from './MovedToTheodoi'
+import { useIsPhone } from '../hooks/useMediaQuery'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -1089,10 +1090,11 @@ function InfoTab({
 
   return (
     <>
-      <div className="space-y-6">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      {/* Điện thoại: hồ sơ & liên hệ, lớp học lên trước; thông tin hoá đơn xuống cuối */}
+      <div className="space-y-6 max-md:flex max-md:flex-col max-md:gap-4 max-md:space-y-0">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 max-md:contents">
           {/* Invoice info */}
-          <div className="lg:col-span-6 bg-surface-container-lowest rounded-xl p-6 sm:p-8 shadow-sm">
+          <div className="lg:col-span-6 bg-surface-container-lowest rounded-xl p-6 sm:p-8 shadow-sm max-md:order-last max-md:p-4">
             <div className="flex items-center justify-between gap-3 flex-wrap mb-6 border-b border-outline-variant/10 pb-4">
               <h3 className="font-headline text-lg font-bold text-on-surface">Thông tin hóa đơn</h3>
               {canManage && (
@@ -1116,8 +1118,8 @@ function InfoTab({
           </div>
 
           {/* Enrollments */}
-          <div className="lg:col-span-6 bg-surface-container-lowest rounded-xl p-6 sm:p-8 shadow-sm">
-            <div className="flex items-center justify-between gap-3 flex-wrap mb-6 border-b border-outline-variant/10 pb-4">
+          <div className="lg:col-span-6 bg-surface-container-lowest rounded-xl p-6 sm:p-8 shadow-sm max-md:order-2 max-md:p-4">
+            <div className="flex items-center justify-between gap-3 flex-wrap mb-6 border-b border-outline-variant/10 pb-4 max-md:mb-3 max-md:pb-3">
               <h3 className="font-headline text-lg font-bold text-on-surface">Lớp học</h3>
               {canManage && (
                 <button onClick={() => setEnrollModal(true)} className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors">
@@ -1190,8 +1192,8 @@ function InfoTab({
         </div>
 
         {/* Profile & contacts */}
-        <div className="bg-surface-container-lowest rounded-xl p-6 sm:p-8 shadow-sm">
-          <div className="flex items-center justify-between gap-3 flex-wrap mb-6 border-b border-outline-variant/10 pb-4">
+        <div className="bg-surface-container-lowest rounded-xl p-6 sm:p-8 shadow-sm max-md:order-1 max-md:p-4">
+          <div className="flex items-center justify-between gap-3 flex-wrap mb-6 border-b border-outline-variant/10 pb-4 max-md:mb-3 max-md:pb-3">
             <h3 className="font-headline text-lg font-bold text-on-surface">Hồ sơ &amp; liên hệ</h3>
             {canManage && (
               <button onClick={onEdit} className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors">
@@ -1706,8 +1708,9 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
     return null
   }
 
+  // Điện thoại: lịch sử → học phí theo lớp (xác nhận thanh toán) → tổng → khuyến mại → điều chỉnh
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 max-md:flex max-md:flex-col max-md:gap-4 max-md:space-y-0">
       <TuitionHistory
         rows={rows}
         totalRemaining={totalRemainingAll}
@@ -1716,24 +1719,24 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
       />
 
       {rows.length > 0 && (
-        <div className="profile-tuition-summary grid grid-cols-3 gap-4">
-          <div className="bg-surface-container-lowest rounded-xl p-4 shadow-sm text-center">
+        <div className="profile-tuition-summary grid grid-cols-3 gap-4 max-md:order-3">
+          <div className="bg-surface-container-lowest rounded-xl p-4 shadow-sm text-center max-md:p-2">
             <p className="text-[10px] uppercase font-bold text-outline tracking-wider mb-1">Tổng học phí</p>
-            <p className="text-xl font-bold text-on-surface">{fmtMoney(totalFee)}</p>
+            <p className="text-xl font-bold max-md:text-sm text-on-surface">{fmtMoney(totalFee)}</p>
           </div>
-          <div className="bg-surface-container-lowest rounded-xl p-4 shadow-sm text-center">
+          <div className="bg-surface-container-lowest rounded-xl p-4 shadow-sm text-center max-md:p-2">
             <p className="text-[10px] uppercase font-bold text-outline tracking-wider mb-1">Tổng buổi</p>
-            <p className="text-xl font-bold text-primary">{filteredRows.reduce((s, r) => s + r.totalSessions, 0)}</p>
+            <p className="text-xl font-bold max-md:text-sm text-primary">{filteredRows.reduce((s, r) => s + r.totalSessions, 0)}</p>
           </div>
-          <div className="bg-surface-container-lowest rounded-xl p-4 shadow-sm text-center">
+          <div className="bg-surface-container-lowest rounded-xl p-4 shadow-sm text-center max-md:p-2">
             <p className="text-[10px] uppercase font-bold text-outline tracking-wider mb-1">Tổng giảm giá</p>
-            <p className="text-xl font-bold text-secondary">{fmtMoney(totalDiscount)}</p>
+            <p className="text-xl font-bold max-md:text-sm text-secondary">{fmtMoney(totalDiscount)}</p>
           </div>
         </div>
       )}
 
       {/* Promotions section */}
-      <div className="bg-surface-container-lowest rounded-xl p-6 shadow-sm">
+      <div className="bg-surface-container-lowest rounded-xl p-6 shadow-sm max-md:order-4 max-md:p-4">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <h3 className="font-headline text-base font-bold text-on-surface">Khuyến mại đang áp dụng</h3>
           <button onClick={() => setShowPromoModal(true)} className="btn-primary shrink-0 text-xs py-1.5 px-3">
@@ -1769,7 +1772,7 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
       </div>
 
       {adjustments.length > 0 && (
-        <div className="bg-surface-container-lowest rounded-xl p-6 shadow-sm">
+        <div className="bg-surface-container-lowest rounded-xl p-6 shadow-sm max-md:order-5 max-md:p-4">
           <h3 className="font-headline text-base font-bold text-on-surface mb-1">Điều chỉnh học phí</h3>
           <p className="mb-4 text-xs text-outline">Khoản thu thêm hoặc giảm vào một tháng, ví dụ chênh lệch khi chuyển lớp.</p>
           <div className="space-y-2">
@@ -1793,8 +1796,8 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
         </div>
       )}
 
-      <div className="bg-surface-container-lowest rounded-xl p-6 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+      <div className="bg-surface-container-lowest rounded-xl p-6 shadow-sm max-md:order-2 max-md:p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6 max-md:mb-3">
           <h3 className="font-headline text-lg font-bold text-on-surface">Học phí cá nhân</h3>
           <div className="flex items-center gap-2">
             <select
@@ -1900,7 +1903,7 @@ function TuitionTab({ studentId, enrollments }: { studentId: string; enrollments
                             {r.tuitionRecord.remainingAmount > 0 && (
                               <button
                                 onClick={() => setPayingRow(r)}
-                                className="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-700 text-[11px] font-bold hover:bg-emerald-500/20 transition-all"
+                                className="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-700 text-[11px] font-bold hover:bg-emerald-500/20 transition-all max-md:order-last max-md:basis-full max-md:bg-emerald-600 max-md:py-3 max-md:text-sm max-md:text-white"
                                 title="Xác nhận đã thanh toán"
                               >
                                 Xác nhận thanh toán
@@ -2329,7 +2332,14 @@ function PrivateTab({ studentId, studentName }: { studentId: string; studentName
             <p className="text-sm text-outline">Chưa có lịch học riêng tháng {month}/{year}</p>
           </div>
         ) : (
-          <table className="profile-session-table tuition-mobile-table w-full text-left">
+          <>
+          <SessionList items={sessions.map(s => {
+            const cfg = statusCfg[resolvePrivateStatus(s)] ?? { label: s.status, cls: 'bg-surface-container-high text-outline' }
+            return { id: s.id, sessionDate: s.sessionDate, startTime: s.startTime, endTime: s.endTime, title: 'Học riêng',
+              teacher: (s as any).teacherName, fee: s.ratePerSession, status: cfg, cancelled: s.status === 'CANCELLED',
+              onDelete: () => deleteSession(s.id) }
+          })} />
+          <table className="profile-session-table tuition-mobile-table w-full text-left max-md:hidden">
             <thead>
               <tr className="border-b border-outline-variant/10 bg-surface-container-low/50">
                 <th className="px-6 py-4 text-[10px] uppercase font-bold text-outline tracking-widest w-24">Thứ</th>
@@ -2391,6 +2401,7 @@ function PrivateTab({ studentId, studentName }: { studentId: string; studentName
               </tfoot>
             )}
           </table>
+          </>
         )}
       </div>
 
@@ -2475,7 +2486,13 @@ function ScheduleTab({ studentId }: { studentId: string }) {
             <p className="text-sm text-outline">Không có lịch học tháng {month}/{year}</p>
           </div>
         ) : (
-          <table className="profile-session-table tuition-mobile-table w-full text-left">
+          <>
+          <SessionList items={sessions.map((s: any) => ({
+            id: s.id, sessionDate: s.sessionDate, startTime: s.startTime, endTime: s.endTime, title: s.className,
+            teacher: s.teacherName, fee: s.ratePerSession, cancelled: s.status === 'CANCELLED',
+            status: sessionStatusCfg[resolveSessionStatus(s)] ?? { label: s.status, cls: 'bg-surface-container-high text-outline' },
+          }))} />
+          <table className="profile-session-table tuition-mobile-table w-full text-left max-md:hidden">
             <thead>
               <tr className="border-b border-outline-variant/10 bg-surface-container-low/50">
                 <th className="px-6 py-4 text-[10px] uppercase font-bold text-outline tracking-widest w-24">Thứ</th>
@@ -2542,6 +2559,7 @@ function ScheduleTab({ studentId }: { studentId: string }) {
               </tfoot>
             )}
           </table>
+          </>
         )}
       </div>
     </div>
@@ -2619,7 +2637,7 @@ function buildZaloUrl(phone?: string | null): string | null {
   return `https://zalo.me/${intl}`
 }
 
-function ShareLinkButton({ studentId }: { studentId: string }) {
+function ShareLinkButton({ studentId, tile = false }: { studentId: string; tile?: boolean }) {
   const showAlert = useAlert()
   const [copied, setCopied] = useState(false)
   const url = buildParentUrl(studentId)
@@ -2635,6 +2653,12 @@ function ShareLinkButton({ studentId }: { studentId: string }) {
     }
   }
 
+  if (tile) return (
+    <button type="button" onClick={copy} title={url} className={QUICK_ACTION}>
+      <span className="material-symbols-outlined" aria-hidden="true">{copied ? 'check' : 'share'}</span>
+      {copied ? 'Đã sao chép' : 'Link PH'}
+    </button>
+  )
   return (
     <button onClick={copy} title={url} className="btn-secondary">
       <span className="material-symbols-outlined text-base">{copied ? 'check' : 'share'}</span>
@@ -2682,6 +2706,190 @@ function StatusMenu({ status, labels, onChange }: {
   )
 }
 
+
+// ─── Danh sách buổi học gọn cho điện thoại ──────────────────────────────────
+
+interface SessionListItem {
+  id: string; sessionDate: string; startTime?: string; endTime?: string
+  title: string; teacher?: string; fee?: number; cancelled: boolean
+  status: { label: string; cls: string }
+  onDelete?: () => void
+}
+
+/** Mỗi buổi một dòng: ngày bên trái, lớp và giờ ở giữa, trạng thái bên phải. Thay bảng trên điện thoại. */
+function SessionList({ items }: { items: SessionListItem[] }) {
+  return (
+    <ul className="divide-y divide-outline-variant/10 md:hidden" aria-label="Danh sách buổi học">
+      {items.map(item => {
+        const [, month, day] = item.sessionDate.slice(0, 10).split('-')
+        return (
+          <li key={item.id} className={`flex items-center gap-3 px-4 py-3 ${item.cancelled ? 'opacity-50' : ''}`}>
+            <div className="w-12 shrink-0 rounded-xl bg-primary/5 py-1.5 text-center">
+              <span className="block text-[10px] font-semibold text-outline">{WEEKDAY_LABELS[new Date(`${item.sessionDate.slice(0, 10)}T00:00`).getDay()]}</span>
+              <span className="block text-lg font-extrabold leading-5 text-on-surface">{day}</span>
+              <span className="block text-[10px] text-outline">/{month}</span>
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className={`truncate text-sm font-semibold text-on-surface ${item.cancelled ? 'line-through' : ''}`}>{item.title}</p>
+              <p className="truncate text-xs text-outline">
+                {[item.startTime && item.endTime ? `${item.startTime}–${item.endTime}` : item.startTime, item.teacher].filter(Boolean).join(' · ') || '—'}
+              </p>
+              {!!item.fee && <p className={`text-xs font-semibold text-on-surface-variant ${item.cancelled ? 'line-through' : ''}`}>{fmtMoney(item.fee)}</p>}
+            </div>
+            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${item.status.cls}`}>{item.status.label}</span>
+            {item.onDelete && (
+              <button type="button" onClick={item.onDelete} aria-label={`Xoá buổi học ngày ${fmt(item.sessionDate)}`}
+                className="-mr-2 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-outline hover:bg-error/10 hover:text-error">
+                <span className="material-symbols-outlined text-lg" aria-hidden="true">delete</span>
+              </button>
+            )}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+// ─── Tóm tắt hồ sơ trên điện thoại ───────────────────────────────────────────
+
+const QUICK_ACTION = 'flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl bg-primary/5 px-2 py-2.5 text-xs font-semibold text-primary active:bg-primary/15 aria-disabled:opacity-40'
+
+type ProfileTab = 'info' | 'schedule' | 'private' | 'tuition' | 'learning'
+
+interface UpcomingSession { sessionDate: string; startTime?: string; endTime?: string; className?: string; status: string }
+
+/** Buổi học sắp tới gần nhất trong tháng này hoặc tháng sau. */
+function useNextSession(studentId: string) {
+  const [state, setState] = useState<{ loading: boolean; session: UpcomingSession | null }>({ loading: true, session: null })
+  useEffect(() => {
+    let alive = true
+    const now = new Date()
+    const upcoming = (list: UpcomingSession[]) => list
+      .filter(s => s.status !== 'CANCELLED' && new Date(`${s.sessionDate.slice(0, 10)}T${s.endTime || s.startTime || '23:59'}`) > now)
+      .sort((a, b) => `${a.sessionDate}${a.startTime ?? ''}`.localeCompare(`${b.sessionDate}${b.startTime ?? ''}`))[0] ?? null
+    const fetchMonth = (offset: number) => {
+      const d = new Date(now.getFullYear(), now.getMonth() + offset, 1)
+      return api.get(`/students/${studentId}/schedule`, { params: { month: d.getMonth() + 1, year: d.getFullYear() } })
+        .then(r => upcoming(r.data ?? []))
+    }
+    setState({ loading: true, session: null })
+    fetchMonth(0).then(found => found ?? fetchMonth(1))
+      .then(session => { if (alive) setState({ loading: false, session }) })
+      .catch(() => { if (alive) setState({ loading: false, session: null }) })
+    return () => { alive = false }
+  }, [studentId])
+  return state
+}
+
+function useTuitionDue(studentId: string, enabled: boolean) {
+  const [state, setState] = useState<{ loading: boolean; remaining: number; current: ReturnType<typeof buildTuitionHistory>[number] | null }>({ loading: enabled, remaining: 0, current: null })
+  useEffect(() => {
+    if (!enabled) return
+    let alive = true
+    api.get(`/students/${studentId}/tuition-summary`)
+      .then(r => {
+        const rows: TuitionRow[] = r.data ?? []
+        const now = new Date()
+        const current = buildTuitionHistory(rows).find(e => e.month === now.getMonth() + 1 && e.year === now.getFullYear()) ?? null
+        const remaining = rows.filter(fromHistoryStart).reduce((sum, row) => sum + (row.tuitionRecord?.remainingAmount ?? 0), 0)
+        if (alive) setState({ loading: false, remaining, current })
+      })
+      .catch(() => { if (alive) setState({ loading: false, remaining: 0, current: null }) })
+    return () => { alive = false }
+  }, [studentId, enabled])
+  return state
+}
+
+function fmtSessionDay(date: string) {
+  const d = new Date(`${date.slice(0, 10)}T00:00`)
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const days = Math.round((d.getTime() - today.getTime()) / 86400000)
+  if (days === 0) return 'Hôm nay'
+  if (days === 1) return 'Ngày mai'
+  return `${WEEKDAY_LABELS[d.getDay()]}, ${fmt(date).slice(0, 5)}`
+}
+
+function MobileProfileSummary({ student, parents, enrollments, statusInfo, canSeeFinance, onOpenTab }: {
+  student: Student & { id: string }
+  parents: (Parent & { id: string })[]
+  enrollments: ClassEnrollment[]
+  statusInfo: { label: string; cls: string }
+  canSeeFinance: boolean
+  onOpenTab: (tab: ProfileTab) => void
+}) {
+  const next = useNextSession(student.id)
+  const tuition = useTuitionDue(student.id, canSeeFinance)
+  const parent = parents.find(p => p.isPrimaryContact) ?? parents[0] ?? null
+  const phone = parent?.phone || student.invoicePhone || null
+  const zaloUrl = buildZaloUrl(parent?.zalo || phone)
+  const active = enrollments.filter(e => e.status === 'ACTIVE')
+  const current = tuition.current ? HISTORY_STATUS[tuition.current.status] : null
+
+  return (
+    <section aria-label="Tóm tắt học viên" className="space-y-3 md:hidden">
+      <div className="rounded-2xl bg-surface-container-lowest p-4 shadow-sm">
+        <div className="flex items-start gap-3">
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-xl font-black text-primary" aria-hidden="true">
+            {student.fullName.split(' ').slice(-1)[0]?.[0]?.toUpperCase() ?? '?'}
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 className="font-headline text-xl font-extrabold leading-tight text-on-surface">{student.fullName}</h2>
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-on-surface-variant">
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusInfo.cls}`}>{statusInfo.label}</span>
+              {student.gradeLevel && <span>Khối {student.gradeLevel}</span>}
+              <span>Mã {student.id.slice(0, 8).toUpperCase()}</span>
+            </div>
+          </div>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {active.length ? active.map(e => (
+            <span key={e.id} className="max-w-full rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-primary">
+              {e.className}{!!e.weekdays?.length && <span className="ml-1 text-amber-700">· {weekdayLabel(e.weekdays)}</span>}
+            </span>
+          )) : <span className="text-xs text-outline">Chưa học lớp nào</span>}
+        </div>
+        {parent && <p className="mt-3 truncate text-sm text-on-surface-variant">
+          <span className="text-outline">{parent.relationship || 'Phụ huynh'}:</span> <span className="font-semibold text-on-surface">{parent.fullName}</span>
+          {phone && <span className="tabular-nums"> · {phone}</span>}
+        </p>}
+        <div className="mt-3 flex gap-2">
+          {phone
+            ? <a href={`tel:${phone}`} className={QUICK_ACTION}><span className="material-symbols-outlined" aria-hidden="true">call</span>Gọi</a>
+            : <span aria-disabled="true" className={QUICK_ACTION}><span className="material-symbols-outlined" aria-hidden="true">call</span>Gọi</span>}
+          {zaloUrl
+            ? <a href={zaloUrl} target="_blank" rel="noopener noreferrer" className={QUICK_ACTION}><span className="material-symbols-outlined" aria-hidden="true">chat</span>Zalo</a>
+            : <span aria-disabled="true" className={QUICK_ACTION}><span className="material-symbols-outlined" aria-hidden="true">chat</span>Zalo</span>}
+          <ShareLinkButton studentId={student.id} tile />
+        </div>
+      </div>
+
+      <div className={`grid gap-3 ${canSeeFinance ? 'grid-cols-2' : 'grid-cols-1'}`}>
+        {canSeeFinance && (
+          <button type="button" onClick={() => onOpenTab('tuition')} className="min-w-0 rounded-2xl bg-surface-container-lowest p-3 text-left shadow-sm">
+            <span className="block text-xs font-medium text-outline">Học phí còn nợ</span>
+            {tuition.loading ? <span className="mt-1 block text-lg font-bold text-outline">…</span>
+              : <span className={`mt-1 block text-lg font-extrabold tabular-nums ${tuition.remaining > 0 ? 'text-rose-600' : 'text-secondary'}`}>
+                  {tuition.remaining > 0 ? fmtMoney(tuition.remaining) : 'Không nợ'}
+                </span>}
+            {current && tuition.current && <span className="mt-1 block truncate text-xs text-on-surface-variant">T{tuition.current.month}: {current.label}</span>}
+          </button>
+        )}
+        <button type="button" onClick={() => onOpenTab('schedule')} className="min-w-0 rounded-2xl bg-surface-container-lowest p-3 text-left shadow-sm">
+          <span className="block text-xs font-medium text-outline">Buổi học tới</span>
+          {next.loading ? <span className="mt-1 block text-lg font-bold text-outline">…</span>
+            : next.session ? <>
+                <span className="mt-1 block truncate text-lg font-extrabold text-on-surface">
+                  {fmtSessionDay(next.session.sessionDate)}{next.session.startTime && <span className="font-semibold text-primary"> {next.session.startTime}</span>}
+                </span>
+                {next.session.className && <span className="mt-1 block truncate text-xs text-on-surface-variant">{next.session.className}</span>}
+              </>
+            : <span className="mt-1 block text-sm font-semibold text-outline">Chưa có lịch</span>}
+        </button>
+      </div>
+    </section>
+  )
+}
+
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 export default function StudentProfile() {
@@ -2691,7 +2899,21 @@ export default function StudentProfile() {
   const [student, setStudent] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const { canSeeFinance, canManageStudents } = useAuth()
-  const [activeTab, setActiveTab] = useState<'info' | 'schedule' | 'private' | 'tuition' | 'learning'>('info')
+  const [activeTab, setActiveTab] = useState<ProfileTab>('info')
+  const isPhone = useIsPhone()
+  const tabsRef = useRef<HTMLDivElement>(null)
+  /** Từ thẻ tóm tắt: mở tab và cuộn tới nội dung tab. */
+  const openTab = (tab: ProfileTab) => {
+    setActiveTab(tab)
+    requestAnimationFrame(() => {
+      // Thanh tab đang dính nên không cuộn theo nó được: cuộn để nội dung tab nằm ngay dưới thanh tab.
+      const tabs = tabsRef.current
+      const content = tabs?.nextElementSibling
+      if (!tabs || !content) return
+      const top = window.scrollY + content.getBoundingClientRect().top - 60 - tabs.offsetHeight - 12
+      window.scrollTo({ top, behavior: 'smooth' })
+    })
+  }
   const [editModal, setEditModal] = useState(false)
 
   const load = () => {
@@ -2749,9 +2971,9 @@ export default function StudentProfile() {
   return (
     <div>
       <TopBar title="Hồ sơ học viên" />
-      <div className="student-profile page-content p-8 space-y-8">
+      <div className="student-profile page-content p-8 space-y-8 max-md:space-y-4">
         {/* Breadcrumb */}
-        <div className="flex items-center gap-2 text-sm text-outline">
+        <div className="flex items-center gap-2 text-sm text-outline max-md:hidden">
           <button onClick={() => navigate('/students')} className="hover:text-primary transition-colors flex items-center gap-1">
             <span className="material-symbols-outlined text-sm">arrow_back</span>Học viên
           </button>
@@ -2759,8 +2981,11 @@ export default function StudentProfile() {
           <span className="text-on-surface font-medium">{student.fullName}</span>
         </div>
 
-        {/* Header */}
-        <section className="flex flex-col sm:flex-row gap-5 sm:items-center">
+        {isPhone && <MobileProfileSummary student={student} parents={parents} enrollments={enrollments}
+          statusInfo={statusInfo} canSeeFinance={canSeeFinance} onOpenTab={openTab} />}
+
+        {/* Header (điện thoại dùng thẻ tóm tắt ở trên) */}
+        <section className="flex flex-col sm:flex-row gap-5 sm:items-center max-md:hidden">
           <div className="w-16 h-16 flex-shrink-0 rounded-xl bg-gradient-to-br from-primary to-primary-container p-0.5 shadow-md shadow-primary/20">
             <div className="w-full h-full rounded-[10px] bg-surface-container-highest flex items-center justify-center">
               <span className="text-2xl font-black text-primary">
@@ -2784,24 +3009,28 @@ export default function StudentProfile() {
         </section>
 
         {/* Tabs */}
-        <div className="responsive-tabs flex gap-1 border-b border-outline-variant/20">
+        <div ref={tabsRef} role="tablist" aria-label="Nội dung hồ sơ"
+          className="responsive-tabs profile-tabs flex gap-1 border-b border-outline-variant/20 max-md:sticky max-md:z-30 max-md:-mx-4 max-md:gap-0 max-md:bg-background/95 max-md:px-2 max-md:backdrop-blur">
           {(['info', 'schedule', 'private', 'tuition', 'learning'] as const).filter(t => t !== 'tuition' || canSeeFinance).map(tab => {
             const icons  = { info: 'person', schedule: 'calendar_month', private: 'person_apron', tuition: 'payments', learning: 'school' }
             const labels = { info: 'Thông tin', schedule: 'Lịch học', private: 'Học riêng', tuition: 'Học phí', learning: 'Học tập' }
             return (
               <button
                 key={tab}
+                role="tab"
+                aria-selected={activeTab === tab}
                 onClick={() => setActiveTab(tab)}
-                className={`px-6 py-3 text-sm font-semibold border-b-2 transition-all flex items-center gap-2 ${activeTab === tab ? 'border-primary text-primary' : 'border-transparent text-outline hover:text-on-surface'}`}
+                className={`px-6 py-3 text-sm font-semibold border-b-2 transition-all flex items-center gap-2 max-md:flex-1 max-md:justify-center max-md:px-2 ${activeTab === tab ? 'border-primary text-primary' : 'border-transparent text-outline hover:text-on-surface'}`}
               >
-                <span className="material-symbols-outlined text-base">{icons[tab]}</span>
+                <span className="material-symbols-outlined text-base max-md:hidden" aria-hidden="true">{icons[tab]}</span>
                 {labels[tab]}
               </button>
             )
           })}
         </div>
 
-        {/* Tab content */}
+        {/* Tab content: trên điện thoại cao tối thiểu một màn hình để thẻ tóm tắt cuộn tới được ngay cả khi tab đang tải */}
+        <div className="max-md:min-h-[calc(100dvh-8rem)]">
         {activeTab === 'info' && (
           <InfoTab
             student={student}
@@ -2824,6 +3053,7 @@ export default function StudentProfile() {
         {activeTab === 'learning' && (
           <TheodoiNotice studentId={id!} />
         )}
+        </div>
       </div>
 
       {/* Edit modal */}
