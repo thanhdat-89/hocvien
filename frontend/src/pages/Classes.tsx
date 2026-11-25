@@ -965,7 +965,7 @@ export default function Classes() {
   return (
     <div>
       <TopBar title="Lịch & Lớp học" />
-      <div className="page-content px-4 sm:px-6 lg:px-8 py-6 lg:py-8 space-y-6">
+      <div className="page-content px-4 sm:px-6 lg:px-8 py-6 lg:py-8 space-y-6 max-md:flex max-md:flex-col max-md:gap-4 max-md:space-y-0">
 
         {/* Header: trên điện thoại tiêu đề đã ở thanh đầu trang, tạo lớp làm trên máy tính */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 max-md:hidden">
@@ -1003,7 +1003,7 @@ export default function Classes() {
         {tab === 'schedule' && (
           <div className="space-y-4">
             {/* Calendar controls */}
-            <div className="calendar-controls bg-surface-container-lowest p-4 rounded-2xl shadow-sm flex flex-wrap items-center justify-between gap-4">
+            <div className="calendar-controls bg-surface-container-lowest p-4 rounded-2xl shadow-sm max-md:hidden flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-3">
                 <h3 className="text-lg font-headline font-bold text-on-surface">
                   {weekStart.toLocaleDateString('vi-VN', { month: 'long', year: 'numeric' })}
@@ -1038,7 +1038,7 @@ export default function Classes() {
               </div>
             </div>
 
-            <MobileWeekAgenda days={weekDays} loading={loadingSessions}
+            <MobileWeekAgenda days={weekDays} onPrevWeek={prevWeek} onNextWeek={nextWeek} onToday={goToday} loading={loadingSessions}
               items={sessions.map(s => ({ id: s.id, date: s.sessionDate, title: classNameById[s.classId] || s.className || 'Lớp học', startTime: s.startTime, endTime: s.endTime, subtitle: s.teacherName, status: displayStatus(s) }))}
               onSelect={id => {
                 const session = sessions.find(s => s.id === id)

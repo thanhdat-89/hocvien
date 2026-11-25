@@ -428,7 +428,7 @@ export default function PrivateSchedule() {
         </section>
 
         {/* Calendar controls */}
-        <div className="calendar-controls bg-surface-container-lowest p-4 rounded-2xl shadow-sm flex flex-wrap items-center justify-between gap-4">
+        <div className="calendar-controls bg-surface-container-lowest p-4 rounded-2xl shadow-sm max-md:hidden flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <h3 className="text-lg font-headline font-bold text-on-surface">
               {weekStart.toLocaleDateString('vi-VN', { month: 'long', year: 'numeric' })}
@@ -458,7 +458,7 @@ export default function PrivateSchedule() {
           </div>
         </div>
 
-        <MobileWeekAgenda days={weekDays} loading={loading}
+        <MobileWeekAgenda days={weekDays} onPrevWeek={prevWeek} onNextWeek={nextWeek} onToday={goToday} loading={loading}
           items={sessions.map(s => ({ id: s.id, date: s.sessionDate, title: s.studentName, startTime: s.startTime, endTime: s.endTime, subtitle: s.teacherName, status: s.status }))}
           onSelect={id => {
             const session = sessions.find(s => s.id === id)

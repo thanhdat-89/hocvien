@@ -77,7 +77,8 @@ export default function Dashboard() {
   return (
     <div>
       <TopBar title="Math Center" />
-      <div className="page-content p-8 max-w-7xl mx-auto space-y-6 max-md:space-y-4">
+      {/* Điện thoại: hôm nay → việc cần xử lý → số liệu */}
+      <div className="page-content p-8 max-w-7xl mx-auto space-y-6 max-md:flex max-md:flex-col max-md:gap-4 max-md:space-y-0">
         {/* Header */}
         <section className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
@@ -99,8 +100,10 @@ export default function Dashboard() {
           </div>
         </section>
 
+        <TodaySessions sessions={data?.sessionsToday ?? []} privateCount={Math.max(0, (stats?.sessionsTodayCount ?? 0) - (data?.sessionsToday.length ?? 0))} />
+
         {/* Stats Cards */}
-        <section className="grid grid-cols-2 xl:grid-cols-4 gap-6 max-md:gap-3">
+        <section className="grid grid-cols-2 xl:grid-cols-4 gap-6 max-md:order-last max-md:gap-3">
           <StatCard
             icon="groups"
             iconColor="text-primary"
@@ -134,21 +137,21 @@ export default function Dashboard() {
         </section>
 
         {/* Monthly student summaries */}
-        <section className={`grid grid-cols-1 gap-6 ${canSeeFinance ? 'lg:grid-cols-2' : ''}`}>
+        <section className={`grid grid-cols-1 gap-6 max-md:gap-4 ${canSeeFinance ? 'lg:grid-cols-2' : ''}`}>
           <button
             type="button"
             onClick={() => navigate('/private-schedule')}
-            className="group flex min-w-0 w-full flex-col items-stretch text-left bg-surface-container-lowest rounded-2xl p-6 border border-error/25 hover:border-error/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error transition-colors"
+            className="group flex min-w-0 w-full flex-col items-stretch text-left bg-surface-container-lowest rounded-2xl p-6 max-md:p-4 border border-error/25 hover:border-error/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error transition-colors"
           >
-            <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start justify-between gap-4 max-md:hidden">
               <div className="p-3 rounded-xl bg-error/10 text-error shrink-0 flex">
                 <span className="material-symbols-outlined">event_busy</span>
               </div>
               <span className="text-xs font-semibold text-on-surface-variant bg-surface-container-low px-3 py-1.5 rounded-full">tháng {monthLabel}</span>
             </div>
-            <h2 className="mt-5 text-lg font-headline font-bold text-on-surface">Học viên học riêng chưa xếp lịch</h2>
+            <h2 className="mt-5 text-lg font-headline font-bold text-on-surface max-md:mt-0 max-md:text-base">Học viên học riêng chưa xếp lịch</h2>
             <p className="text-sm text-on-surface-variant mt-1">Chưa có buổi học riêng trong tháng {monthLabel}</p>
-            <div className="flex items-baseline gap-2 py-6">
+            <div className="flex items-baseline gap-2 py-6 max-md:py-3">
               <span className="text-4xl font-headline font-black text-error">{stats?.unscheduledPrivateStudentsThisMonth ?? '—'}</span>
               <span className="text-sm text-on-surface-variant">học viên</span>
             </div>
@@ -159,11 +162,11 @@ export default function Dashboard() {
           </button>
 
           {canSeeFinance && (
-            <div className="min-w-0 w-full bg-surface-container-lowest rounded-2xl p-6 border border-outline-variant/15">
-              <div className="p-3 rounded-xl bg-secondary/10 text-secondary w-fit flex">
+            <div className="min-w-0 w-full bg-surface-container-lowest rounded-2xl p-6 max-md:p-4 border border-outline-variant/15">
+              <div className="p-3 rounded-xl bg-secondary/10 text-secondary w-fit flex max-md:hidden">
                 <span className="material-symbols-outlined">payments</span>
               </div>
-              <h2 className="mt-5 text-lg font-headline font-bold text-on-surface">Học viên chưa thanh toán học phí</h2>
+              <h2 className="mt-5 text-lg font-headline font-bold text-on-surface max-md:mt-0 max-md:text-base">Học viên chưa thanh toán học phí</h2>
               <p className="text-sm text-on-surface-variant mt-1">Học viên còn học phí phải trả theo từng tháng, kể cả chưa có phiếu</p>
               <div className="mt-4 divide-y divide-outline-variant/15">
                 {unpaidMonths.map(({ year, month, count }) => (
@@ -218,5 +221,55 @@ function StatCard({ icon, iconColor, iconBg, value, label, sub, onClick }: {
         {sub && <p className="text-[10px] text-on-surface-variant mt-0.5">{sub}</p>}
       </div>
     </div>
+  )
+}
+
+const SESSION_STATUS: Record<string, { label: string; cls: string }> = {
+  COMPLETED: { label: 'Đã học', cls: 'text-secondary' },
+  CANCELLED: { label: 'Đã hủy', cls: 'text-error' },
+}
+
+/** Điện thoại: các buổi học trong ngày lên đầu trang tổng quan. */
+function TodaySessions({ sessions, privateCount }: { sessions: DashboardData['sessionsToday']; privateCount: number }) {
+  const navigate = useNavigate()
+  const now = new Date()
+  const current = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+  return (
+    <section aria-labelledby="today-title" className="rounded-2xl bg-surface-container-lowest p-4 shadow-sm md:hidden">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h2 id="today-title" className="font-headline text-base font-bold text-on-surface">Lớp học hôm nay</h2>
+        <button type="button" onClick={() => navigate('/classes')} className="px-1 text-sm font-semibold text-primary">Xem lịch</button>
+      </div>
+      {sessions.length === 0 ? <p className="py-3 text-sm text-outline">Hôm nay không có buổi học lớp nào</p> : (
+        <ul className="divide-y divide-outline-variant/15">
+          {sessions.map(s => {
+            const done = s.status === 'COMPLETED' || (s.status !== 'CANCELLED' && !!s.endTime && s.endTime <= current)
+            const live = s.status === 'SCHEDULED' && s.startTime <= current && (!s.endTime || current < s.endTime)
+            const status = live ? { label: 'Đang học', cls: 'text-primary font-semibold' }
+              : SESSION_STATUS[s.status] ?? (done ? SESSION_STATUS.COMPLETED : { label: 'Sắp học', cls: 'text-on-surface-variant' })
+            return (
+              <li key={s.id} className={`flex items-center gap-3 py-2.5 ${s.status === 'CANCELLED' || done ? 'opacity-60' : ''}`}>
+                <span className="w-12 shrink-0 text-sm font-semibold tabular-nums text-primary">
+                  {s.startTime}
+                  {s.endTime && <span className="block text-xs font-normal text-outline">{s.endTime}</span>}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className={`block truncate text-sm font-semibold text-on-surface ${s.status === 'CANCELLED' ? 'line-through' : ''}`}>{s.className}</span>
+                  {s.teacherName && <span className="block truncate text-xs text-outline">{s.teacherName}</span>}
+                </span>
+                <span className={`shrink-0 text-xs ${status.cls}`}>{status.label}</span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      {privateCount > 0 && (
+        <button type="button" onClick={() => navigate('/private-schedule')}
+          className="mt-2 flex w-full items-center justify-between gap-2 rounded-xl bg-tertiary/5 px-3 py-2.5 text-sm font-semibold text-tertiary">
+          <span>{privateCount} buổi học riêng hôm nay</span>
+          <span className="material-symbols-outlined text-lg" aria-hidden="true">chevron_right</span>
+        </button>
+      )}
+    </section>
   )
 }

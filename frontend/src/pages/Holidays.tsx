@@ -140,7 +140,7 @@ export default function Holidays() {
       <TopBar title="Lịch nghỉ lễ" />
       
       <main className="flex-1 overflow-auto p-4 lg:p-8">
-        <div className="max-w-4xl mx-auto space-y-6">
+        <div className="max-w-4xl mx-auto space-y-6 max-md:flex max-md:flex-col max-md:gap-4 max-md:space-y-0">
           {/* Điện thoại chỉ xem lịch nghỉ; thêm ngày nghỉ làm trên máy tính */}
           <div className="flex justify-between items-center max-md:hidden">
             <div>

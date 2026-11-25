@@ -72,13 +72,6 @@
   .profile-promotion-class { flex: 1; min-width: 0; white-space: normal; }
   .profile-promotion-dates { flex-basis: 100%; white-space: normal; }
   .activity-filters { grid-template-columns: minmax(0, 1fr); }
-  .calendar-controls > div { width: 100%; flex-wrap: wrap; gap: 12px; }
-  .calendar-controls > div > h3 { font-size: 1rem; line-height: 1.5rem; }
-  .calendar-controls > div > div { flex-shrink: 0; max-width: 100%; }
-  .calendar-controls > div:last-child > div { flex-wrap: wrap; gap: 8px 12px; }
-  .calendar-controls :is(button, .material-symbols-outlined),
-  .calendar-controls > div > span,
-  .calendar-controls > div:last-child > div > span { flex-shrink: 0; white-space: nowrap; }
   .app-shell :where(input:not([type='checkbox']):not([type='radio']), select, textarea),
   .responsive-dialog :where(input:not([type='checkbox']):not([type='radio']), select, textarea),
   .login-page input { font-size: 16px; }
