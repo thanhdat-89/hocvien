@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
+import WorkspaceSwitcher from './WorkspaceSwitcher'
 
 type Role = 'ADMIN' | 'STAFF' | 'TEACHER'
 
@@ -132,6 +133,9 @@ export default function Sidebar({ open, onClose, compact }: { open: boolean; onC
           </div>
         </div>
       </div>
+
+      {/* Cơ sở & năm học: trên điện thoại nằm trong menu thay vì thanh đầu trang */}
+      <div className="mb-4 px-4 lg:hidden"><WorkspaceSwitcher stacked /></div>
 
       {/* Nav */}
       <nav aria-label="Điều hướng chính" className="flex-1 px-2 space-y-1 max-lg:min-h-0 max-lg:overflow-y-auto">

@@ -407,7 +407,7 @@ export default function Holidays() {
       
       {/* Toast notification */}
       {toastMsg && (
-        <div className={`fixed bottom-6 right-6 z-[200] px-5 py-3 rounded-xl shadow-lg text-sm font-semibold text-white transition-all ${toastMsg.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>
+        <div className={`mobile-fab fixed bottom-6 right-6 z-[200] px-5 py-3 rounded-xl shadow-lg text-sm font-semibold text-white transition-all ${toastMsg.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>
           {toastMsg.text}
         </div>
       )}

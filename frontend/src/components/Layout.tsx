@@ -4,6 +4,7 @@ import { useAuth } from '../hooks/useAuth'
 import Sidebar from './Sidebar'
 import { MobileNavigationContext } from './MobileNavigation'
 import TopBar from './TopBar'
+import MobileTabBar from './MobileTabBar'
 import { WorkspaceProvider, useWorkspace } from '../hooks/useWorkspace'
 import { useCompactSidebar } from '../hooks/useCompactSidebar'
 
@@ -28,13 +29,14 @@ export default function Layout() {
     <MobileNavigationContext.Provider value={{ open: menuOpen, toggle: () => setMenuOpen(open => !open) }}>
     <div data-compact-sidebar={compact} className="app-shell flex bg-background min-h-screen font-body text-on-background antialiased">
       <Sidebar open={menuOpen} onClose={closeMenu} compact={compact} />
-      <main ref={contentRef} id="main-content" className="app-content flex-1 min-w-0 lg:ml-64 min-h-screen">
+      <main ref={contentRef} id="main-content" className="app-content flex-1 min-w-0 lg:ml-64 min-h-screen max-lg:pb-[calc(4.25rem+env(safe-area-inset-bottom))]">
         {['/notifications', '/leads'].includes(pathname) && (
           <div className="sticky top-0 z-40 lg:hidden"><TopBar title={pathname === '/leads' ? 'Khách tiềm năng' : 'Thông báo'} /></div>
         )}
         <YearBanner />
         <Outlet />
       </main>
+      <MobileTabBar />
     </div>
     </MobileNavigationContext.Provider>
     </WorkspaceProvider>

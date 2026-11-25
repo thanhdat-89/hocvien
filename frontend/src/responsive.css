@@ -26,11 +26,13 @@
     max-width: 100%;
     flex-wrap: wrap;
   }
+  /* Nổi phía trên thanh điều hướng đáy (MobileTabBar). */
   .app-toasts {
     width: calc(100% - 24px);
     min-width: 0;
-    bottom: max(12px, env(safe-area-inset-bottom));
+    bottom: calc(5rem + env(safe-area-inset-bottom));
   }
+  .mobile-tabbar { padding-bottom: max(4px, env(safe-area-inset-bottom)); }
 
   .app-shell :where(button, a[aria-label]), .responsive-dialog button { min-height: 44px; }
   .app-shell :where(button, a[aria-label]):has(> .material-symbols-outlined:only-child) { min-width: 44px; }
@@ -48,9 +50,10 @@
     flex-wrap: wrap;
     justify-content: space-between;
     gap: 12px;
-    bottom: max(12px, env(safe-area-inset-bottom));
     padding: 12px 16px;
+    bottom: calc(5rem + env(safe-area-inset-bottom));
   }
+  .mobile-fab { bottom: calc(5rem + env(safe-area-inset-bottom)); }
 }
 
 @media (max-width: 767px) {

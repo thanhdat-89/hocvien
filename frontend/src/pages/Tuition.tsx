@@ -357,42 +357,43 @@ export default function Tuition() {
     <div>
       {invoiceResults && <InvoiceWorkflowResultDialog results={invoiceResults} onClose={() => setInvoiceResults(null)} />}
       <TopBar title="Quản lý Học phí" />
-      <div className="page-content px-8 py-8 space-y-8">
+      <div className="page-content px-8 py-8 space-y-8 max-md:space-y-4">
 
         {/* Header */}
         <div className="flex flex-wrap items-end justify-between gap-6">
-          <div>
+          <div className="max-md:hidden">
             <span className="text-[11px] font-bold text-primary tracking-[0.2em] uppercase mb-2 block">Tài chính</span>
             <h2 className="text-4xl font-black text-on-surface font-headline tracking-tight">Quản lý Học phí</h2>
             <p className="mt-2 text-sm text-outline">Tự động tạo hóa đơn chưa phát hành chỉ áp dụng cho kỳ học phí từ tháng 10/2026.</p>
           </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <button onClick={() => loadData(true)} disabled={loading}
-              className="px-4 py-2 rounded-xl bg-primary/10 text-primary text-sm font-semibold hover:bg-primary/20 disabled:opacity-40">
-              Tải lại dữ liệu
+          <div className="flex flex-wrap items-center gap-3 max-md:w-full max-md:flex-nowrap max-md:gap-2">
+            <button onClick={() => loadData(true)} disabled={loading} aria-label="Tải lại dữ liệu"
+              className="max-md:order-last max-md:shrink-0 px-4 py-2 rounded-xl bg-primary/10 text-primary text-sm font-semibold hover:bg-primary/20 disabled:opacity-40">
+              <span className="max-md:hidden">Tải lại dữ liệu</span>
+              <span className="material-symbols-outlined md:hidden" aria-hidden="true">refresh</span>
             </button>
             <button
               onClick={exportExcel}
               disabled={filtered.length === 0}
-              className="flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 rounded-xl bg-secondary/10 text-secondary text-sm font-semibold hover:bg-secondary/20 transition-all disabled:opacity-40"
+              className="max-md:hidden flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 rounded-xl bg-secondary/10 text-secondary text-sm font-semibold hover:bg-secondary/20 transition-all disabled:opacity-40"
             >
               <span className="material-symbols-outlined text-[18px]">download</span>
               Xuất Excel
             </button>
-            <select value={month} onChange={e => setMonth(Number(e.target.value))}
-              className="bg-surface-container-lowest border border-outline-variant/20 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
+            <select value={month} onChange={e => setMonth(Number(e.target.value))} aria-label="Tháng"
+              className="max-md:flex-1 bg-surface-container-lowest border border-outline-variant/20 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
               {Array.from({ length: 12 }, (_, i) => (
                 <option key={i + 1} value={i + 1}>Tháng {i + 1}</option>
               ))}
             </select>
-            <select value={year} onChange={e => setYear(Number(e.target.value))}
-              className="bg-surface-container-lowest border border-outline-variant/20 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
+            <select value={year} onChange={e => setYear(Number(e.target.value))} aria-label="Năm"
+              className="max-md:flex-1 bg-surface-container-lowest border border-outline-variant/20 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
               {years.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
           </div>
         </div>
 
-        <div className="space-y-8">
+        <div className="space-y-8 max-md:space-y-4">
         {loadError && <div role="alert" className="text-red-700">{loadError} <button className="underline" onClick={() => loadData(true)}>Thử lại</button></div>}
         {/* Stats */}
         <div className="tuition-summary grid grid-cols-1 md:grid-cols-3 gap-6">

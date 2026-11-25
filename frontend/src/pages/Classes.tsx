@@ -967,8 +967,8 @@ export default function Classes() {
       <TopBar title="Lịch & Lớp học" />
       <div className="page-content px-4 sm:px-6 lg:px-8 py-6 lg:py-8 space-y-6">
 
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+        {/* Header: trên điện thoại tiêu đề đã ở thanh đầu trang, tạo lớp làm trên máy tính */}
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 max-md:hidden">
           <div>
             <span className="text-[11px] font-bold text-primary tracking-[0.2em] uppercase mb-2 block">Lịch Đào Tạo</span>
             <h2 className="text-4xl font-black text-on-surface font-headline tracking-tight">Quản Lý Lịch & Lớp Học</h2>

@@ -77,16 +77,17 @@ export default function Dashboard() {
   return (
     <div>
       <TopBar title="Math Center" />
-      <div className="page-content p-8 max-w-7xl mx-auto space-y-6">
+      <div className="page-content p-8 max-w-7xl mx-auto space-y-6 max-md:space-y-4">
         {/* Header */}
         <section className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
             <p className="text-sm text-on-surface-variant capitalize">{dateDisplay}</p>
-            <h1 className="text-3xl font-headline font-extrabold text-on-surface tracking-tight mt-1">
+            <h1 className="text-3xl font-headline font-extrabold text-on-surface tracking-tight mt-1 max-md:text-2xl">
               Tổng quan Trung tâm
             </h1>
           </div>
-          <div className="flex items-center gap-3">
+          {/* Trên điện thoại hai lối tắt này đã có ở thanh điều hướng đáy */}
+          <div className="flex items-center gap-3 max-lg:hidden">
             <button className="btn-secondary" onClick={() => navigate('/students')}>
               <span className="material-symbols-outlined text-lg">groups</span>
               Học viên
@@ -99,7 +100,7 @@ export default function Dashboard() {
         </section>
 
         {/* Stats Cards */}
-        <section className="grid grid-cols-2 xl:grid-cols-4 gap-6">
+        <section className="grid grid-cols-2 xl:grid-cols-4 gap-6 max-md:gap-3">
           <StatCard
             icon="groups"
             iconColor="text-primary"
@@ -205,15 +206,15 @@ function StatCard({ icon, iconColor, iconBg, value, label, sub, onClick }: {
 }) {
   return (
     <div
-      className={`min-w-0 bg-surface-container-lowest p-6 rounded-2xl flex flex-col gap-4 ${onClick ? 'cursor-pointer hover:shadow-md transition-all' : ''}`}
+      className={`min-w-0 bg-surface-container-lowest p-6 rounded-2xl flex flex-col gap-4 max-md:flex-row max-md:items-center max-md:gap-3 max-md:p-3 ${onClick ? 'cursor-pointer hover:shadow-md transition-all' : ''}`}
       onClick={onClick}
     >
-      <div className={`p-3 ${iconBg} rounded-xl w-fit flex`}>
+      <div className={`p-3 ${iconBg} rounded-xl w-fit flex max-md:p-2 max-md:shrink-0`}>
         <span className={`material-symbols-outlined ${iconColor}`}>{icon}</span>
       </div>
-      <div>
-        <h3 className="text-3xl font-headline font-black text-on-surface">{value}</h3>
-        <p className="text-[11px] uppercase tracking-wider text-on-surface-variant mt-1 font-semibold">{label}</p>
+      <div className="min-w-0">
+        <h3 className="text-3xl font-headline font-black text-on-surface max-md:text-xl">{value}</h3>
+        <p className="text-[11px] uppercase tracking-wider text-on-surface-variant mt-1 font-semibold max-md:mt-0 max-md:normal-case max-md:tracking-normal max-md:text-xs max-md:font-medium max-md:leading-4">{label}</p>
         {sub && <p className="text-[10px] text-on-surface-variant mt-0.5">{sub}</p>}
       </div>
     </div>

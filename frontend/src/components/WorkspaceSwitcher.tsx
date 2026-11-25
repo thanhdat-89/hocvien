@@ -6,12 +6,12 @@ const STATUS_SUFFIX = { CURRENT: '', UPCOMING: ' · sắp tới', CLOSED: ' · �
 const pillClass = 'h-9 max-w-[13rem] min-w-0 rounded-full bg-surface-container-low text-sm font-semibold text-slate-700 max-lg:max-w-none max-lg:flex-1'
 
 /** Cơ sở làm việc (đổi trong Cài đặt) và năm học đang xem (thanh trên cùng) */
-export default function WorkspaceSwitcher() {
+export default function WorkspaceSwitcher({ stacked = false }: { stacked?: boolean }) {
   const { branches, years, branchId, year, setYear } = useWorkspace()
   const branch = branches.find(b => b.id === branchId)
 
   return (
-    <div className="flex min-w-0 items-center gap-2">
+    <div className={stacked ? 'flex min-w-0 flex-col items-stretch gap-2 [&>*]:h-10 [&>*]:max-w-none' : 'flex min-w-0 items-center gap-2'}>
       <Link to="/settings/account" title="Cơ sở làm việc — đổi trong Cài đặt → Tài khoản của tôi"
         className={`${pillClass} inline-flex items-center gap-1.5 px-3 hover:bg-primary/10`}>
         <span className="material-symbols-outlined text-base text-primary" aria-hidden="true">apartment</span>

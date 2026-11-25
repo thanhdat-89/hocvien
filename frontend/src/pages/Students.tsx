@@ -498,32 +498,32 @@ export default function Students() {
   return (
     <div>
       <TopBar title="Quản lý Học viên" onSearch={handleSearch} />
-      <div className="page-content px-8 py-8 space-y-8">
+      <div className="page-content px-8 py-8 space-y-8 max-md:space-y-4 max-md:pb-24">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-          <div>
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 max-md:contents">
+          <div className="max-md:hidden">
             <span className="text-[11px] font-bold text-primary tracking-[0.2em] uppercase mb-2 block">Dữ liệu hệ thống</span>
             <h2 className="text-4xl font-black text-on-surface font-headline tracking-tight">Quản lý Học viên</h2>
           </div>
-          <div className="flex items-center gap-2 flex-wrap justify-end">
+          <div className="flex items-center gap-2 flex-wrap justify-end max-md:contents">
             {canImportStudents && (
               <button onClick={() => setShowImportModal(true)}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-surface-container-low border border-outline-variant/20 text-sm font-semibold text-on-surface-variant hover:bg-surface-container hover:text-primary transition-all">
+                className="max-md:hidden flex items-center gap-2 px-4 py-2.5 rounded-xl bg-surface-container-low border border-outline-variant/20 text-sm font-semibold text-on-surface-variant hover:bg-surface-container hover:text-primary transition-all">
                 <span className="material-symbols-outlined text-[18px]">upload_file</span>
                 Import Excel
               </button>
             )}
-            <button className="btn-primary" onClick={() => { setEditStudent(null); setShowModal(true) }}>
+            <button className="btn-primary mobile-fab max-md:fixed max-md:right-4 max-md:z-40 max-md:rounded-full max-md:px-5 max-md:py-3.5 max-md:shadow-lg" onClick={() => { setEditStudent(null); setShowModal(true) }}>
               <span className="material-symbols-outlined">person_add</span>
-              Thêm học viên mới
+              <span className="md:hidden">Thêm học viên</span><span className="max-md:hidden">Thêm học viên mới</span>
             </button>
           </div>
         </div>
 
         {/* Stats + Filters */}
         <div className="student-summary grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="bg-surface-container-lowest p-6 rounded-2xl shadow-sm border border-outline-variant/10">
-            <div className="flex items-center justify-between mb-4">
+          <div className="bg-surface-container-lowest p-6 rounded-2xl shadow-sm border border-outline-variant/10 max-md:px-4 max-md:py-3">
+            <div className="flex items-center justify-between mb-4 max-md:hidden">
               <div className="w-10 h-10 rounded-lg bg-primary-container/20 flex items-center justify-center text-primary">
                 <span className="material-symbols-outlined">group</span>
               </div>
@@ -531,8 +531,8 @@ export default function Students() {
             <p className="text-sm text-outline font-medium">Tổng học viên</p>
             <p className="text-2xl font-black text-on-surface mt-1">{loading ? '—' : totalAll}</p>
           </div>
-          <div className="bg-surface-container-lowest p-6 rounded-2xl shadow-sm border border-outline-variant/10">
-            <div className="flex items-center justify-between mb-4">
+          <div className="bg-surface-container-lowest p-6 rounded-2xl shadow-sm border border-outline-variant/10 max-md:px-4 max-md:py-3">
+            <div className="flex items-center justify-between mb-4 max-md:hidden">
               <div className="w-10 h-10 rounded-lg bg-secondary-container/20 flex items-center justify-center text-secondary">
                 <span className="material-symbols-outlined">check_circle</span>
               </div>
@@ -543,14 +543,14 @@ export default function Students() {
               {loading ? '—' : totalActive}
             </p>
           </div>
-          <div className="md:col-span-2 bg-surface-container-low p-5 rounded-2xl flex flex-col justify-center">
+          <div className="md:col-span-2 bg-surface-container-low p-5 rounded-2xl flex flex-col justify-center max-md:p-3">
             <label className="text-[10px] font-bold text-outline uppercase mb-2 block">Khối lớp</label>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 max-md:-mx-1 max-md:flex-nowrap max-md:overflow-x-auto max-md:px-1 max-md:pb-1">
               {['', '6', '7', '8', '9', '10', '11', '12'].map((gl) => (
                 <button
                   key={gl}
                   onClick={() => handleGradeFilter(gl)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all max-md:shrink-0 max-md:whitespace-nowrap ${
                     gradeLevel === gl
                       ? 'bg-primary text-on-primary border-primary shadow-sm'
                       : 'bg-surface text-on-surface-variant border-outline-variant/30 hover:border-primary/40 hover:text-primary'
