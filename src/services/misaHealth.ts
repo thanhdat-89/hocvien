@@ -1,28 +1,23 @@
 import { prisma } from '../lib/db'
-import { sendTelegramMessage } from './telegramService'
 
 /**
  * Theo dõi sức khỏe kết nối MISA. Mỗi lần gọi (qua misaFetch) được ghi lại:
- *  - Cửa sổ 5 phút trong bộ nhớ: tỉ lệ lỗi > 10% (ít nhất 5 lần gọi) → MỘT cảnh báo Telegram; khi hết lỗi → một tin "đã ổn định".
+ *  - Cửa sổ 5 phút trong bộ nhớ: tỉ lệ lỗi > 10% (ít nhất 5 lần gọi) → `alerting` trong báo cáo.
  *  - Đếm theo ngày, ghi gộp vào bảng misa_call_stats mỗi phút (xem GET /api/tuition/misa/health).
+ * Không gửi Telegram: lỗi kết nối thoáng qua không cần ai xử lý. Hoá đơn tạo lỗi đã có tin riêng
+ * (telegramService.notifyInvoiceCreationFailed, misaInvoiceRetry) — chỉ những tin đó mới báo.
  * Lỗi tính vào tỉ lệ: 429, 401, 5xx, mất kết nối, chưa gửi được. 4xx khác (sai dữ liệu) và 404 không phải lỗi kết nối.
  */
 export type MisaCallOutcome = 'ok' | 'http_429' | 'http_401' | 'http_5xx' | 'http_4xx' | 'network' | 'not_sent'
 const FAILURE: MisaCallOutcome[] = ['http_429', 'http_401', 'http_5xx', 'network', 'not_sent']
-const LABEL: Record<MisaCallOutcome, string> = {
-  ok: 'thành công', http_429: 'quá tải (429)', http_401: 'hết phiên đăng nhập (401)', http_5xx: 'MISA lỗi máy chủ (5xx)',
-  http_4xx: 'từ chối dữ liệu (4xx)', network: 'mất kết nối / hết giờ', not_sent: 'chưa gửi được (xếp hàng quá lâu)',
-}
 const WINDOW_MS = 5 * 60_000
 const MIN_CALLS = 5
 const FAILURE_RATE = 0.1
 const FLUSH_MS = 60_000
 
 let window: Array<{ at: number; outcome: MisaCallOutcome }> = []
-let alerting = false
 let unflushed = new Map<string, number>()   // `${day}|${outcome}` → số lần chưa ghi DB
 let flushTimer: NodeJS.Timeout | null = null
-let notify: (text: string) => Promise<unknown> = text => sendTelegramMessage(text)
 
 export const outcomeOfStatus = (status: number): MisaCallOutcome =>
   status === 429 ? 'http_429' : status === 401 ? 'http_401' : status >= 500 ? 'http_5xx' : status >= 400 && status !== 404 ? 'http_4xx' : 'ok'
@@ -37,6 +32,8 @@ function summarize(now: number) {
   return { calls: window.length, failures, byOutcome }
 }
 
+const isAlerting = ({ calls, failures }: { calls: number; failures: number }) => calls >= MIN_CALLS && failures / calls > FAILURE_RATE
+
 export function recordMisaCall(outcome: MisaCallOutcome, now = Date.now()) {
   window.push({ at: now, outcome })
   const key = `${vnDay(now)}|${outcome}`
@@ -44,25 +41,6 @@ export function recordMisaCall(outcome: MisaCallOutcome, now = Date.now()) {
   if (!flushTimer) {
     flushTimer = setTimeout(() => { flushTimer = null; flushMisaCallStats().catch(() => undefined) }, FLUSH_MS)
     flushTimer.unref?.()
-  }
-  evaluate(now)
-}
-
-function evaluate(now: number) {
-  const { calls, failures, byOutcome } = summarize(now)
-  const breakdown = (Object.entries(byOutcome) as Array<[MisaCallOutcome, number]>)
-    .sort((a, b) => b[1] - a[1]).map(([outcome, count]) => `• ${LABEL[outcome]}: ${count}`)
-  if (!alerting && calls >= MIN_CALLS && failures / calls > FAILURE_RATE) {
-    alerting = true
-    void notify([
-      '🚨 KẾT NỐI MISA ĐANG LỖI NHIỀU',
-      `${failures}/${calls} yêu cầu lỗi trong 5 phút qua (${Math.round(failures / calls * 100)}%).`,
-      ...breakdown,
-      'Hóa đơn lỗi do MISA quá tải / mất kết nối sẽ được tự tạo lại mỗi 15 phút. Nếu kéo dài, kiểm tra trạng thái MISA hoặc tài khoản meInvoice.',
-    ].join('\n')).catch(() => undefined)
-  } else if (alerting && (failures === 0 || (calls >= MIN_CALLS && failures / calls <= FAILURE_RATE))) {
-    alerting = false
-    void notify(['✅ KẾT NỐI MISA ĐÃ ỔN ĐỊNH LẠI', `5 phút qua: ${calls} yêu cầu, ${failures} lỗi.`].join('\n')).catch(() => undefined)
   }
 }
 
@@ -96,12 +74,12 @@ export async function misaHealthReport(now = Date.now()) {
     const day = row.day.toISOString().slice(0, 10)
     days[day] = { ...(days[day] || {}), [row.outcome]: row.count }
   }
-  return { alerting, last5Minutes: summarize(now), days }
+  const last5Minutes = summarize(now)
+  return { alerting: isAlerting(last5Minutes), last5Minutes, days }
 }
 
 /** Chỉ cho kiểm thử */
-export function resetMisaHealth(sender?: (text: string) => Promise<unknown>) {
-  window = []; alerting = false; unflushed = new Map()
+export function resetMisaHealth() {
+  window = []; unflushed = new Map()
   if (flushTimer) { clearTimeout(flushTimer); flushTimer = null }
-  notify = sender ?? (text => sendTelegramMessage(text))
 }

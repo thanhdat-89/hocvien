@@ -9,7 +9,8 @@ import { sendTelegramMessage } from './telegramService'
  * Cron mỗi 15 phút: tạo lại hoá đơn MISA ở trạng thái FAILED do lỗi TẠM THỜI của MISA (quá tải 429, mất kết nối, lỗi máy chủ).
  * Chỉ FAILED — MISA đã từ chối hoặc chưa nhận yêu cầu — nên tạo lại không thể trùng. "Không rõ kết quả" (OUTCOME_UNKNOWN)
  * và lỗi dữ liệu (sai thông tin người mua, mẫu…) không bao giờ tự tạo lại. Tối đa 5 lần mỗi hoá đơn, chỉ lỗi trong 3 ngày gần đây.
- * Giữ nguyên mẫu + người mua đã chọn lần trước; báo một tin Telegram tổng hợp cho mỗi lần chạy có việc.
+ * Giữ nguyên mẫu + người mua đã chọn lần trước. Chỉ báo Telegram khi có hoá đơn cần người xử lý: dừng tự thử lại
+ * (đủ 5 lần / lỗi dữ liệu) hoặc không rõ kết quả. Tạo lại thành công hay sẽ thử tiếp thì không cần báo.
  */
 export const MAX_AUTO_RETRIES = 5
 const MIN_AGE_MS = 10 * 60_000
@@ -94,7 +95,7 @@ export async function retryFailedMisaInvoices(deps: RetryDependencies = {}) {
   const count = (outcome: Outcome) => items.filter(item => item.outcome === outcome).length
   const summary = { checked: candidates.length, created: count('created'), failed: count('failed'),
     exhausted: count('exhausted'), unknown: count('unknown'), skipped: count('skipped') }
-  if (summary.checked - summary.skipped > 0) {
+  if (summary.exhausted + summary.unknown > 0) {
     const sent = await notify(retrySummaryMessage(items)).catch(() => ({ sent: false }))
     if (!sent.sent) console.warn('[MISA auto-retry] Telegram summary not sent')
   }
@@ -106,9 +107,7 @@ export function retrySummaryMessage(items: Item[]) {
   const line = (item: Item) => `• ${item.studentName.slice(0, 80)} — ${item.label.slice(0, 80)}${item.reason ? `: ${item.reason.slice(0, 150)}` : ''}`
   const section = (title: string, list: Item[]) => list.length ? [title, ...list.slice(0, 15).map(line), ...(list.length > 15 ? [`… và ${list.length - 15} phiếu khác`] : [])] : []
   return [
-    '🔁 TỰ TẠO LẠI HÓA ĐƠN MISA',
-    `Đã tạo: ${pick('created').length}`,
-    ...section(`Vẫn lỗi, sẽ thử lại sau 15 phút: ${pick('failed').length}`, pick('failed')),
+    '🔁 TỰ TẠO LẠI HÓA ĐƠN MISA — CẦN XỬ LÝ',
     ...section(`⛔ Dừng tự thử lại — cần xử lý tay: ${pick('exhausted').length}`, pick('exhausted')),
     ...section(`⚠️ Không rõ kết quả — đối chiếu RefID trên MISA trước khi tạo lại: ${pick('unknown').length}`, pick('unknown')),
     'https://qlhv.cqt.vn/tuition/invoices',

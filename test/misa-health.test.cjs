@@ -4,32 +4,26 @@ const { prisma, reset } = require('./helpers/pg.cjs')
 const health = require('../dist/services/misaHealth')
 const { misaFetch } = require('../dist/services/misaRateLimit')
 
-let messages
-beforeEach(async () => { await reset(); messages = []; health.resetMisaHealth(async text => { messages.push(text) }) })
+beforeEach(async () => { await reset(); health.resetMisaHealth() })
 after(() => prisma.$disconnect())
 
-test('tỉ lệ lỗi > 10% trong 5 phút → MỘT cảnh báo; hết lỗi → một tin ổn định lại', () => {
-  const t0 = Date.parse('2026-11-22T18:00:00+07:00')
-  for (let i = 0; i < 4; i++) health.recordMisaCall('ok', t0 + i)
-  assert.equal(messages.length, 0)
-  health.recordMisaCall('http_429', t0 + 10)
-  assert.equal(messages.length, 1)
-  assert.match(messages[0], /KẾT NỐI MISA ĐANG LỖI NHIỀU\n1\/5 yêu cầu lỗi[\s\S]*quá tải \(429\): 1/)
-  for (let i = 0; i < 20; i++) health.recordMisaCall('http_429', t0 + 20 + i)
-  assert.equal(messages.length, 1, 'không gửi lặp lại khi vẫn đang lỗi')
-  health.recordMisaCall('ok', t0 + 6 * 60_000)   // lỗi cũ đã ra khỏi cửa sổ 5 phút
-  assert.equal(messages.length, 2)
-  assert.match(messages[1], /ĐÃ ỔN ĐỊNH LẠI/)
-})
-
-test('ít lần gọi hoặc lỗi dữ liệu (4xx, 404) không gây cảnh báo', () => {
-  const t0 = Date.now()
-  for (let i = 0; i < 4; i++) health.recordMisaCall('network', t0 + i)
-  for (let i = 0; i < 10; i++) health.recordMisaCall(health.outcomeOfStatus(i % 2 ? 400 : 404), t0 + 10 + i)
-  assert.equal(messages.length, 1, '4 lỗi mạng / 14 lần gọi > 10% thì vẫn báo')
-  health.resetMisaHealth(async text => { messages.push(text) }); messages.length = 0
-  for (let i = 0; i < 20; i++) health.recordMisaCall(health.outcomeOfStatus(400), t0 + i)
-  assert.equal(messages.length, 0)
+test('lỗi kết nối MISA không gửi Telegram; báo cáo vẫn cho biết đang lỗi nhiều', async () => {
+  const sent = []
+  const realFetch = global.fetch
+  global.fetch = async (url, init) => { sent.push(String(url)); return new Response('{"ok":true}') }
+  try {
+    const t0 = Date.now()
+    for (let i = 0; i < 4; i++) health.recordMisaCall('ok', t0 + i)
+    for (let i = 0; i < 6; i++) health.recordMisaCall('http_429', t0 + 10 + i)
+    await new Promise(resolve => setTimeout(resolve, 20))
+    assert.equal(sent.filter(url => url.includes('telegram')).length, 0)
+    const report = await health.misaHealthReport(t0 + 100)
+    assert.equal(report.alerting, true)
+    assert.equal(report.last5Minutes.failures, 6)
+    health.resetMisaHealth()
+    for (let i = 0; i < 20; i++) health.recordMisaCall(health.outcomeOfStatus(i % 2 ? 400 : 404), t0 + i)
+    assert.equal((await health.misaHealthReport(t0 + 100)).alerting, false, 'lỗi dữ liệu (4xx, 404) không tính là lỗi kết nối')
+  } finally { global.fetch = realFetch }
 })
 
 test('mọi lần gọi qua hàng đợi được đếm theo ngày và ghi vào misa_call_stats', async () => {

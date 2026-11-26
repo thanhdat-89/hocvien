@@ -40,7 +40,7 @@ async function failedInvoice({ id = 'fee-1', message = BUSY, minutesAgo = 20, st
 
 const notifier = () => { const messages = []; return { messages, notify: async text => { messages.push(text); return { sent: true } } } }
 
-test('hóa đơn lỗi 429 được tự tạo lại, giữ người mua đã chọn, gửi một tin tổng hợp', async t => {
+test('hóa đơn lỗi 429 được tự tạo lại, giữ người mua đã chọn; tạo được thì không cần báo', async t => {
   const sent = fakeMisa(t)
   await failedInvoice({ buyer: { fullName: 'Phụ huynh Gia Bảo', legalName: 'Công ty ABC', address: 'Hà Nội', email: '', phone: '' } })
   const { messages, notify } = notifier()
@@ -53,8 +53,7 @@ test('hóa đơn lỗi 429 được tự tạo lại, giữ người mua đã ch
   assert.equal(sent.length, 1)
   assert.equal(sent[0].buyer.legalName, 'Công ty ABC')
   assert.equal(sent[0].template.id, 'template-1')
-  assert.equal(messages.length, 1)
-  assert.match(messages[0], /TỰ TẠO LẠI HÓA ĐƠN MISA[\s\S]*Đã tạo: 1/)
+  assert.equal(messages.length, 0, 'không có gì cần xử lý thì không gửi Telegram')
 })
 
 test('không đụng tới: lỗi dữ liệu, lỗi vừa xảy ra, "không rõ kết quả"', async t => {
@@ -88,7 +87,9 @@ test('MISA vẫn bận: đếm số lần, đủ 5 lần thì dừng và báo c�
     await prisma.misaInvoice.update({ where: { id: 'fee-1' }, data: { updatedAt: new Date(clock - 15 * 60_000) } })
   }
   assert.equal(sent.length, MAX_AUTO_RETRIES)
-  assert.match(messages.at(-1), /Dừng tự thử lại — cần xử lý tay: 1/)
+  assert.equal(messages.length, 1, 'chỉ báo một lần, khi dừng tự thử lại — các lần "sẽ thử lại" không báo')
+  assert.match(messages[0], /CẦN XỬ LÝ[\s\S]*Dừng tự thử lại — cần xử lý tay: 1/)
+  assert.doesNotMatch(messages[0], /Đã tạo|sẽ thử lại sau/)
 
   clock += 20 * 60_000
   const after = await retryFailedMisaInvoices({ notify, now: () => clock })
