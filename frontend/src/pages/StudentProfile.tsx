@@ -2935,7 +2935,7 @@ export default function StudentProfile() {
 
   if (!student) return (
     <div>
-      <TopBar title="Hồ sơ học viên" />
+      <TopBar title="Hồ sơ học viên" backTo="/students" />
       <div className="p-8 text-center">
         <span className="material-symbols-outlined text-5xl text-outline/40 block mb-3">person_off</span>
         <p className="text-outline">Không tìm thấy học viên</p>
@@ -2970,7 +2970,7 @@ export default function StudentProfile() {
 
   return (
     <div>
-      <TopBar title="Hồ sơ học viên" />
+      <TopBar title="Hồ sơ học viên" backTo="/students" />
       <div className="student-profile page-content p-8 space-y-8 max-md:space-y-4">
         {/* Breadcrumb */}
         <div className="flex items-center gap-2 text-sm text-outline max-md:hidden">
