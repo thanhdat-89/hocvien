@@ -137,7 +137,7 @@ function EditStudentModal({ student, onClose, onSaved }: { student: Student; onC
             </Field>
           </div>
         </div>
-        <div className="flex gap-3 pt-2">
+        <div className="dialog-footer flex gap-3 pt-2">
           <button type="button" onClick={onClose} className="flex-1 btn-secondary justify-center">Huỷ</button>
           <button type="submit" disabled={saving} className="flex-1 btn-primary justify-center disabled:opacity-60">
             {saving ? 'Đang lưu...' : 'Cập nhật'}
@@ -196,7 +196,7 @@ function InvoiceInfoModal({ student, onClose, onSaved }: { student: Student; onC
           <input value={form.invoicePhone} onChange={set('invoicePhone')} type="tel" className="input" placeholder="0901234567" />
         </Field>
         <p className="text-xs text-outline">Để trống thì hóa đơn dùng tên và địa chỉ trong thông tin cơ bản của học viên.</p>
-        <div className="flex gap-3 pt-2">
+        <div className="dialog-footer flex gap-3 pt-2">
           <button type="button" onClick={onClose} className="flex-1 btn-secondary justify-center">Huỷ</button>
           <button type="submit" disabled={saving} className="flex-1 btn-primary justify-center disabled:opacity-60">
             {saving ? 'Đang lưu...' : 'Cập nhật'}
@@ -278,7 +278,7 @@ function ParentModal({ studentId, parent, onClose, onSaved }: {
             <input value={form.email} onChange={set('email')} type="email" className="input" placeholder="email@example.com" />
           </Field>
         </div>
-        <div className="flex gap-3 pt-2">
+        <div className="dialog-footer flex gap-3 pt-2">
           <button type="button" onClick={onClose} className="flex-1 btn-secondary justify-center">Huỷ</button>
           <button type="submit" disabled={saving} className="flex-1 btn-primary justify-center disabled:opacity-60">
             {saving ? 'Đang lưu...' : isEdit ? 'Cập nhật' : 'Thêm phụ huynh'}
@@ -975,7 +975,7 @@ function PaymentModal({ record, onClose, onSaved }: { record: TuitionRecord; onC
         <Field label="Ghi chú">
           <input value={form.notes} onChange={set('notes')} className="input" placeholder="Ghi chú..." />
         </Field>
-        <div className="flex gap-3 pt-2">
+        <div className="dialog-footer flex gap-3 pt-2">
           <button type="button" onClick={onClose} className="flex-1 btn-secondary justify-center">Huỷ</button>
           <button type="submit" disabled={saving} className="flex-1 btn-primary justify-center disabled:opacity-60">
             {saving ? 'Đang lưu...' : 'Ghi nhận'}
@@ -992,8 +992,8 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   return (
     <div className="responsive-dialog fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-inverse-surface/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-lg bg-surface-container-lowest rounded-2xl shadow-2xl p-8 z-10 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-6">
+      <div className="relative w-full max-w-lg bg-surface-container-lowest rounded-2xl shadow-2xl p-8 max-md:px-5 max-md:pb-0 max-md:pt-4 z-10 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-6 max-md:mb-4">
           <h3 className="text-xl font-headline font-bold text-on-surface">{title}</h3>
           <button onClick={onClose} className="p-2 hover:bg-surface-container-low rounded-lg transition-colors">
             <span className="material-symbols-outlined">close</span>
@@ -1564,7 +1564,7 @@ function PromoModal({ studentId, enrollments, hasPrivate, onClose, onSaved }: Pr
                 className="w-full bg-surface-container-low border-none rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
             </div>
           </div>
-          <div className="flex gap-3 pt-2">
+          <div className="dialog-footer flex gap-3 pt-2">
             <button type="button" onClick={onClose} className="flex-1 btn-secondary justify-center">Huỷ</button>
             <button type="submit" disabled={saving} className="flex-1 btn-primary justify-center disabled:opacity-60">
               {saving ? 'Đang lưu...' : 'Thêm khuyến mại'}

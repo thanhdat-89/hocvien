@@ -112,7 +112,7 @@ export default function StudentModal({ student, onClose, onSaved }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-5">
+    <div className="responsive-dialog fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-5">
       <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-[3px]" onClick={onClose} />
       <div role="dialog" aria-modal="true" aria-labelledby="student-modal-title" className="relative z-10 flex max-h-[92dvh] w-full max-w-[620px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-7 sm:py-5">

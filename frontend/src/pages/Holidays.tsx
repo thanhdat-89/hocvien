@@ -241,7 +241,7 @@ export default function Holidays() {
 
       {/* Modal Thêm theo giai đoạn */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="responsive-dialog fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowAddModal(false)} />
           <div className="relative bg-surface-container-lowest rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
             <div className="px-6 py-4 border-b border-outline-variant/30 flex justify-between items-center">
@@ -353,7 +353,7 @@ export default function Holidays() {
 
       {/* Modal Xóa */}
       {deleteModal.open && deleteModal.holiday && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div className="responsive-dialog fixed inset-0 z-[100] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDeleteModal({ open: false, holiday: null })} />
           <div className="relative bg-surface-container-lowest rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col p-6 space-y-4">
             <div className="flex items-start gap-3">

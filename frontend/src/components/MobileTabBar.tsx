@@ -27,7 +27,7 @@ export default function MobileTabBar() {
 
   return (
     <nav aria-label="Điều hướng nhanh"
-      className="mobile-tabbar fixed inset-x-0 bottom-0 z-50 border-t border-outline-variant/20 bg-white/95 backdrop-blur-md lg:hidden">
+      className="mobile-tabbar fixed inset-x-0 bottom-0 z-40 border-t border-outline-variant/20 bg-white/95 backdrop-blur-md lg:hidden">
       <div className="mx-auto grid max-w-xl grid-cols-5 gap-1 px-2 pt-1">
         {tabs.map(tab => (
           <NavLink key={tab.path} to={tab.path} className={({ isActive }) => tabClass(isActive)}>

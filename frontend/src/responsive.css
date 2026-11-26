@@ -161,3 +161,30 @@
 @media (max-width: 767px) {
   .profile-tabs { top: 60px; scroll-margin-top: 60px; }
 }
+
+/* Điện thoại: mọi hộp thoại thành bảng trượt từ đáy, nút Lưu/Huỷ (.dialog-footer) dính đáy. */
+@media (max-width: 767px) {
+  .responsive-dialog { align-items: flex-end; padding: 0; }
+  .responsive-dialog > :is(div, form, section):not(.absolute):not(.fixed) {
+    width: 100%;
+    max-width: none;
+    max-height: 92dvh;
+    margin: 0;
+    border-radius: 1.25rem 1.25rem 0 0;
+    border-bottom: env(safe-area-inset-bottom) solid #fff;
+    animation: dialog-sheet-up 180ms ease-out;
+  }
+  .responsive-dialog .dialog-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    margin-top: 1rem;
+    padding-block: 12px;
+    background: #fff;
+    border-top: 1px solid rgb(167 170 215 / 20%);
+  }
+}
+@keyframes dialog-sheet-up { from { transform: translateY(32px); opacity: 0.6; } }
+@media (prefers-reduced-motion: reduce) {
+  .responsive-dialog > * { animation: none !important; }
+}
