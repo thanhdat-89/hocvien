@@ -75,6 +75,9 @@ export interface Class {
   status: 'ACTIVE' | 'CLOSED'
   notes?: string
   createdAt: string
+  /** Số học viên đang học (cập nhật cùng ghi danh) và sĩ số tối đa của lớp */
+  activeStudentCount?: number
+  maxStudents?: number | null
 }
 
 export interface Teacher {

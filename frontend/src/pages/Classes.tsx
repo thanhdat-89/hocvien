@@ -6,6 +6,7 @@ import api from '../services/api'
 import { Session, Class } from '../types'
 import { useAuth } from '../hooks/useAuth'
 import { gradeOfClass, gradeFromName } from '../lib/classGrade'
+import ClassListTable, { ClassSlot, ClassEditSection, EnrollmentCell, ScheduleCell } from '../components/ClassListTable'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -47,11 +48,6 @@ function displayedClassRate(cls: Class) {
 }
 
 const DAY_LABELS = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN']
-const SCHEDULE_DAY_ORDER = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']
-const SCHEDULE_DAY_LABELS: Record<string, string> = {
-  MONDAY: 'T2', TUESDAY: 'T3', WEDNESDAY: 'T4', THURSDAY: 'T5',
-  FRIDAY: 'T6', SATURDAY: 'T7', SUNDAY: 'CN',
-}
 const CLASS_COLORS = [
   { bg: 'bg-blue-50', border: 'border-blue-500', text: 'text-blue-900', badge: 'text-blue-600' },
   { bg: 'bg-secondary-container/20', border: 'border-secondary', text: 'text-on-secondary-container', badge: 'text-secondary' },
@@ -484,7 +480,6 @@ function ClassModal({ onClose, onSaved }: { onClose: () => void; onSaved: (sessi
 
 // ─── Edit Class Modal ────────────────────────────────────────────────────────
 
-type ClassEditSection = 'name' | 'schedule' | 'rate'
 
 function EditPasswordModal({ onClose, onVerified }: { onClose: () => void; onVerified: (password: string) => void }) {
   const [password, setPassword] = useState('')
@@ -843,9 +838,9 @@ export default function Classes() {
   const [sessions, setSessions] = useState<Session[]>([])
   const [classes, setClasses] = useState<Class[]>([])
   const [classSearch, setClassSearch] = useState('')
-  const [classStatus, setClassStatus] = useState<'ALL' | 'ACTIVE' | 'CLOSED'>('ALL')
+  const [classStatus, setClassStatus] = useState<'ALL' | 'ACTIVE' | 'CLOSED'>('ACTIVE')
   const [classGrade, setClassGrade] = useState('ALL')
-  const [schedulesByClass, setSchedulesByClass] = useState<Record<string, string[]>>({})
+  const [slotsByClass, setSlotsByClass] = useState<Record<string, ClassSlot[]>>({})
   const [selectedSession, setSelectedSession] = useState<Session | null>(null)
   const [showClassModal, setShowClassModal] = useState(false)
   const [editingClass, setEditingClass] = useState<{ cls: Class; section: ClassEditSection } | null>(null)
@@ -876,15 +871,16 @@ export default function Classes() {
 
   const loadSchedules = () =>
     api.get('/schedules').then((r) => {
-      const list: Array<{ classId: string; dayOfWeek: string; effectiveFrom: string; effectiveTo?: string }> = Array.isArray(r.data) ? r.data : []
-      const map: Record<string, string[]> = {}
+      const list: Array<ClassSlot & { classId: string; effectiveFrom: string; effectiveTo?: string }> = Array.isArray(r.data) ? r.data : []
+      const map: Record<string, ClassSlot[]> = {}
+      const today = toISO(new Date())
       for (const s of list) {
-        const today = toISO(new Date())
+        // Chỉ lịch đang hiệu lực hôm nay; một thứ chỉ lấy một khung giờ
         if (s.effectiveFrom > today || (s.effectiveTo && s.effectiveTo < today)) continue
         if (!map[s.classId]) map[s.classId] = []
-        if (!map[s.classId].includes(s.dayOfWeek)) map[s.classId].push(s.dayOfWeek)
+        if (!map[s.classId].some(x => x.dayOfWeek === s.dayOfWeek)) map[s.classId].push({ dayOfWeek: s.dayOfWeek, startTime: s.startTime, endTime: s.endTime })
       }
-      setSchedulesByClass(map)
+      setSlotsByClass(map)
     }).catch(() => {})
 
   useEffect(() => {
@@ -942,6 +938,11 @@ export default function Classes() {
     })
 
   const handleDeleteClass = (cls: Class) => setDeletingClass(cls)
+  const copyClassId = async (cls: Class) => {
+    try { await navigator.clipboard.writeText(cls.id); showToast(`Đã sao chép ID lớp ${cls.name}`, 'success') }
+    catch { showToast('Không sao chép được ID lớp', 'error') }
+  }
+  const statusCounts = { ACTIVE: classes.filter(c => c.status === 'ACTIVE').length, CLOSED: classes.filter(c => c.status !== 'ACTIVE').length, ALL: classes.length }
 
   const [generatingAll, setGeneratingAll] = useState(false)
   const handleGenerateAll = async () => {
@@ -970,8 +971,8 @@ export default function Classes() {
         {/* Header: trên điện thoại tiêu đề đã ở thanh đầu trang, tạo lớp làm trên máy tính */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 max-md:hidden">
           <div>
-            <span className="text-[11px] font-bold text-primary tracking-[0.2em] uppercase mb-2 block">Lịch Đào Tạo</span>
-            <h2 className="text-4xl font-black text-on-surface font-headline tracking-tight">Quản Lý Lịch & Lớp Học</h2>
+            <span className="text-[11px] font-bold text-primary tracking-[0.2em] uppercase mb-2 block">Lịch đào tạo</span>
+            <h2 className="text-4xl font-black text-on-surface font-headline tracking-tight">Lịch & lớp học</h2>
           </div>
           <div className="responsive-toolbar flex gap-2">
             {canManageClasses && (
@@ -1123,146 +1124,68 @@ export default function Classes() {
 
         {/* ── Tab: Danh sách lớp học ── */}
         {tab === 'classes' && (
-          <div className="space-y-5">
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl border border-outline-variant/15 bg-surface-container-lowest px-5 py-3.5 text-sm">
-              <span className="font-semibold text-on-surface">{classes.length} lớp học</span>
-              <span className="hidden sm:block h-4 w-px bg-outline-variant/30" />
-              <span className="flex items-center gap-2 text-on-surface-variant"><span className="h-2 w-2 rounded-full bg-secondary" />{classes.filter(c => c.status === 'ACTIVE').length} đang hoạt động</span>
-              <span className="flex items-center gap-2 text-on-surface-variant"><span className="h-2 w-2 rounded-full bg-outline" />{classes.filter(c => c.status !== 'ACTIVE').length} đã đóng</span>
+          <section className="overflow-hidden rounded-2xl border border-outline-variant/15 bg-surface-container-lowest shadow-sm" aria-label="Danh sách lớp học">
+            <div className="flex flex-col gap-4 border-b border-outline-variant/15 px-5 py-4 lg:flex-row lg:items-center lg:justify-between md:px-6">
+              <div className="flex flex-wrap items-center gap-3">
+                <h3 className="font-headline text-lg font-bold text-on-surface">Danh sách lớp học</h3>
+                {/* Trạng thái: nhóm nút kèm số lượng thay cho thanh thống kê + ô chọn trạng thái */}
+                <div role="radiogroup" aria-label="Lọc theo trạng thái" className="inline-flex rounded-xl bg-surface-container-low p-1">
+                  {([['ACTIVE', 'Đang hoạt động'], ['CLOSED', 'Đã đóng'], ['ALL', 'Tất cả']] as const).map(([key, label]) => (
+                    <button key={key} type="button" role="radio" aria-checked={classStatus === key} onClick={() => setClassStatus(key)}
+                      className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${classStatus === key ? 'bg-surface-container-lowest text-on-surface shadow-sm' : 'text-on-surface-variant hover:text-on-surface'}`}>
+                      {label} <span className={`ml-1 tabular-nums ${classStatus === key ? 'text-primary' : 'text-outline'}`}>{statusCounts[key]}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="grid grid-cols-[1fr_auto] gap-2 sm:flex">
+                <label className="relative min-w-0 sm:w-64">
+                  <span className="sr-only">Tìm lớp theo tên hoặc ID</span>
+                  <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-lg text-outline">search</span>
+                  <input value={classSearch} onChange={e => setClassSearch(e.target.value)} placeholder="Tìm lớp…" className="h-10 w-full rounded-xl border border-outline-variant/25 bg-white pl-10 pr-3 text-sm text-on-surface outline-none placeholder:text-outline focus:border-primary focus:ring-2 focus:ring-primary/10" />
+                </label>
+                <label>
+                  <span className="sr-only">Lọc theo khối</span>
+                  <select value={classGrade} onChange={e => setClassGrade(e.target.value)} className="h-10 rounded-xl border border-outline-variant/25 bg-white px-3 text-sm text-on-surface focus:border-primary focus:outline-none">
+                    <option value="ALL">Tất cả khối</option>
+                    {classGrades.map(grade => <option key={grade} value={grade}>Khối {grade}</option>)}
+                  </select>
+                </label>
+              </div>
             </div>
 
-            <section className="overflow-hidden rounded-2xl border border-outline-variant/15 bg-surface-container-lowest shadow-sm" aria-label="Danh sách lớp học">
-              <div className="flex flex-col gap-4 border-b border-outline-variant/15 px-5 py-5 xl:flex-row xl:items-center xl:justify-between">
-                <div>
-                  <h3 className="font-headline text-lg font-bold text-on-surface">Danh sách lớp học</h3>
-                  <p className="mt-0.5 text-sm text-on-surface-variant">{visibleClasses.length} lớp phù hợp</p>
-                </div>
-                <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:flex-wrap">
-                  <label className="relative col-span-2 min-w-0 sm:w-60">
-                    <span className="sr-only">Tìm tên hoặc ID lớp</span>
-                    <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-lg text-outline">search</span>
-                    <input value={classSearch} onChange={e => setClassSearch(e.target.value)} placeholder="Tìm tên hoặc ID lớp..." className="h-10 w-full rounded-xl border border-outline-variant/25 bg-white pl-10 pr-3 text-sm text-on-surface outline-none placeholder:text-outline focus:border-primary focus:ring-2 focus:ring-primary/10" />
-                  </label>
-                  <label>
-                    <span className="sr-only">Lọc theo khối</span>
-                    <select value={classGrade} onChange={e => setClassGrade(e.target.value)} className="h-10 w-full rounded-xl border border-outline-variant/25 bg-white px-3 text-sm text-on-surface focus:border-primary focus:outline-none sm:w-auto">
-                      <option value="ALL">Tất cả khối</option>
-                      {classGrades.map(grade => <option key={grade} value={grade}>Khối {grade}</option>)}
-                    </select>
-                  </label>
-                  <label>
-                    <span className="sr-only">Lọc theo trạng thái</span>
-                    <select value={classStatus} onChange={e => setClassStatus(e.target.value as 'ALL' | 'ACTIVE' | 'CLOSED')} className="h-10 w-full rounded-xl border border-outline-variant/25 bg-white px-3 text-sm text-on-surface focus:border-primary focus:outline-none sm:w-auto">
-                      <option value="ALL">Mọi trạng thái</option>
-                      <option value="ACTIVE">Đang hoạt động</option>
-                      <option value="CLOSED">Đã đóng</option>
-                    </select>
-                  </label>
-                </div>
+            {visibleClasses.length === 0 ? (
+              <div className="px-5 py-14 text-center">
+                <span className="material-symbols-outlined text-3xl text-outline/60">{classes.length ? 'search_off' : 'school'}</span>
+                <p className="mt-2 font-medium text-on-surface">{classes.length ? 'Không tìm thấy lớp phù hợp' : 'Chưa có lớp học nào'}</p>
+                <p className="mt-1 text-sm text-outline">{classes.length ? 'Thử đổi từ khóa hoặc bộ lọc.' : 'Tạo lớp đầu tiên để bắt đầu quản lý lịch học.'}</p>
+                {classes.length === 0 && canManageClasses && <button type="button" onClick={() => setShowClassModal(true)} className="btn-primary mx-auto mt-4 max-md:hidden">Tạo lớp học</button>}
               </div>
-
-              {/* Điện thoại: thẻ chỉ xem; sửa tên, lịch, học phí và xoá lớp làm trên máy tính */}
-              <ul className="divide-y divide-outline-variant/15 md:hidden" aria-label="Danh sách lớp học">
-                {visibleClasses.map(cls => {
-                  const days = [...(schedulesByClass[cls.id] ?? [])].sort((a, b) => SCHEDULE_DAY_ORDER.indexOf(a) - SCHEDULE_DAY_ORDER.indexOf(b))
-                  const grade = gradeOfClass(cls)
-                  return (
+            ) : (
+              <>
+                {/* Điện thoại: thẻ chỉ xem; sửa tên, lịch, học phí và xoá lớp làm trên máy tính */}
+                <ul className="divide-y divide-outline-variant/15 md:hidden" aria-label="Danh sách lớp học">
+                  {visibleClasses.map(cls => (
                     <li key={cls.id} className="px-4 py-3">
                       <div className="flex items-start justify-between gap-3">
-                        <p className="min-w-0 font-semibold leading-5 text-on-surface">{cls.name}</p>
-                        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${cls.status === 'ACTIVE' ? 'bg-secondary-container/25 text-secondary' : 'bg-surface-container-high text-outline'}`}>
-                          {cls.status === 'ACTIVE' ? 'Đang học' : 'Đã đóng'}
-                        </span>
+                        <p className={`min-w-0 font-semibold leading-5 ${cls.status === 'ACTIVE' ? 'text-on-surface' : 'text-on-surface-variant'}`}>{cls.name}</p>
+                        <span className="shrink-0 text-sm font-semibold tabular-nums text-on-surface">{displayedClassRate(cls).toLocaleString('vi-VN')}đ<span className="text-xs font-normal text-outline">/buổi</span></span>
                       </div>
-                      <p className="mt-0.5 text-xs text-outline">
-                        {[grade ? `Khối ${grade}` : 'Chưa có khối', cls.room ? `Phòng ${cls.room}` : '', cls.teacherName].filter(Boolean).join(' · ')}
-                      </p>
-                      <div className="mt-2 flex items-center justify-between gap-3 text-sm">
-                        <span className={`min-w-0 ${days.length ? 'font-medium text-primary' : 'text-outline'}`}>
-                          {days.length ? days.map(day => SCHEDULE_DAY_LABELS[day] ?? day).join(', ') : 'Chưa có lịch'}
-                          {!!cls.sessionsPerMonth && <span className="font-normal text-outline"> · {cls.sessionsPerMonth} buổi/tháng</span>}
-                        </span>
-                        <span className="shrink-0 font-semibold tabular-nums text-on-surface">{displayedClassRate(cls).toLocaleString('vi-VN')}đ<span className="text-xs font-normal text-outline">/buổi</span></span>
+                      <div className="mt-2"><ScheduleCell slots={slotsByClass[cls.id] ?? []} compact /></div>
+                      <div className="mt-2 flex items-center justify-between gap-3">
+                        <EnrollmentCell cls={cls} />
+                        {cls.status !== 'ACTIVE' && <span className="shrink-0 rounded-full bg-surface-container-high px-2 py-0.5 text-[11px] font-semibold text-outline">Đã đóng</span>}
                       </div>
                     </li>
-                  )
-                })}
-                {visibleClasses.length === 0 && <li className="px-4 py-10 text-center text-sm text-outline">{classes.length ? 'Không tìm thấy lớp phù hợp' : 'Chưa có lớp học nào'}</li>}
-              </ul>
-              <div className="overflow-x-auto max-md:hidden">
-                <table role="table" aria-label="Danh sách lớp học" className="class-mobile-table w-full min-w-[950px] table-fixed text-left text-sm">
-                  <colgroup>
-                    <col className="w-[22%]" /><col className="w-[18%]" /><col className="w-[22%]" />
-                    <col className="w-[16%]" /><col className="w-[12%]" /><col className="w-[10%]" />
-                  </colgroup>
-                  <thead className="bg-surface-container-low/50 text-xs font-semibold text-on-surface-variant">
-                    <tr>
-                      <th scope="col" className="px-5 py-3.5">Tên lớp</th>
-                      <th scope="col" className="px-4 py-3.5">ID lớp</th>
-                      <th scope="col" className="px-4 py-3.5">Lịch học</th>
-                      <th scope="col" className="px-4 py-3.5">Học phí / buổi</th>
-                      <th scope="col" className="px-4 py-3.5">Trạng thái</th>
-                      <th scope="col" className="px-4 py-3.5 text-right">Thao tác</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-outline-variant/15">
-                    {visibleClasses.map(cls => {
-                      const days = [...(schedulesByClass[cls.id] ?? [])].sort((a, b) => SCHEDULE_DAY_ORDER.indexOf(a) - SCHEDULE_DAY_ORDER.indexOf(b))
-                      const grade = gradeOfClass(cls)
-                      return (
-                        <tr role="row" key={cls.id} className="transition-colors hover:bg-primary/[0.035]">
-                          <td role="cell" data-label="Tên lớp" className="px-5 py-4 align-middle">
-                            <div className="flex items-start gap-1">
-                              <span className="min-w-0 font-semibold leading-5 text-on-surface">{cls.name}</span>
-                              {canManageClasses && <button type="button" onClick={() => requestClassEdit(cls, 'name')} className="shrink-0 rounded-lg p-1 text-outline hover:bg-primary/10 hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" title={`Đổi tên ${cls.name}`} aria-label={`Đổi tên ${cls.name}`}><span className="material-symbols-outlined text-base">edit</span></button>}
-                            </div>
-                            <div className="mt-1 text-xs text-outline">{grade ? `Khối ${grade}` : 'Chưa có khối'}{cls.room ? ` · Phòng ${cls.room}` : ''}</div>
-                          </td>
-                          <td role="cell" data-label="ID lớp" className="px-4 py-4 align-middle"><code className="break-all text-xs text-on-surface-variant" title={cls.id}>{cls.id}</code></td>
-                          <td role="cell" data-label="Lịch học" className="px-4 py-4 align-middle">
-                            <div className="flex items-start gap-1">
-                              <span className={days.length ? 'font-medium text-primary' : 'text-outline'}>{days.length ? days.map(day => SCHEDULE_DAY_LABELS[day] ?? day).join(', ') : 'Chưa có lịch'}</span>
-                              {canManageClasses && cls.status === 'ACTIVE' && <button type="button" onClick={() => requestClassEdit(cls, 'schedule')} className="shrink-0 rounded-lg p-1 text-outline hover:bg-primary/10 hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" title={`Sửa lịch ${cls.name}`} aria-label={`Sửa lịch ${cls.name}`}><span className="material-symbols-outlined text-base">edit</span></button>}
-                            </div>
-                            {!!cls.sessionsPerMonth && <div className="mt-1 text-xs text-outline">{cls.sessionsPerMonth} buổi/tháng</div>}
-                          </td>
-                          <td role="cell" data-label="Học phí / buổi" className="px-4 py-4 align-middle font-semibold tabular-nums text-on-surface">
-                            <div className="flex items-center gap-1">
-                              <span>{displayedClassRate(cls).toLocaleString('vi-VN')}đ</span>
-                              {canManageClasses && cls.status === 'ACTIVE' && <button type="button" onClick={() => requestClassEdit(cls, 'rate')} className="shrink-0 rounded-lg p-1 text-outline hover:bg-primary/10 hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" title={`Sửa học phí ${cls.name}`} aria-label={`Sửa học phí ${cls.name}`}><span className="material-symbols-outlined text-base">edit</span></button>}
-                            </div>
-                            {cls.tuitionRateEffectiveMonth && cls.tuitionRateEffectiveMonth > toISO(new Date()).slice(0, 7) && (
-                              <div className="mt-1 text-xs font-normal text-outline">
-                                {cls.tuitionRate.toLocaleString('vi-VN')}đ từ {cls.tuitionRateEffectiveMonth.slice(5)}/{cls.tuitionRateEffectiveMonth.slice(0, 4)}
-                              </div>
-                            )}
-                          </td>
-                          <td role="cell" data-label="Trạng thái" className="px-4 py-4 align-middle">
-                            <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${cls.status === 'ACTIVE' ? 'bg-secondary-container/25 text-secondary' : 'bg-surface-container-low text-on-surface-variant'}`}>
-                              <span className={`h-1.5 w-1.5 rounded-full ${cls.status === 'ACTIVE' ? 'bg-secondary' : 'bg-outline'}`} />
-                              {cls.status === 'ACTIVE' ? 'Đang học' : 'Đã đóng'}
-                            </span>
-                          </td>
-                          <td role="cell" data-label="Thao tác" className="px-4 py-4 align-middle text-right">
-                            {canManageClasses && <div className="flex justify-end gap-1">
-                              <button type="button" onClick={() => handleDeleteClass(cls)} className="rounded-lg p-2 text-outline transition-colors hover:bg-error/10 hover:text-error focus-visible:outline focus-visible:outline-2 focus-visible:outline-error" title={`Kết thúc hoặc xóa ${cls.name}`} aria-label={`Kết thúc hoặc xóa ${cls.name}`}><span className="material-symbols-outlined text-xl">more_horiz</span></button>
-                            </div>}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                    {visibleClasses.length === 0 && <tr><td colSpan={6} className="px-5 py-14 text-center">
-                      <span className="material-symbols-outlined text-3xl text-outline/60">{classes.length ? 'search_off' : 'school'}</span>
-                      <p className="mt-2 font-medium text-on-surface">{classes.length ? 'Không tìm thấy lớp phù hợp' : 'Chưa có lớp học nào'}</p>
-                      <p className="mt-1 text-sm text-outline">{classes.length ? 'Thử đổi từ khóa hoặc bộ lọc.' : 'Tạo lớp đầu tiên để bắt đầu quản lý lịch học.'}</p>
-                      {classes.length === 0 && canManageClasses && <button type="button" onClick={() => setShowClassModal(true)} className="btn-primary mx-auto mt-4">Tạo lớp học</button>}
-                    </td></tr>}
-                  </tbody>
-                </table>
-              </div>
-              <div className="border-t border-outline-variant/10 px-5 py-3 text-xs text-outline hidden md:block lg:hidden">Vuốt ngang để xem đầy đủ bảng và thao tác.</div>
-            </section>
-          </div>
+                  ))}
+                </ul>
+                <div className="overflow-x-auto max-md:hidden">
+                  <ClassListTable classes={visibleClasses} slotsByClass={slotsByClass} rateOf={displayedClassRate} canManage={canManageClasses}
+                    onEdit={requestClassEdit} onEnd={handleDeleteClass} onCopyId={cls => { void copyClassId(cls) }} />
+                </div>
+              </>
+            )}
+          </section>
         )}
       </div>
 
