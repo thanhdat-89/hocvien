@@ -45,7 +45,7 @@ export async function createInitialWeekdayPlan(tx: Tx, enrollment: { id: string;
 // ─── Đổi buổi học / nghỉ lớp: cùng một quy trình xem trước → kiểm tra khoá → ghi ───────────────
 
 export type EnrollmentChange =
-  | { action: 'weekdays'; days?: unknown; effectiveFrom?: unknown }
+  | { action: 'weekdays'; days?: unknown; effectiveFrom?: unknown; requestedFrom?: unknown }
   | { action: 'drop'; dropDate?: unknown }
 
 /** Ảnh hưởng tới học phí một tháng (số tiền đã trừ khuyến mãi). */
@@ -107,6 +107,12 @@ async function prepare(studentId: string, enrollmentId: string, change: Enrollme
   const earlier = ((enrollment as any).weekdayPlans ?? [] as WeekdayPlan[])
     .filter((p: WeekdayPlan) => p.effectiveFrom < effectiveFrom && p.effectiveFrom >= enrollment.enrollmentDate)
   const plans: WeekdayPlan[] = days.length || earlier.length ? [...earlier, { effectiveFrom, days }] : earlier
+  // Ngày dời vì học phí đã thu: lưu ngày người dùng chọn ban đầu (ngày đổi buổi thực tế) cho theodoi.
+  // Chỉ nhận khi sớm hơn ngày áp dụng và không trước ngày ghi danh / lịch riêng trước đó.
+  if (change.requestedFrom != null && change.requestedFrom !== '' && !isDate(change.requestedFrom)) fail('Ngày đổi buổi thực tế không hợp lệ')
+  const lastEarlier = earlier.reduce((m: string, p: WeekdayPlan) => (p.effectiveFrom > m ? p.effectiveFrom : m), enrollment.enrollmentDate)
+  const actual = change.requestedFrom as string | undefined
+  const requestedFrom = actual && actual < effectiveFrom && actual >= lastEarlier ? actual : null
   return {
     enrollment,
     fromDate: effectiveFrom,
@@ -118,7 +124,7 @@ async function prepare(studentId: string, enrollmentId: string, change: Enrollme
         where: { enrollmentId, OR: [{ effectiveFrom: { gte: toDay(effectiveFrom)! } }, { effectiveFrom: { lt: toDay(enrollment.enrollmentDate)! } }] },
       })
       if (days.length || earlier.length) {
-        await tx.enrollmentWeekdayPlan.create({ data: { id: newId(), enrollmentId, effectiveFrom: toDay(effectiveFrom)!, days } })
+        await tx.enrollmentWeekdayPlan.create({ data: { id: newId(), enrollmentId, effectiveFrom: toDay(effectiveFrom)!, days, requestedFrom: toDay(requestedFrom) } })
       }
     },
   }
@@ -231,10 +237,11 @@ async function applyChange(studentId: string, enrollmentId: string, change: Enro
 /**
  * Đổi lịch cố định trong tuần của học viên ở một lớp, áp dụng từ `effectiveFrom` trở đi.
  * Các tháng trước giữ nguyên. Tháng bị ảnh hưởng đã thu tiền/đã xuất hoá đơn → từ chối;
+ * `requestedFrom`: ngày đổi buổi thực tế khi ngày áp dụng đã bị dời sang tháng sau (chỉ lưu cho theodoi).
  * phiếu chưa thu của các tháng đó được tính lại theo lịch mới.
  */
-export const setEnrollmentWeekdays = (studentId: string, enrollmentId: string, body: { days?: unknown; effectiveFrom?: unknown }) =>
-  applyChange(studentId, enrollmentId, { action: 'weekdays', days: body.days, effectiveFrom: body.effectiveFrom })
+export const setEnrollmentWeekdays = (studentId: string, enrollmentId: string, body: { days?: unknown; effectiveFrom?: unknown; requestedFrom?: unknown }) =>
+  applyChange(studentId, enrollmentId, { action: 'weekdays', days: body.days, effectiveFrom: body.effectiveFrom, requestedFrom: body.requestedFrom })
 
 /**
  * Cho học viên nghỉ lớp từ sau `dropDate` (buổi ngày nghỉ vẫn tính). Tháng đã thu/xuất hoá đơn mà bị bớt buổi → từ chối;

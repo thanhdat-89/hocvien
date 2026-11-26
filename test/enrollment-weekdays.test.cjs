@@ -43,12 +43,21 @@ test('ghi danh học một buổi/tuần: lập phiếu, lịch cá nhân và đ
     err => err.status === 409 && /T11\/2026/.test(err.message))
 
   // Từ 1/12 học đủ: phiếu tháng 12 chưa thu được tính lại, tháng 11 giữ nguyên.
-  const res = (await setWeekdays({ params: { id: student.id, enrollmentId: created.id }, body: { days: ['SATURDAY', 'TUESDAY'], effectiveFrom: '2026-12-01' } })).body
+  const res = (await setWeekdays({ params: { id: student.id, enrollmentId: created.id }, body: { days: ['SATURDAY', 'TUESDAY'], effectiveFrom: '2026-12-01', requestedFrom: '2026-11-15' } })).body
   assert.equal(res.recalculatedRecords, 1)
   const after = await prisma.tuitionRecord.findMany({ where: { studentId: student.id }, orderBy: { billingMonth: 'asc' } })
   assert.deepEqual(after.map(r => [r.billingMonth, r.totalSessions, r.finalAmount]), [[11, 4, 600000], [12, 9, 1350000]])
   const plans = await prisma.enrollmentWeekdayPlan.findMany({ where: { enrollmentId: created.id }, orderBy: { effectiveFrom: 'asc' } })
   assert.deepEqual(plans.map(p => p.days), [['TUESDAY'], []], 'chọn đủ mọi buổi được lưu là học đủ')
+  // Ngày dời vì học phí: lưu ngày đổi buổi thực tế (15/11) cho theodoi, học phí vẫn theo 01/12
+  assert.deepEqual(plans.map(p => p.requestedFrom?.toISOString().slice(0, 10) ?? null), [null, '2026-11-15'])
+
+  // Ngày thực tế không sớm hơn ngày áp dụng / trước ngày ghi danh → bỏ qua
+  await setWeekdays({ params: { id: student.id, enrollmentId: created.id }, body: { days: ['TUESDAY'], effectiveFrom: '2026-12-15', requestedFrom: '2026-12-20' } })
+  await setWeekdays({ params: { id: student.id, enrollmentId: created.id }, body: { days: ['SATURDAY'], effectiveFrom: '2026-12-22', requestedFrom: '2026-10-01' } })
+  const later = await prisma.enrollmentWeekdayPlan.findMany({ where: { enrollmentId: created.id, effectiveFrom: { gte: new Date('2026-12-15T00:00:00Z') } }, orderBy: { effectiveFrom: 'asc' } })
+  assert.deepEqual(later.map(p => p.requestedFrom), [null, null])
+  await assert.rejects(setWeekdays({ params: { id: student.id, enrollmentId: created.id }, body: { days: ['TUESDAY'], effectiveFrom: '2026-12-29', requestedFrom: 'x' } }), /không hợp lệ/)
 })
 
 const drop = routeHandler(router, '/:id/enroll/:enrollmentId/drop', 'put')

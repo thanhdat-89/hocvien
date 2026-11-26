@@ -814,7 +814,11 @@ function EnrollmentScheduleModal({ studentId, enrollment, activeClassIds, onClos
     setSaving(true); setError('')
     try {
       if (tab === 'drop') await api.put(`/students/${studentId}/enroll/${enrollment.id}/drop`, { dropDate })
-      else await api.put(`/students/${studentId}/enroll/${enrollment.id}/weekdays`, { days, effectiveFrom })
+      else {
+        // Ngày áp dụng bị dời vì học phí: gửi kèm ngày đã chọn ban đầu = ngày đổi buổi thực tế (theodoi xếp BTVN theo ngày này)
+        const requestedFrom = autoMoved?.tab === 'weekdays' && autoMoved.to === effectiveFrom ? autoMoved.from : undefined
+        await api.put(`/students/${studentId}/enroll/${enrollment.id}/weekdays`, { days, effectiveFrom, requestedFrom })
+      }
       onSaved()
     } catch (err: any) {
       setError(err.response?.data?.message ?? 'Có lỗi xảy ra')
@@ -859,7 +863,7 @@ function EnrollmentScheduleModal({ studentId, enrollment, activeClassIds, onClos
               {autoMoved?.tab === 'weekdays' && autoMoved.to === effectiveFrom && (
                 <p role="status" className="mt-1.5 flex items-start gap-1.5 rounded-lg bg-blue-50 px-3 py-2 text-xs text-primary">
                   <span aria-hidden="true" className="material-symbols-outlined text-[16px]">event_available</span>
-                  <span>Học phí {autoMoved.months} đã thu hoặc đã xuất hoá đơn nên ngày áp dụng được chuyển từ {fmt(autoMoved.from)} sang <strong>{fmt(autoMoved.to)}</strong>.</span>
+                  <span>Học phí {autoMoved.months} đã thu hoặc đã xuất hoá đơn nên ngày áp dụng được chuyển từ {fmt(autoMoved.from)} sang <strong>{fmt(autoMoved.to)}</strong>. Theo dõi BTVN vẫn xếp buổi theo lịch mới từ {fmt(autoMoved.from)}.</span>
                 </p>
               )}
               <p className="mt-1.5 text-xs text-outline">Học phí trước ngày này giữ nguyên. Phiếu chưa thu từ tháng này trở đi được tính lại; tháng đã thu tiền hoặc đã xuất hoá đơn thì không đổi được.</p>

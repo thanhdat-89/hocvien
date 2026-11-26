@@ -425,6 +425,9 @@ model EnrollmentWeekdayPlan {
   enrollmentId  String
   effectiveFrom DateTime    @db.Date
   days          DayOfWeek[]
+  /// Ngày học viên thực tế bắt đầu học lịch này, khi effectiveFrom bị dời sang tháng sau vì học phí đã thu / xuất HĐ.
+  /// Chỉ để theodoi xếp buổi BTVN; học phí, điểm danh vẫn theo effectiveFrom. null = trùng effectiveFrom.
+  requestedFrom DateTime?   @db.Date
   createdAt     DateTime    @default(now()) @db.Timestamptz(3)
 
   enrollment ClassEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
