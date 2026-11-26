@@ -32,23 +32,28 @@ export default function EInvoices() {
   }, [search])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
+  // Tải lại khi đã có dữ liệu cùng kỳ (tìm kiếm, làm mới): giữ danh sách cũ trên màn hình, không hiện loading cả trang
+  const [refreshing, setRefreshing] = useState(false)
+  const loadedPeriod = useRef<string | null>(null)
+  const periodKey = `${year}-${month}`
   const years = Array.from({ length: 4 }, (_, i) => thisYear - 1 + i)
 
-  const loadData = async (cursor?: string, force = false) => {
+  const loadData = async (cursor?: string, force = false, quiet = false) => {
     const request = ++latestRequest.current
-    if (cursor) setLoadingMore(true); else setLoading(true)
+    if (cursor) setLoadingMore(true); else if (quiet) setRefreshing(true); else setLoading(true)
     setError(null)
     try {
       const { data } = await api.get('/tuition/misa/invoices', { params: { month, year, limit: 30, cursor, ...(query ? { q: query } : {}), ...(force ? { force: true } : {}) } })
       if (request !== latestRequest.current) return
       setRows(previous => cursor ? [...previous, ...data.rows] : data.rows)
       setCounts(data.counts); setTotal(data.total); setPeriodTotal(data.periodTotal ?? data.total); setNextCursor(data.nextCursor)
+      loadedPeriod.current = periodKey
     } catch (error: any) {
       if (request !== latestRequest.current) return
       if (cursor && error.response?.status === 409) { void loadData(); return }
       setError('Không tải được danh sách hóa đơn. Vui lòng thử lại.')
     } finally {
-      if (request === latestRequest.current) { setLoading(false); setLoadingMore(false) }
+      if (request === latestRequest.current) { setLoading(false); setLoadingMore(false); setRefreshing(false) }
     }
   }
 
@@ -62,8 +67,10 @@ export default function EInvoices() {
   }, [searchParams, isAdmin])
 
   useEffect(() => {
-    setRows([]); setNextCursor(null)
-    void loadData()
+    // Đổi kỳ: xoá danh sách và hiện loading. Cùng kỳ (đổi từ khoá tìm kiếm): giữ danh sách cũ tới khi có kết quả.
+    const samePeriod = loadedPeriod.current === periodKey
+    if (!samePeriod) { setRows([]); setNextCursor(null) }
+    void loadData(undefined, false, samePeriod)
     return () => { latestRequest.current++ }
   }, [month, year, query])
 
@@ -87,7 +94,7 @@ export default function EInvoices() {
             </select>
           </div>
         </div>
-        <EInvoicePreparation rows={rows} counts={counts} total={total} periodTotal={periodTotal} search={search} searching={query} onSearch={setSearch} loading={loading} error={error} month={month} year={year} retry={() => { void loadData(undefined, true) }} loadMore={nextCursor ? () => { void loadData(nextCursor) } : undefined} loadingMore={loadingMore} onRecreate={isAdmin ? row => setRecreateId(row.id) : undefined} />
+        <EInvoicePreparation rows={rows} counts={counts} total={total} periodTotal={periodTotal} search={search} searching={query} onSearch={setSearch} refreshing={refreshing} loading={loading} error={error} month={month} year={year} retry={() => { void loadData(undefined, true, loadedPeriod.current === periodKey) }} loadMore={nextCursor ? () => { void loadData(nextCursor) } : undefined} loadingMore={loadingMore} onRecreate={isAdmin ? row => setRecreateId(row.id) : undefined} />
       </div>
       {recreateId && <InvoiceDraftDialog recordId={recreateId} onClose={() => setRecreateId(null)} onCreated={() => { void loadData(undefined, true) }} />}
     </div>

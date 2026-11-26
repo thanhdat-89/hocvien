@@ -50,12 +50,14 @@ const invoiceDate = (invoice: InvoiceRow) => {
   })
 }
 
-export default function EInvoicePreparation({ rows, counts, total, periodTotal = total, search = '', searching = '', onSearch, loading, error, month, year, retry, loadMore, loadingMore, onRecreate }: {
+export default function EInvoicePreparation({ rows, counts, total, periodTotal = total, search = '', searching = '', onSearch, refreshing = false, loading, error, month, year, retry, loadMore, loadingMore, onRecreate }: {
   rows: InvoiceRow[]; counts: Record<string, number>; total: number; loading: boolean; error: string | null
   /** Số hoá đơn cả kỳ (thẻ tổng hợp); `total` là số dòng khớp tìm kiếm. */
   periodTotal?: number
   /** Ô tìm kiếm theo tên học viên / RefID: giá trị đang gõ, từ khoá đã áp dụng, hàm đổi giá trị. */
   search?: string; searching?: string; onSearch?: (value: string) => void
+  /** Đang tải lại danh sách (tìm kiếm, làm mới) khi đã có dữ liệu: làm mờ danh sách cũ thay vì thay cả trang. */
+  refreshing?: boolean
   month: number; year: number; retry: () => void; loadMore?: () => void; loadingMore: boolean
   /** Chỉ quản trị viên: mở hộp thoại tạo lại hoá đơn cho phiếu tạo thất bại / đã xoá trên MISA */
   onRecreate?: (row: InvoiceRow) => void
@@ -154,7 +156,8 @@ export default function EInvoicePreparation({ rows, counts, total, periodTotal =
         </div>
         <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
         {onSearch && <div className="relative w-full sm:w-72">
-          <span aria-hidden="true" className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-slate-400">search</span>
+          <span aria-hidden="true" className={`material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[18px] ${refreshing ? 'text-primary animate-spin' : 'text-slate-400'}`}>{refreshing ? 'progress_activity' : 'search'}</span>
+          <span role="status" className="sr-only">{refreshing ? 'Đang tìm…' : ''}</span>
           <input type="search" value={search} onChange={e => onSearch(e.target.value)} aria-label="Tìm theo tên học viên hoặc RefID"
             placeholder="Tìm tên học viên hoặc RefID"
             className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
@@ -168,7 +171,7 @@ export default function EInvoicePreparation({ rows, counts, total, periodTotal =
         </button>
         </div>
       </div>
-      <div className="overflow-x-auto">
+      <div aria-busy={refreshing} className={`overflow-x-auto transition-opacity duration-150 ${refreshing ? 'opacity-50 pointer-events-none' : ''}`}>
         <table aria-labelledby="invoice-table-title" className="w-full min-w-[960px] table-fixed text-sm text-slate-700">
           <colgroup><col style={{ width: '12%' }} /><col style={{ width: '21%' }} /><col style={{ width: '14%' }} /><col style={{ width: '20%' }} /><col style={{ width: '21%' }} /><col style={{ width: '12%' }} /></colgroup>
           <thead className="bg-slate-50/80 border-b border-slate-200/70">
