@@ -359,7 +359,7 @@ function Field({ label, value, mono }: { label: string; value: string; mono?: bo
   )
 }
 
-interface UndoResult { restored: number; reverted: number; deleted: number; skipped: { table: string; reason: string; count: number }[] }
+interface UndoResult { restored: number; reverted: number; deleted: number; skipped: { table: string; reason: string; count: number }[]; blocked?: boolean }
 interface UndoInfo {
   id: string; kind: 'delete' | 'batch'; label: string; createdAt: string; expiresAt: string
   undoneAt: string | null; undoneBy: string | null; undoResult: UndoResult | null
@@ -442,6 +442,13 @@ function UndoPanel({ undoId, onUndone }: { undoId: string; onUndone: () => void 
         <p className="text-sm text-outline">Chỉ quản trị viên được khôi phục học viên đã xoá.</p>
       ) : previewError ? (
         <p className="text-sm text-outline">{previewError}</p>
+      ) : preview?.blocked ? (
+        <div className="space-y-1 text-sm">
+          <p className="text-amber-800">Không hoàn tác được vì dữ liệu đã thay đổi sau thao tác. Thao tác này chỉ hoàn tác khi khôi phục được toàn bộ:</p>
+          {preview.skipped.map(x => (
+            <p key={x.table + x.reason} className="text-amber-700">• {x.count} {tableLabel(x.table)}: {reasonLabel(x.reason)}</p>
+          ))}
+        </div>
       ) : preview && (
         <>
           <p className="text-xs text-outline">Có thể hoàn tác đến {fmtDateTime(info.expiresAt)}. Chỉ những dòng chưa bị sửa sau thao tác mới được hoàn tác.</p>

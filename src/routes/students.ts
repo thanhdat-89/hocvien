@@ -26,7 +26,7 @@ import { createInitialWeekdayPlan, dropEnrollment, previewEnrollmentChange, setE
 import { previewTransfer, transferEnrollment } from '../services/enrollmentTransfer'
 import { calculateTuitionForStudent } from '../services/tuitionCalculator'
 import { importPrivateSchedule, privateScheduleSuggestions } from '../services/privateScheduleImport'
-import { snapshotDelete, trackUndo } from '../lib/undo'
+import { snapshotBatch, snapshotDelete, trackUndo } from '../lib/undo'
 
 const router = Router()
 router.use(authenticate)
@@ -484,7 +484,30 @@ router.put('/:id/enroll/:enrollmentId/drop', requireRole('ADMIN', 'STAFF'), asyn
 // body: { toClassId, startDate: ngày bắt đầu học lớp mới, days?: thứ học ở lớp mới, applyCredit?: cấn trừ phần lớp cũ đã thu }
 router.post('/:id/enroll/:enrollmentId/transfer', requireRole('ADMIN', 'STAFF'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    res.json(await transferEnrollment(s(req.params.id), s(req.params.enrollmentId), req.body ?? {}, req.user?.userId))
+    const studentId = s(req.params.id)
+    const from = await prisma.classEnrollment.findFirst({
+      where: { id: s(req.params.enrollmentId), studentId },
+      select: { classId: true, class: { select: { name: true } }, student: { select: { fullName: true } } },
+    })
+    const toClassId = typeof req.body?.toClassId === 'string' ? req.body.toClassId : ''
+    const to = toClassId ? await prisma.class.findUnique({ where: { id: toClassId }, select: { name: true } }) : null
+    const startDate = typeof req.body?.startDate === 'string' ? req.body.startDate.split('-').reverse().join('/') : ''
+    const label = from && to ? `Chuyển lớp ${from.student.fullName}: ${from.class.name} → ${to.name} từ ${startDate}` : ''
+    // Chụp ghi danh / phiếu / điều chỉnh / điểm danh của học viên ở hai lớp để hoàn tác được từ Lịch sử hoạt động.
+    // atomic: hoàn tác một nửa (khôi phục lớp cũ mà còn lớp mới) sẽ sai dữ liệu — có gì đổi sau đó thì không hoàn tác.
+    if (from && to && req.user && toClassId !== from.classId) {
+      const classIds = [from.classId, toClassId]
+      const undoId = await snapshotBatch([
+        { table: 'class_enrollments', where: { studentId, classId: classIds } },
+        { table: 'tuition_records', where: { studentId, classId: classIds } },
+        { table: 'tuition_adjustments', where: { studentId, classId: classIds } },
+        { table: 'student_attendances', where: { studentId, classId: toClassId } },
+      ], label, { userId: req.user.userId, branchId: req.branchId }, { atomic: true })
+      trackUndo(req, res, undoId, true)
+    }
+    const result = await transferEnrollment(studentId, s(req.params.enrollmentId), req.body ?? {}, req.user?.userId)
+    if (label) req.activity = { ...req.activity, action: 'UPDATE', resourceId: studentId, description: label }
+    res.json(result)
   } catch (err) {
     next(err)
   }

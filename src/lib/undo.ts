@@ -11,6 +11,8 @@ import { createError } from '../middleware/errorHandler'
  *    trước và sau thao tác. Hoàn tác từng dòng, chỉ khi dòng đó chưa bị sửa sau thao tác:
  *      sửa → trả về giá trị trước; tạo mới → xoá (bỏ qua nếu đã có dữ liệu con, ví dụ thanh toán / điểm danh / hoá đơn);
  *      thao tác xoá mất → thêm lại. Dòng đã đổi sau thao tác → bỏ qua và báo lại.
+ *    atomic (chuyển lớp…): hoàn tác một phần sẽ làm dữ liệu sai lệch, nên chỉ cần một dòng bị bỏ qua — hoặc có dòng mới
+ *    phát sinh trong phạm vi sau thao tác — là không hoàn tác gì (xem trước trả blocked, hoàn tác thật báo lỗi 409).
  * Đọc/ghi bằng SQL thô theo danh mục bảng của PostgreSQL nên dùng được cho mọi bảng; tên bảng / cột chỉ lấy từ danh mục.
  */
 export const UNDO_KEEP_DAYS = 30
@@ -18,8 +20,12 @@ type Row = Record<string, unknown>
 type Cond = string | number | null | Array<string | null> | { gte: string; lt: string }
 export interface Scope { table: string; where: Record<string, Cond> }
 interface TableSnap { pk: string[]; scope?: Scope['where']; before: Row[]; after?: Row[] }
-interface SnapData { root?: { table: string; id: string }; tables: Record<string, TableSnap>; relinks?: Array<{ table: string; pk: Row; column: string; value: unknown }> }
-export interface UndoResult { restored: number; reverted: number; deleted: number; skipped: Array<{ table: string; reason: string; count: number }> }
+interface SnapData { root?: { table: string; id: string }; tables: Record<string, TableSnap>; relinks?: Array<{ table: string; pk: Row; column: string; value: unknown }>; atomic?: boolean }
+export interface UndoResult {
+  restored: number; reverted: number; deleted: number; skipped: Array<{ table: string; reason: string; count: number }>
+  /** Thao tác atomic không hoàn tác được vì có dòng bị bỏ qua (chỉ có ở kết quả xem trước). */
+  blocked?: boolean
+}
 
 // ── Danh mục bảng (cache cả tiến trình; schema chỉ đổi khi deploy) ─────────────────────────────
 interface Fk { child: string; column: string; parent: string; parentColumn: string; onDelete: string }
@@ -146,11 +152,11 @@ export async function snapshotDelete(table: string, id: string, label: string, w
 }
 
 /** Trước thao tác ghi đè hàng loạt: chụp các dòng trong phạm vi. Gọi captureAfter khi thao tác xong. */
-export async function snapshotBatch(scopes: Scope[], label: string, who: Who): Promise<string> {
+export async function snapshotBatch(scopes: Scope[], label: string, who: Who, opts: { atomic?: boolean } = {}): Promise<string> {
   const cat = await catalog()
   const tables: Record<string, TableSnap> = {}
   for (const s of scopes) tables[s.table] = { pk: cat.pk.get(s.table) ?? [], scope: s.where, before: await selectRows(prisma, cat, s.table, s.where) }
-  return save('batch', label, { tables }, who, null)
+  return save('batch', label, { tables, ...(opts.atomic ? { atomic: true } : {}) }, who, null)
 }
 
 export async function captureAfter(id: string) {
@@ -177,6 +183,12 @@ export function trackUndo(req: { activity?: { after?: unknown } }, res: { status
     void (ok ? (batch ? captureAfter(id) : Promise.resolve()) : discardSnapshot(id))
       .catch(err => console.error('[undo] snapshot', id, err?.message))
   })
+}
+
+/** Tên bảng trong thông báo lỗi hoàn tác atomic. */
+const TABLE_LABEL: Record<string, string> = {
+  class_enrollments: 'ghi danh', tuition_records: 'phiếu học phí', tuition_adjustments: 'điều chỉnh học phí',
+  student_attendances: 'điểm danh', payments: 'thanh toán', enrollment_weekday_plans: 'lịch học trong tuần',
 }
 
 // ── Hoàn tác ──────────────────────────────────────────────────────────────────────────────────
@@ -280,7 +292,13 @@ export async function undoSnapshot(id: string, userId: string, dryRun: boolean):
           }
         }
         for (const [k, b] of before) if (!after.has(k) && !current.has(k)) plan.reinsert.push(b)
+        if (snap.data.atomic) for (const k of current.keys()) if (!after.has(k) && !before.has(k)) skip(t, 'phát sinh sau thao tác')
         plans.set(t, plan)
+      }
+      if (snap.data.atomic && result.skipped.length) {
+        if (dryRun) return { ...result, blocked: true }
+        throw createError(`Không hoàn tác được vì dữ liệu đã thay đổi sau thao tác: ${result.skipped
+          .map(x => `${x.count} ${TABLE_LABEL[x.table] ?? x.table} ${x.reason.replace(/ở ([a-z_]+)$/, (_, t) => `(${TABLE_LABEL[t] ?? t})`)}`).join('; ')}. Không có gì bị thay đổi.`, 409)
       }
       for (const t of [...order].reverse()) {
         const s = snap.data.tables[t]
@@ -289,7 +307,11 @@ export async function undoSnapshot(id: string, userId: string, dryRun: boolean):
       for (const t of order) {
         const s = snap.data.tables[t], plan = plans.get(t)!
         for (const row of plan.revert) { if (!dryRun) await updateRow(tx, cat, t, s.pk, row); result.reverted++ }
-        result.restored += dryRun ? plan.reinsert.length : await insertRows(tx, t, plan.reinsert)
+        const inserted = dryRun ? plan.reinsert.length : await insertRows(tx, t, plan.reinsert)
+        if (snap.data.atomic && inserted < plan.reinsert.length) {
+          throw createError(`Không hoàn tác được: ${TABLE_LABEL[t] ?? t} đã có bản ghi mới trùng. Không có gì bị thay đổi.`, 409)
+        }
+        result.restored += inserted
         if (t === 'class_enrollments') [...plan.revert, ...plan.remove, ...plan.reinsert].forEach(r => touchedClasses.add(String(r.classId)))
       }
     }
