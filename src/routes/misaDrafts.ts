@@ -95,7 +95,8 @@ router.get('/invoices', async (req, res, next) => {
     if (!validPeriod(month, year) || !Number.isInteger(limit)) throw new InvoicePreviewError(400, 'Tháng/năm hoặc số dòng không hợp lệ.')
     const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined
     if (cursor && (cursor.length > 1000 || !/^[A-Za-z0-9_-]+$/.test(cursor))) throw new InvoicePreviewError(400, 'Vị trí trang hóa đơn không hợp lệ.')
-    res.json(await getInvoiceList(month, year, limit, cursor, req.query.force === 'true'))
+    const search = typeof req.query.q === 'string' ? req.query.q.slice(0, 100) : ''
+    res.json(await getInvoiceList(month, year, limit, cursor, req.query.force === 'true', search))
   } catch (error) { next(error) }
 })
 

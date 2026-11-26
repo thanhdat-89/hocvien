@@ -22,6 +22,14 @@ export default function EInvoices() {
   const latestRequest = useRef(0)
   const [counts, setCounts] = useState<Record<string, number>>({})
   const [total, setTotal] = useState(0)
+  const [periodTotal, setPeriodTotal] = useState(0)
+  // Ô tìm kiếm (tên học viên / RefID): gõ xong 300ms mới gọi API
+  const [search, setSearch] = useState('')
+  const [query, setQuery] = useState('')
+  useEffect(() => {
+    const timer = setTimeout(() => setQuery(search.trim()), 300)
+    return () => clearTimeout(timer)
+  }, [search])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
   const years = Array.from({ length: 4 }, (_, i) => thisYear - 1 + i)
@@ -31,10 +39,10 @@ export default function EInvoices() {
     if (cursor) setLoadingMore(true); else setLoading(true)
     setError(null)
     try {
-      const { data } = await api.get('/tuition/misa/invoices', { params: { month, year, limit: 30, cursor, ...(force ? { force: true } : {}) } })
+      const { data } = await api.get('/tuition/misa/invoices', { params: { month, year, limit: 30, cursor, ...(query ? { q: query } : {}), ...(force ? { force: true } : {}) } })
       if (request !== latestRequest.current) return
       setRows(previous => cursor ? [...previous, ...data.rows] : data.rows)
-      setCounts(data.counts); setTotal(data.total); setNextCursor(data.nextCursor)
+      setCounts(data.counts); setTotal(data.total); setPeriodTotal(data.periodTotal ?? data.total); setNextCursor(data.nextCursor)
     } catch (error: any) {
       if (request !== latestRequest.current) return
       if (cursor && error.response?.status === 409) { void loadData(); return }
@@ -57,7 +65,7 @@ export default function EInvoices() {
     setRows([]); setNextCursor(null)
     void loadData()
     return () => { latestRequest.current++ }
-  }, [month, year])
+  }, [month, year, query])
 
   return (
     <div>
@@ -79,7 +87,7 @@ export default function EInvoices() {
             </select>
           </div>
         </div>
-        <EInvoicePreparation rows={rows} counts={counts} total={total} loading={loading} error={error} month={month} year={year} retry={() => { void loadData(undefined, true) }} loadMore={nextCursor ? () => { void loadData(nextCursor) } : undefined} loadingMore={loadingMore} onRecreate={isAdmin ? row => setRecreateId(row.id) : undefined} />
+        <EInvoicePreparation rows={rows} counts={counts} total={total} periodTotal={periodTotal} search={search} searching={query} onSearch={setSearch} loading={loading} error={error} month={month} year={year} retry={() => { void loadData(undefined, true) }} loadMore={nextCursor ? () => { void loadData(nextCursor) } : undefined} loadingMore={loadingMore} onRecreate={isAdmin ? row => setRecreateId(row.id) : undefined} />
       </div>
       {recreateId && <InvoiceDraftDialog recordId={recreateId} onClose={() => setRecreateId(null)} onCreated={() => { void loadData(undefined, true) }} />}
     </div>

@@ -58,4 +58,19 @@ test('shared views keep version/unchanged, preserve private eligibility and pagi
   await service.invalidateReadView('invoices')
   await assert.rejects(service.getInvoiceList(10, 2026, 1, page1.nextCursor), error => error.status === 409)
   await assert.rejects(service.getInvoiceList(10, 2026, 1, 'bnVsbA'), error => error.status === 400)
+
+  // Tìm theo tên học viên (không phân biệt dấu) hoặc một phần RefID; thẻ tổng hợp vẫn tính cả kỳ.
+  await saveInvoiceCopies(['f4'], { ...base, refId: '9ac716fe-8b42-4730', recordIds: ['f4'],
+    source: { ...source('f4', 10), studentName: 'Nguyễn Trọng Nhân' }, billingPeriods: ['2026-10'], createdAt: '2026-10-15T10:00:00Z' })
+  await service.invalidateReadView('invoices')
+  const byName = await service.getInvoiceList(10, 2026, 30, undefined, false, '  trong NHAN ')
+  assert.deepEqual(byName.rows.map(row => row.id), ['f4'])
+  assert.equal(byName.total, 1); assert.equal(byName.periodTotal, 3); assert.equal(byName.counts.DRAFT_CREATED, 3)
+  assert.deepEqual((await service.getInvoiceList(10, 2026, 30, undefined, false, '8B42')).rows.map(row => row.id), ['f4'])
+  assert.deepEqual((await service.getInvoiceList(10, 2026, 30, undefined, false, 'an')).rows.map(row => row.id), ['f4', 'f2', 'f1'])
+  assert.equal((await service.getInvoiceList(10, 2026, 30, undefined, false, 'không có')).total, 0)
+  // Con trỏ gắn với từ khoá: đổi từ khoá giữa chừng thì phải tải lại từ đầu.
+  const firstPage = await service.getInvoiceList(10, 2026, 1, undefined, false, 'an')
+  assert.equal((await service.getInvoiceList(10, 2026, 1, firstPage.nextCursor, false, 'an')).rows[0].id, 'f2')
+  await assert.rejects(service.getInvoiceList(10, 2026, 1, firstPage.nextCursor, false, 'r'), error => error.status === 409)
 })

@@ -50,8 +50,12 @@ const invoiceDate = (invoice: InvoiceRow) => {
   })
 }
 
-export default function EInvoicePreparation({ rows, counts, total, loading, error, month, year, retry, loadMore, loadingMore, onRecreate }: {
+export default function EInvoicePreparation({ rows, counts, total, periodTotal = total, search = '', searching = '', onSearch, loading, error, month, year, retry, loadMore, loadingMore, onRecreate }: {
   rows: InvoiceRow[]; counts: Record<string, number>; total: number; loading: boolean; error: string | null
+  /** Số hoá đơn cả kỳ (thẻ tổng hợp); `total` là số dòng khớp tìm kiếm. */
+  periodTotal?: number
+  /** Ô tìm kiếm theo tên học viên / RefID: giá trị đang gõ, từ khoá đã áp dụng, hàm đổi giá trị. */
+  search?: string; searching?: string; onSearch?: (value: string) => void
   month: number; year: number; retry: () => void; loadMore?: () => void; loadingMore: boolean
   /** Chỉ quản trị viên: mở hộp thoại tạo lại hoá đơn cho phiếu tạo thất bại / đã xoá trên MISA */
   onRecreate?: (row: InvoiceRow) => void
@@ -133,7 +137,7 @@ export default function EInvoicePreparation({ rows, counts, total, loading, erro
 
     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
       {[
-        ['Tổng hóa đơn đã tạo', total],
+        ['Tổng hóa đơn đã tạo', periodTotal],
         ['Chưa phát hành', counts.DRAFT_CREATED || 0],
         ['Đã phát hành', (counts.ISSUED || 0) + (counts.SENT_TO_TAX || 0)],
         ['Cần đối chiếu / lỗi', (counts.OUTCOME_UNKNOWN || 0) + (counts.FAILED || 0)],
@@ -148,9 +152,21 @@ export default function EInvoicePreparation({ rows, counts, total, loading, erro
           <h3 id="invoice-table-title" className="text-base font-semibold text-on-surface">Danh sách hóa đơn <span className="ml-2 rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{total}</span></h3>
           <p className="mt-1 text-xs text-slate-500">Kỳ học phí {String(month).padStart(2, '0')}/{year} · Hóa đơn mới tạo hiển thị trước</p>
         </div>
+        <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+        {onSearch && <div className="relative w-full sm:w-72">
+          <span aria-hidden="true" className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-slate-400">search</span>
+          <input type="search" value={search} onChange={e => onSearch(e.target.value)} aria-label="Tìm theo tên học viên hoặc RefID"
+            placeholder="Tìm tên học viên hoặc RefID"
+            className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
+          {search && <button type="button" aria-label="Xoá tìm kiếm" onClick={() => onSearch('')}
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-slate-400 hover:text-slate-600">
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">close</span>
+          </button>}
+        </div>}
         <button type="button" aria-label="Tải lại trạng thái" onClick={refreshMonthStatuses} disabled={syncProgress !== null || refreshingStatusId !== null} className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-slate-200 text-sm font-semibold text-primary hover:bg-blue-50 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
           <span aria-hidden="true" className="material-symbols-outlined text-[18px]">refresh</span><span role="status">{syncProgress || 'Tải lại trạng thái'}</span>
         </button>
+        </div>
       </div>
       <div className="overflow-x-auto">
         <table aria-labelledby="invoice-table-title" className="w-full min-w-[960px] table-fixed text-sm text-slate-700">
@@ -197,7 +213,7 @@ export default function EInvoicePreparation({ rows, counts, total, loading, erro
           })}</tbody>
         </table>
       </div>
-      {!rows.length ? <div className="py-12 px-6 text-center"><span aria-hidden="true" className="material-symbols-outlined text-[36px] text-slate-300">receipt_long</span><p className="mt-3 text-sm text-slate-500">Chưa có hóa đơn nào trong kỳ học phí này.</p></div>
+      {!rows.length ? <div className="py-12 px-6 text-center"><span aria-hidden="true" className="material-symbols-outlined text-[36px] text-slate-300">receipt_long</span><p className="mt-3 text-sm text-slate-500">{searching ? `Không tìm thấy hóa đơn nào khớp “${searching}” trong kỳ học phí này.` : 'Chưa có hóa đơn nào trong kỳ học phí này.'}</p></div>
         : <div className="border-t border-slate-100 px-5 sm:px-6 py-3 text-xs text-slate-400">Đang hiển thị {rows.length}/{total} hóa đơn</div>}
       <span role="status" className="sr-only">{copiedId ? 'Đã sao chép RefID' : ''}</span>
     </div>

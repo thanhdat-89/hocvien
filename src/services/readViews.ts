@@ -64,7 +64,15 @@ export async function getMissingPrivateStudents(month: number, year: number, ver
 
 const statuses = new Set(['CREATING', 'OUTCOME_UNKNOWN', 'FAILED', 'DRAFT_CREATED', 'ISSUED', 'SENT_TO_TAX', 'REMOVED_FROM_MISA'])
 
-export async function getInvoiceList(month: number, year: number, limit: number, cursor?: string, force = false) {
+/** Bỏ dấu, chữ thường: tìm "nhan" khớp "Nhân", "dung" khớp "Dũng". */
+const fold = (value: unknown) => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase().replace(/\s+/g, ' ').trim()
+
+/**
+ * Danh sách hoá đơn một kỳ, phân trang bằng con trỏ. `search`: tên học viên (không phân biệt dấu) hoặc một phần RefID.
+ * `counts` / `periodTotal` luôn tính cả kỳ (thẻ tổng hợp); `total` là số dòng khớp tìm kiếm.
+ */
+export async function getInvoiceList(month: number, year: number, limit: number, cursor?: string, force = false, search = '') {
   const period = `${year}-${String(month).padStart(2, '0')}`
   const view = await readView('invoices', period, async () => {
     const invoices = await prisma.misaInvoice.findMany({ where: { billingPeriods: { has: period } } })
@@ -89,7 +97,9 @@ export async function getInvoiceList(month: number, year: number, limit: number,
     return Array.from(byRecordId.values()).sort((a, b) =>
       (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0) || b.id.localeCompare(a.id))
   }, undefined, force)
-  const rows = view.data!
+  const all = view.data!
+  const query = fold(search)
+  const rows = query ? all.filter(row => fold(row.studentName).includes(query) || fold(row.refId).includes(query)) : all
   let start = 0
   if (cursor) {
     let parsed: any
@@ -98,13 +108,13 @@ export async function getInvoiceList(month: number, year: number, limit: number,
     if (!parsed || typeof parsed.version !== 'string' || typeof parsed.id !== 'string') {
       throw Object.assign(new Error('Vị trí trang hóa đơn không hợp lệ.'), { status: 400 })
     }
-    if (parsed.version !== view.version) throw Object.assign(new Error('Danh sách hóa đơn đã thay đổi. Vui lòng tải lại.'), { status: 409 })
+    if (parsed.version !== view.version || (parsed.search ?? '') !== query) throw Object.assign(new Error('Danh sách hóa đơn đã thay đổi. Vui lòng tải lại.'), { status: 409 })
     start = rows.findIndex(row => row.id === parsed.id) + 1
     if (start === 0) throw Object.assign(new Error('Vị trí trang hóa đơn không hợp lệ.'), { status: 400 })
   }
   const data = rows.slice(start, start + limit)
-  const counts = rows.reduce((result, row) => { result[row.status] = (result[row.status] || 0) + 1; return result }, {} as Record<string, number>)
+  const counts = all.reduce((result, row) => { result[row.status] = (result[row.status] || 0) + 1; return result }, {} as Record<string, number>)
   const nextCursor = start + limit < rows.length
-    ? Buffer.from(JSON.stringify({ version: view.version, id: data[data.length - 1].id })).toString('base64url') : null
-  return { rows: data, total: rows.length, counts, nextCursor, version: view.version }
+    ? Buffer.from(JSON.stringify({ version: view.version, id: data[data.length - 1].id, ...(query ? { search: query } : {}) })).toString('base64url') : null
+  return { rows: data, total: rows.length, periodTotal: all.length, counts, nextCursor, version: view.version }
 }
