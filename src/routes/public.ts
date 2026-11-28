@@ -86,9 +86,8 @@ const publicCache = new Map<string, { at: number; payload: any }>()
 const PUBLIC_TTL_MS = 60_000
 
 // ─── Khoá trang chia sẻ bằng SĐT Zalo phụ huynh ────────────────
-// Giai đoạn chuyển tiếp: false = vẫn trả dữ liệu khi thiếu token (link cũ chưa hỏng);
-// bật true sau khi trang cqt.vn/hoc-vien đã có màn hình nhập SĐT.
-export const ENFORCE_PARENT_TOKEN = false
+// Bắt buộc token (trang cqt.vn/hoc-vien đã có màn hình nhập SĐT). Đặt false chỉ khi cần mở tạm mọi link cũ.
+export const ENFORCE_PARENT_TOKEN = true
 
 const MAX_FAILS_PER_STUDENT = 5
 const FAIL_WINDOW_MS = 15 * 60_000

@@ -59,6 +59,11 @@ test('xác minh đúng SĐT (kể cả số zalo của phụ huynh khác) thì n
   const other = await withParent('Học viên khác', '0911111111')
   const denied = await studentPage({ params: { id: other.id }, headers: { authorization: `Bearer ${ok.body.token}` }, ip: ip() })
   assert.equal(denied.status, 401)
+
+  // Không có token thì không xem được
+  const anonymous = await studentPage({ params: { id: st.id }, ip: ip() })
+  assert.equal(anonymous.status, 401)
+  assert.equal(anonymous.body.needsSetup, false)
 })
 
 test('sai SĐT 5 lần thì khoá tạm; đổi SĐT trong qlhv thì token cũ hết hiệu lực', async () => {
