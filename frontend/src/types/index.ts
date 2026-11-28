@@ -38,6 +38,8 @@ export interface Parent {
   zalo?: string
   email?: string
   isPrimaryContact: boolean
+  /** Phụ huynh tự đăng ký SĐT trên trang chia sẻ cqt.vn, admin chưa xác nhận */
+  selfRegisteredAt?: string | null
 }
 
 export interface ClassEnrollment {

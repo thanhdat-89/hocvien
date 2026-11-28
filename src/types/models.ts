@@ -77,6 +77,7 @@ export interface Parent {
   zalo?: string
   email?: string
   isPrimaryContact: boolean
+  selfRegisteredAt?: string | null
   createdAt: string
 }
 

@@ -1235,6 +1235,12 @@ function InfoTab({
                           {p.isPrimaryContact && (
                             <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-bold">Liên hệ chính</span>
                           )}
+                          {p.selfRegisteredAt && (
+                            <span
+                              className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-bold"
+                              title="Phụ huynh tự nhập SĐT trên trang chia sẻ cqt.vn. Kiểm tra lại rồi bấm sửa và lưu để xác nhận."
+                            >Tự đăng ký · chờ xác nhận</span>
+                          )}
                         </div>
                         <p className="text-sm text-outline mt-0.5">{p.relationship}</p>
                         <div className="flex gap-4 mt-2 flex-wrap">

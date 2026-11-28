@@ -39,7 +39,8 @@ router.put('/:studentId/:parentId', async (req: AuthRequest, res: Response, next
         : []),
       prisma.parent.update({
         where: { id: parentId, studentId },
-        data: { fullName, relationship: relationship === '' ? null : relationship, phone, zalo, email, isPrimaryContact },
+        // Admin đã xem / sửa → bỏ nhãn "Tự đăng ký"
+        data: { fullName, relationship: relationship === '' ? null : relationship, phone, zalo, email, isPrimaryContact, selfRegisteredAt: null },
       }),
     ])
     res.json({ message: 'Đã cập nhật thông tin phụ huynh' })

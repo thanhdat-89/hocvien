@@ -294,6 +294,8 @@ model Parent {
   zalo             String?
   email            String?
   isPrimaryContact Boolean  @default(false)
+  /// Phụ huynh tự đăng ký SĐT trên trang chia sẻ cqt.vn; NULL = do trung tâm nhập hoặc admin đã xác nhận.
+  selfRegisteredAt DateTime? @db.Timestamptz(3)
   createdAt        DateTime @default(now()) @db.Timestamptz(3)
 
   student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
